@@ -1,203 +1,203 @@
 """
 ======================================================
- گام ۵: خروجی کامل - Excel + گزارش متنی
+ گام ۵: خروجی کامل - Excel + CSV + گزارش فارسی
 ======================================================
-
-خروجی‌ها:
-  1. pakistan_prosperity.xlsx  - فایل Excel با Sheet جداگانه
-  2. pakistan_report.txt       - گزارش متنی خوانا
 """
 
-import pandas as pd
-import numpy as np
+from __future__ import annotations
+
 from datetime import datetime
-from step4_analysis import load_data, indicator_summary, compare_decades
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from step4_analysis import build_summary, build_yearly_changes, load_data, year_columns
 
 
-# ---------------------------------------------------
-# گام ۵.۱ - خروجی Excel
-# ---------------------------------------------------
-def export_excel(df: pd.DataFrame, filepath="pakistan_prosperity.xlsx"):
-    """
-    یک فایل Excel می‌سازه با:
-      - Sheet اصلی: همه داده‌ها
-      - یک Sheet برای هر دسته
-      - Sheet خلاصه: مقایسه دو دهه
-    """
+OUTPUT_DIR = Path("outputs")
+EXCEL_OUTPUT = OUTPUT_DIR / "pakistan_prosperity.xlsx"
+SUMMARY_OUTPUT = OUTPUT_DIR / "pakistan_prosperity_summary.csv"
+YEARLY_OUTPUT = OUTPUT_DIR / "pakistan_prosperity_yearly_changes.csv"
+REPORT_OUTPUT = OUTPUT_DIR / "pakistan_report.txt"
+
+
+def format_value(value, decimals: int = 2) -> str:
+    """یک عدد را به شکل خوانا فرمت می‌کند."""
+    if value is None or pd.isna(value):
+        return "ندارد"
+    value = float(value)
+    if abs(value) >= 1_000_000_000:
+        return f"{value / 1_000_000_000:,.2f} میلیارد"
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:,.2f} میلیون"
+    return f"{value:,.{decimals}f}"
+
+
+def _safe_sheet_name(name: str) -> str:
+    """Excel نام sheet بیشتر از 31 کاراکتر و بعضی کاراکترها را قبول نمی‌کند."""
+    for char in "[]:*?/\\":  # noqa: W605
+        name = name.replace(char, "-")
+    return name[:31] or "Sheet"
+
+
+def export_excel(
+    df: pd.DataFrame,
+    yearly_changes: pd.DataFrame,
+    summary: pd.DataFrame,
+    filepath: Path = EXCEL_OUTPUT,
+) -> None:
+    """یک فایل Excel با sheetهای جداگانه می‌سازد."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
     with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="raw_values", index=False)
+        yearly_changes.to_excel(writer, sheet_name="yearly_changes", index=False)
+        summary.to_excel(writer, sheet_name="summary", index=False)
 
-        # --- Sheet اول: همه داده‌ها ---
-        df.to_excel(writer, sheet_name="همه داده‌ها")
+        metadata_cols = [col for col in df.columns if not str(col).isdigit()]
+        df[metadata_cols].to_excel(writer, sheet_name="metadata", index=False)
 
-        # --- Sheet جداگانه برای هر دسته ---
-        categories = df.index.get_level_values(0).unique()
-        for cat in categories:
-            cat_df = df.loc[cat]
-            # نام Sheet نباید بیشتر از 31 کاراکتر باشه
-            sheet_name = cat[:31]
-            cat_df.to_excel(writer, sheet_name=sheet_name)
-
-        # --- Sheet خلاصه: مقایسه دهه‌ها ---
-        summary_rows = []
-        for cat in categories:
-            result = compare_decades(df, cat)
-            if result is not None:
-                result["دسته"] = cat
-                summary_rows.append(result.reset_index())
-
-        if summary_rows:
-            summary_df = pd.concat(summary_rows, ignore_index=True)
-            summary_df = summary_df[["دسته", "شاخص", "میانگین ۲۰۱۰-۲۰۱۹", "میانگین ۲۰۲۰-۲۰۲۶", "تغییر %"]]
-            summary_df.to_excel(writer, sheet_name="خلاصه مقایسه", index=False)
+        for category, category_df in df.groupby("دسته", sort=False):
+            category_df.to_excel(writer, sheet_name=_safe_sheet_name(category), index=False)
 
     print(f"  ✅ فایل Excel ذخیره شد: {filepath}")
 
 
-# ---------------------------------------------------
-# گام ۵.۲ - گزارش متنی
-# ---------------------------------------------------
-def format_value(val, decimals=2):
-    """یک عدد را به شکل خوانا فرمت می‌کنه"""
-    if val is None or (isinstance(val, float) and np.isnan(val)):
-        return "ندارد"
-    if abs(val) >= 1_000_000_000:
-        return f"{val/1_000_000_000:,.1f} میلیارد"
-    if abs(val) >= 1_000_000:
-        return f"{val/1_000_000:,.1f} میلیون"
-    return f"{val:,.{decimals}f}"
+def export_csvs(
+    df: pd.DataFrame,
+    yearly_changes: pd.DataFrame,
+    summary: pd.DataFrame,
+    output_dir: Path = OUTPUT_DIR,
+) -> None:
+    """CSVهای اصلی و CSV جداگانه برای هر دسته را ذخیره می‌کند."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    summary.to_csv(SUMMARY_OUTPUT, index=False, encoding="utf-8-sig")
+    yearly_changes.to_csv(YEARLY_OUTPUT, index=False, encoding="utf-8-sig")
+    print(f"  ✅ {SUMMARY_OUTPUT}")
+    print(f"  ✅ {YEARLY_OUTPUT}")
+
+    for category, category_df in df.groupby("دسته", sort=False):
+        filename = output_dir / f"PAK_{category.replace(' ', '_').replace('/', '_')}.csv"
+        category_df.to_csv(filename, index=False, encoding="utf-8-sig")
+        print(f"  ✅ {filename}")
 
 
-def generate_text_report(df: pd.DataFrame, filepath="pakistan_report.txt"):
-    """
-    یک گزارش متنی کامل تولید می‌کنه.
-    """
+def _direction(change_pct) -> str:
+    if change_pct is None or pd.isna(change_pct):
+        return "بدون محاسبه"
+    if change_pct > 0:
+        return "افزایش"
+    if change_pct < 0:
+        return "کاهش"
+    return "بدون تغییر"
+
+
+def generate_text_report(
+    df: pd.DataFrame,
+    yearly_changes: pd.DataFrame,
+    summary: pd.DataFrame,
+    filepath: Path = REPORT_OUTPUT,
+) -> str:
+    """گزارش فارسی بخش‌بندی‌شده تولید می‌کند."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    years = year_columns(df)
     lines = []
-    sep = "=" * 65
 
-    lines.append(sep)
-    lines.append("  گزارش جامع شاخص‌های رفاه پاکستان")
-    lines.append(f"  منبع: World Bank Data360")
-    lines.append(f"  بازه زمانی: 2010 تا 2026")
-    lines.append(f"  تاریخ تهیه: {datetime.now().strftime('%Y-%m-%d')}")
-    lines.append(sep)
+    lines.append("=" * 78)
+    lines.append("گزارش جامع شاخص‌های Prosperity پاکستان")
+    lines.append("منبع داده: World Bank Data360 API")
+    lines.append("صفحه مرجع: https://data360.worldbank.org/en/economy/PAK?tab=Prosperity")
+    lines.append("بازه خروجی: 2010 تا 2026")
+    lines.append(f"تاریخ تهیه: {datetime.now().strftime('%Y-%m-%d')}")
+    lines.append("")
+    lines.append("توضیح مهم: اگر برای 2025 یا 2026 مقدار نمی‌بینید، یعنی منبع Data360 هنوز مقدار منتشر نکرده است.")
+    lines.append("=" * 78)
 
-    years = sorted(df.columns.tolist())
-    categories = df.index.get_level_values(0).unique()
+    for category, category_df in df.groupby("دسته", sort=False):
+        category_summary = summary[summary["دسته"] == category]
+        lines.append(f"\n\n## {category}")
+        lines.append("-" * 78)
+        lines.append(f"تعداد شاخص در این بخش: {len(category_df)}")
 
-    for cat in categories:
-        lines.append(f"\n\n{'#' * 65}")
-        lines.append(f"  {cat}")
-        lines.append(f"{'#' * 65}")
+        for _, raw_row in category_df.iterrows():
+            item_summary = category_summary[
+                category_summary["کد Data360"] == raw_row["کد Data360"]
+            ].iloc[0]
+            item_changes = yearly_changes[
+                yearly_changes["کد Data360"] == raw_row["کد Data360"]
+            ]
 
-        try:
-            cat_df = df.loc[cat]
-        except KeyError:
-            continue
+            lines.append(f"\n### {raw_row['شاخص']}")
+            lines.append(f"- کد World Bank: {raw_row['کد World Bank']}")
+            lines.append(f"- کد Data360: {raw_row['کد Data360']}")
+            lines.append(f"- واحد: {raw_row.get('واحد') or 'نامشخص'}")
+            lines.append(f"- موضوع Data360: {raw_row.get('موضوع‌های Data360') or 'نامشخص'}")
 
-        for indicator in cat_df.index:
-            series = cat_df.loc[indicator]
-            clean = series.dropna()
-
-            lines.append(f"\n  ─── {indicator} ───")
-
-            if clean.empty:
-                lines.append("    (داده موجود نیست)")
+            if item_summary.get("وضعیت") != "دارای داده":
+                lines.append("- وضعیت: داده‌ای برای بازه درخواستی موجود نیست.")
                 continue
 
-            # جدول سالانه
-            lines.append(f"    {'سال':<8} {'مقدار':>20}")
-            lines.append(f"    {'-' * 30}")
+            change_pct = item_summary.get("تغییر کل %")
+            lines.append(
+                "- خلاصه: "
+                f"از {int(item_summary['اولین سال موجود'])} تا {int(item_summary['آخرین سال موجود'])}، "
+                f"مقدار از {format_value(item_summary['مقدار اولین سال'])} به "
+                f"{format_value(item_summary['مقدار آخرین سال'])} رسید؛ "
+                f"تغییر کل {format_value(item_summary['تغییر کل'])} "
+                f"({format_value(change_pct)} درصد، {_direction(change_pct)})."
+            )
+            lines.append(
+                f"- میانگین 2010-2019: {format_value(item_summary.get('میانگین 2010-2019'))} | "
+                f"میانگین 2020-2026: {format_value(item_summary.get('میانگین 2020-2026'))}"
+            )
+            lines.append(
+                f"- بیشترین مقدار: {format_value(item_summary.get('بیشترین مقدار'))} "
+                f"در {int(item_summary['سال بیشترین مقدار'])} | "
+                f"کمترین مقدار: {format_value(item_summary.get('کمترین مقدار'))} "
+                f"در {int(item_summary['سال کمترین مقدار'])}"
+            )
 
-            prev = None
-            for year in years:
-                val = series.get(year)
-                if pd.notna(val):
-                    if prev is not None and prev != 0:
-                        delta = ((val - prev) / abs(prev)) * 100
-                        arrow = "↑" if delta > 0 else "↓"
-                        delta_str = f"  ({arrow}{abs(delta):.1f}%)"
-                    else:
-                        delta_str = ""
-                    lines.append(f"    {year:<8} {format_value(val):>20}{delta_str}")
-                    prev = val
-                else:
-                    lines.append(f"    {year:<8} {'—':>20}")
-
-            # خلاصه
-            summ = indicator_summary(series, indicator)
-            lines.append(f"\n    خلاصه:")
-            lines.append(f"      اولین مقدار ({summ.get('اولین سال','؟')}): {format_value(summ.get('مقدار اول'))}")
-            lines.append(f"      آخرین مقدار ({summ.get('آخرین سال','؟')}): {format_value(summ.get('مقدار آخر'))}")
-            if summ.get("تغییر %") is not None:
-                change = summ["تغییر %"]
-                trend = "بهبود ↑" if change > 0 else "کاهش ↓"
-                lines.append(f"      تغییر کلی: {change:+.1f}% ({trend})")
-            avg10 = summ.get("میانگین ۲۰۱۰-۲۰۱۹")
-            avg20 = summ.get("میانگین ۲۰۲۰-۲۰۲۶")
-            if pd.notna(avg10):
-                lines.append(f"      میانگین ۲۰۱۰-۲۰۱۹: {format_value(avg10)}")
-            if pd.notna(avg20):
-                lines.append(f"      میانگین ۲۰۲۰-۲۰۲۶: {format_value(avg20)}")
-
-    # انتها
-    lines.append(f"\n\n{sep}")
-    lines.append("  پایان گزارش")
-    lines.append(sep)
+            lines.append("")
+            lines.append("سال | مقدار | تغییر نسبت به مقدار قبلی")
+            lines.append("--- | ---: | ---:")
+            for _, change_row in item_changes.iterrows():
+                value = change_row["مقدار"]
+                change = change_row["تغییر نسبت به مقدار قبلی %"]
+                change_text = "ندارد" if pd.isna(change) else f"{change:+.2f}%"
+                lines.append(f"{int(change_row['سال'])} | {format_value(value)} | {change_text}")
 
     report_text = "\n".join(lines)
-
-    with open(filepath, "w", encoding="utf-8") as f:
-        f.write(report_text)
-
+    filepath.write_text(report_text, encoding="utf-8")
     print(f"  ✅ گزارش متنی ذخیره شد: {filepath}")
     return report_text
 
 
-# ---------------------------------------------------
-# گام ۵.۳ - خروجی CSV تمیز به تفکیک دسته
-# ---------------------------------------------------
-def export_category_csvs(df: pd.DataFrame):
-    """یک CSV جداگانه برای هر دسته"""
-    categories = df.index.get_level_values(0).unique()
-    for cat in categories:
-        cat_df = df.loc[cat]
-        filename = f"PAK_{cat.replace(' ', '_').replace('/', '_')}.csv"
-        cat_df.to_csv(filename, encoding="utf-8-sig")
-        print(f"  ✅ {filename}")
-
-
-# ---------------------------------------------------
-# اجرای اصلی
-# ---------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 65)
+    print("=" * 78)
     print("  تولید خروجی‌های نهایی")
-    print("=" * 65)
+    print("=" * 78)
 
     try:
-        df = load_data("pakistan_prosperity_raw.csv")
+        data_frame = load_data()
     except FileNotFoundError:
         print("❌ ابتدا step3_scraper.py را اجرا کن")
-        exit(1)
+        raise SystemExit(1)
+
+    yearly = build_yearly_changes(data_frame)
+    summary_df = build_summary(data_frame)
 
     print("\n[۱] ساخت فایل Excel...")
-    export_excel(df)
+    export_excel(data_frame, yearly, summary_df)
 
-    print("\n[۲] ساخت گزارش متنی...")
-    report = generate_text_report(df)
+    print("\n[۲] ساخت CSVها...")
+    export_csvs(data_frame, yearly, summary_df)
 
-    print("\n[۳] ساخت CSV‌های جداگانه...")
-    export_category_csvs(df)
+    print("\n[۳] ساخت گزارش متنی...")
+    report = generate_text_report(data_frame, yearly, summary_df)
 
-    print("\n" + "=" * 65)
+    print("\n" + "=" * 78)
     print("  ✅ همه خروجی‌ها آماده است!")
-    print()
-    print("  فایل‌های تولیدشده:")
-    print("    📊 pakistan_prosperity.xlsx  - Excel با Sheet جداگانه")
-    print("    📝 pakistan_report.txt       - گزارش متنی کامل")
-    print("    📂 PAK_*.csv                 - CSV به تفکیک دسته")
-    print("=" * 65)
-
-    # نمایش ۳۰ خط اول گزارش
+    print("  فایل‌ها داخل پوشه outputs هستند.")
+    print("=" * 78)
     print("\n  پیش‌نمایش گزارش:")
-    print("\n".join(report.split("\n")[:30]))
+    print("\n".join(report.splitlines()[:35]))

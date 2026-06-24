@@ -1,154 +1,131 @@
 """
 ======================================================
- گام ۳: اسکرپر اصلی - دریافت همه داده‌ها
+ گام ۳: اسکرپر اصلی - دریافت داده‌ها از Data360
 ======================================================
 
-این فایل همه شاخص‌ها را از World Bank API می‌گیره
-و به DataFrame تبدیل می‌کنه.
+این فایل برای هر شاخص:
+  1. شناسه Data360 را می‌سازد.
+  2. endpoint /data را با فیلتر کشور پاکستان صدا می‌زند.
+  3. سال‌های 2010 تا 2026 را به جدول ثابت تبدیل می‌کند.
+  4. metadata/topicهای Data360 را هم کنار داده ذخیره می‌کند.
 """
 
-import requests
-import pandas as pd
+from pathlib import Path
 import time
-from step2_indicators import PROSPERITY_INDICATORS
 
-# ---------------------------------------------------
-# تنظیمات
-# ---------------------------------------------------
-COUNTRY = "PAK"
-START_YEAR = 2010
-END_YEAR = 2026
-DELAY_BETWEEN_REQUESTS = 0.5  # ثانیه - تا سرور بلاکمون نکنه
+import pandas as pd
+
+from data360_client import (
+    DEFAULT_COUNTRY,
+    DEFAULT_DATABASE_ID,
+    DEFAULT_END_YEAR,
+    DEFAULT_START_YEAR,
+    extract_data360_topics,
+    fetch_admin_metadata,
+    fetch_indicator_data,
+    get_session,
+    normalize_series,
+    select_best_series,
+)
+from step2_indicators import iter_indicators
 
 
-# ---------------------------------------------------
-# گام ۳.۱ - تابع دریافت یک شاخص
-# ---------------------------------------------------
-def fetch_indicator(code, name, country=COUNTRY):
-    """یک شاخص را از API می‌گیره و به dict تبدیل می‌کنه"""
+COUNTRY = DEFAULT_COUNTRY
+START_YEAR = DEFAULT_START_YEAR
+END_YEAR = DEFAULT_END_YEAR
+OUTPUT_DIR = Path("outputs")
+RAW_OUTPUT = OUTPUT_DIR / "pakistan_prosperity_raw.csv"
+DELAY_BETWEEN_REQUESTS = 0.2
 
-    url = (
-        f"https://api.worldbank.org/v2/country/{country}"
-        f"/indicator/{code}"
-        f"?format=json&date={START_YEAR}:{END_YEAR}&per_page=100"
+
+def scrape_all_indicators() -> pd.DataFrame:
+    """همه شاخص‌ها را از Data360 دریافت و به DataFrame عریض تبدیل می‌کند."""
+    indicators = list(iter_indicators())
+    years = list(range(START_YEAR, END_YEAR + 1))
+    session = get_session()
+
+    print("  دریافت metadata شاخص‌ها از Data360...")
+    metadata_by_id = fetch_admin_metadata(
+        [item["data360_id"] for item in indicators],
+        session=session,
     )
 
-    try:
-        resp = requests.get(url, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-
-        if len(data) < 2 or not data[1]:
-            return {}
-
-        # تبدیل به dict: {سال: مقدار}
-        result = {}
-        for entry in data[1]:
-            year = int(entry["date"])
-            value = entry["value"]
-            result[year] = value
-
-        return result
-
-    except Exception as e:
-        print(f"    ⚠ خطا در {code}: {e}")
-        return {}
-
-
-# ---------------------------------------------------
-# گام ۳.۲ - دریافت همه شاخص‌ها
-# ---------------------------------------------------
-def scrape_all_indicators():
-    """
-    همه شاخص‌های تعریف‌شده را می‌گیره.
-
-    Returns:
-        dict: {category -> {indicator_name -> {year -> value}}}
-    """
-    all_data = {}
-    years = list(range(START_YEAR, END_YEAR + 1))
-
-    total_indicators = sum(len(v) for v in PROSPERITY_INDICATORS.values())
-    done = 0
-
-    for category, indicators in PROSPERITY_INDICATORS.items():
-        print(f"\n{'=' * 55}")
-        print(f"  دسته: {category}")
-        print(f"{'=' * 55}")
-
-        category_data = {}
-
-        for code, name in indicators.items():
-            done += 1
-            print(f"  [{done}/{total_indicators}] {name}...")
-
-            raw = fetch_indicator(code, name)
-
-            # ساخت سری زمانی کامل (سال‌های بدون داده = None)
-            series = {year: raw.get(year) for year in years}
-            category_data[name] = series
-
-            time.sleep(DELAY_BETWEEN_REQUESTS)
-
-        all_data[category] = category_data
-
-    return all_data
-
-
-# ---------------------------------------------------
-# گام ۳.۳ - تبدیل به DataFrame
-# ---------------------------------------------------
-def to_dataframe(all_data):
-    """
-    داده‌ها را به یک DataFrame چند سطحی تبدیل می‌کنه.
-
-    ستون‌ها: سال‌ها (2010 تا 2026)
-    ردیف‌ها: (دسته, نام شاخص)
-    """
     rows = []
+    total = len(indicators)
+    for index, item in enumerate(indicators, start=1):
+        print(f"  [{index}/{total}] {item['name_fa']} ({item['data360_id']})")
+        try:
+            raw_rows = fetch_indicator_data(
+                item["data360_id"],
+                database_id=DEFAULT_DATABASE_ID,
+                country=COUNTRY,
+                session=session,
+            )
+            selected = select_best_series(raw_rows, country=COUNTRY)
+            values = normalize_series(selected, start_year=START_YEAR, end_year=END_YEAR)
+        except Exception as exc:
+            print(f"    هشدار: دریافت این شاخص ناموفق بود: {exc}")
+            selected = None
+            values = {year: None for year in years}
 
-    for category, indicators in all_data.items():
-        # حذف ایموجی از نام دسته برای DataFrame
-        cat_clean = category.split(" ", 1)[1] if " " in category else category
+        admin_metadata = metadata_by_id.get(item["data360_id"], {})
+        topic_labels, topic_ids = extract_data360_topics(admin_metadata)
+        non_null_count = sum(value is not None for value in values.values())
 
-        for name, year_data in indicators.items():
-            row = {"دسته": cat_clean, "شاخص": name}
-            row.update(year_data)
-            rows.append(row)
+        row = {
+            "دسته": item["category"],
+            "شاخص": item["name_fa"],
+            "کد World Bank": item["world_bank_code"],
+            "کد Data360": item["data360_id"],
+            "پایگاه داده": DEFAULT_DATABASE_ID,
+            "کشور": COUNTRY,
+            "واحد": selected.get("UNIT_MEASURE") if selected else None,
+            "بازه منبع": selected.get("range") if selected else None,
+            "موضوع‌های Data360": topic_labels,
+            "کد موضوع‌های Data360": topic_ids,
+            "تعداد سال دارای داده": non_null_count,
+        }
+        row.update(values)
+        rows.append(row)
+        time.sleep(DELAY_BETWEEN_REQUESTS)
 
     df = pd.DataFrame(rows)
-    df = df.set_index(["دسته", "شاخص"])
-    df = df.sort_index()
-
+    metadata_columns = [
+        "دسته",
+        "شاخص",
+        "کد World Bank",
+        "کد Data360",
+        "پایگاه داده",
+        "کشور",
+        "واحد",
+        "بازه منبع",
+        "موضوع‌های Data360",
+        "کد موضوع‌های Data360",
+        "تعداد سال دارای داده",
+    ]
+    df = df[metadata_columns + years]
     return df
 
 
-# ---------------------------------------------------
-# اجرای اصلی
-# ---------------------------------------------------
+def save_raw_data(df: pd.DataFrame, filepath: Path = RAW_OUTPUT) -> None:
+    """فایل خام عریض را ذخیره می‌کند."""
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(filepath, index=False, encoding="utf-8-sig")
+    print(f"\n✅ داده خام ذخیره شد: {filepath}")
+
+
 if __name__ == "__main__":
-    print("=" * 55)
-    print("  شروع دریافت داده‌های پاکستان از World Bank")
-    print(f"  بازه زمانی: {START_YEAR} تا {END_YEAR}")
-    print("=" * 55)
+    print("=" * 65)
+    print("  شروع دریافت داده‌های Prosperity پاکستان از World Bank Data360")
+    print(f"  کشور: {COUNTRY}")
+    print(f"  بازه زمانی خروجی: {START_YEAR} تا {END_YEAR}")
+    print("=" * 65)
 
-    # دریافت داده‌ها
-    all_data = scrape_all_indicators()
+    data_frame = scrape_all_indicators()
+    save_raw_data(data_frame)
 
-    # تبدیل به DataFrame
-    df = to_dataframe(all_data)
-
-    print(f"\n\n{'=' * 55}")
-    print(f"  داده‌ها دریافت شدند!")
-    print(f"  تعداد شاخص‌ها: {len(df)}")
-    print(f"  تعداد سال‌ها: {len(df.columns)}")
-    print(f"{'=' * 55}")
+    print(f"\n  تعداد شاخص‌ها: {len(data_frame)}")
+    print(f"  تعداد ستون‌های سالانه: {END_YEAR - START_YEAR + 1}")
     print("\n  پیش‌نمایش:")
-    print(df.head(10).to_string())
-
-    # ذخیره برای گام بعدی
-    df.to_csv("pakistan_prosperity_raw.csv", encoding="utf-8-sig")
-    print("\n✅ داده‌ها در pakistan_prosperity_raw.csv ذخیره شدند")
-
-    # برگردوندن df برای استفاده در فایل‌های بعدی
-    print("\n  آماده برای گام ۴: تحلیل و خروجی...")
+    print(data_frame.head(8).to_string(index=False))
+    print("\n  آماده برای گام ۴: تحلیل تغییرات سالانه...")

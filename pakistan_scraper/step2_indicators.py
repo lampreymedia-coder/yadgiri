@@ -1,25 +1,23 @@
 """
 ======================================================
- گام ۲: تعریف همه شاخص‌های Prosperity پاکستان
+ گام ۲: تعریف شاخص‌های آموزشی Prosperity پاکستان
 ======================================================
 
-سایت Data360 در بخش Prosperity این دسته‌ها رو داره:
-  1. رشد اقتصادی (Economic Growth)
-  2. درآمد و فقر (Income & Poverty)
-  3. سلامت (Health)
-  4. آموزش (Education)
-  5. زیرساخت (Infrastructure)
-  6. بازار کار (Labor Market)
-  7. تجارت و سرمایه‌گذاری (Trade & Investment)
-  8. محیط زیست (Environment)
+در Data360 هر شاخص یک شناسه مثل WB_WDI_NY_GDP_PCAP_CD دارد.
+اگر همان شاخص در World Bank API با کد NY.GDP.PCAP.CD شناخته شود،
+در Data360 نقطه‌ها با زیرخط جایگزین و پیشوند WB_WDI_ اضافه می‌شود.
+
+این فهرست یک مجموعه آموزشی و قابل فهم از شاخص‌های Prosperity است و در گام ۳
+از endpoint رسمی Data360 برای پاکستان دریافت می‌شود.
 """
+
+from data360_client import world_bank_code_to_data360_id
 
 # ---------------------------------------------------
 # دیکشنری کامل شاخص‌ها به تفکیک دسته
 # ---------------------------------------------------
-PROSPERITY_INDICATORS = {
-
-    "📈 رشد اقتصادی": {
+PROSPERITY_INDICATORS: dict[str, dict[str, str]] = {
+    "رشد اقتصادی": {
         "NY.GDP.MKTP.CD":       "GDP (دلار جاری)",
         "NY.GDP.MKTP.KD.ZG":    "نرخ رشد GDP (%)",
         "NY.GDP.PCAP.CD":       "GDP سرانه (دلار)",
@@ -28,7 +26,7 @@ PROSPERITY_INDICATORS = {
         "NE.GDI.TOTL.ZS":       "سرمایه‌گذاری کل (% GDP)",
     },
 
-    "💰 درآمد و فقر": {
+    "درآمد و فقر": {
         "SI.POV.DDAY":          "فقر زیر ۲.۱۵$/روز (%)",
         "SI.POV.LMIC":          "فقر زیر ۳.۶۵$/روز (%)",
         "SI.POV.UMIC":          "فقر زیر ۶.۸۵$/روز (%)",
@@ -37,7 +35,7 @@ PROSPERITY_INDICATORS = {
         "SP.POP.TOTL":          "جمعیت کل",
     },
 
-    "🏥 سلامت": {
+    "سلامت": {
         "SP.DYN.LE00.IN":       "امید به زندگی (سال)",
         "SH.DYN.MORT":          "مرگ‌ومیر زیر ۵ سال (در ۱۰۰۰)",
         "SH.STA.MMRT":          "مرگ‌ومیر مادران (در ۱۰۰,۰۰۰)",
@@ -46,7 +44,7 @@ PROSPERITY_INDICATORS = {
         "SN.ITK.DEFC.ZS":       "سوءتغذیه (%)",
     },
 
-    "📚 آموزش": {
+    "آموزش": {
         "SE.ADT.LITR.ZS":       "نرخ سواد بزرگسالان (%)",
         "SE.PRM.ENRR":          "ثبت‌نام ابتدایی (ناخالص %)",
         "SE.SEC.ENRR":          "ثبت‌نام متوسطه (ناخالص %)",
@@ -54,7 +52,7 @@ PROSPERITY_INDICATORS = {
         "SE.XPD.TOTL.GD.ZS":   "هزینه آموزش (% GDP)",
     },
 
-    "⚡ زیرساخت": {
+    "زیرساخت": {
         "EG.ELC.ACCS.ZS":       "دسترسی به برق (%)",
         "SH.H2O.BASW.ZS":       "دسترسی به آب سالم (%)",
         "SH.STA.BASS.ZS":       "دسترسی به بهداشت (%)",
@@ -63,7 +61,7 @@ PROSPERITY_INDICATORS = {
         "IS.ROD.PAVE.ZS":       "جاده‌های آسفالت (%)",
     },
 
-    "👷 بازار کار": {
+    "بازار کار": {
         "SL.UEM.TOTL.ZS":       "نرخ بیکاری (%)",
         "SL.TLF.CACT.ZS":       "مشارکت نیروی کار (%)",
         "SL.TLF.CACT.FE.ZS":   "مشارکت زنان در بازار کار (%)",
@@ -71,7 +69,7 @@ PROSPERITY_INDICATORS = {
         "SL.IND.EMPL.ZS":       "اشتغال صنعتی (%)",
     },
 
-    "🌐 تجارت و مالیه": {
+    "تجارت و مالیه": {
         "NE.EXP.GNFS.ZS":       "صادرات (% GDP)",
         "NE.IMP.GNFS.ZS":       "واردات (% GDP)",
         "BX.KLT.DINV.WD.GD.ZS":"سرمایه‌گذاری خارجی FDI (% GDP)",
@@ -80,12 +78,24 @@ PROSPERITY_INDICATORS = {
         "FP.CPI.TOTL.ZG":      "تورم (%)",
     },
 
-    "🌱 محیط زیست": {
+    "محیط زیست": {
         "EN.ATM.CO2E.PC":       "انتشار CO2 سرانه (تن)",
         "AG.LND.FRST.ZS":       "پوشش جنگلی (% زمین)",
         "ER.H2O.FWTL.ZS":      "برداشت آب شیرین (%)",
     },
 }
+
+
+def iter_indicators():
+    """شاخص‌ها را با metadata لازم برای Data360 یکی‌یکی برمی‌گرداند."""
+    for category, indicators in PROSPERITY_INDICATORS.items():
+        for world_bank_code, persian_name in indicators.items():
+            yield {
+                "category": category,
+                "world_bank_code": world_bank_code,
+                "data360_id": world_bank_code_to_data360_id(world_bank_code),
+                "name_fa": persian_name,
+            }
 
 
 def list_indicators():
@@ -95,7 +105,8 @@ def list_indicators():
         print(f"\n{category}")
         print("-" * 50)
         for code, name in indicators.items():
-            print(f"  {code:30s}  {name}")
+            data360_id = world_bank_code_to_data360_id(code)
+            print(f"  {code:25s}  {data360_id:35s}  {name}")
             total += 1
     print(f"\n{'=' * 50}")
     print(f"  مجموع: {total} شاخص در {len(PROSPERITY_INDICATORS)} دسته")

@@ -1,90 +1,50 @@
 """
 ======================================================
- گام ۱: آشنایی با World Bank API و تست اتصال
+ گام ۱: آشنایی با Data360 API و تست اتصال
 ======================================================
 
-World Bank یک API کاملاً رایگان و عمومی دارد:
-  https://api.worldbank.org/v2/
+در صفحه Data360، داده‌ها از endpoint زیر می‌آیند:
+  https://data360api.worldbank.org/data360/portal/v1/data
 
-ساختار URL:
-  /v2/country/{country_code}/indicator/{indicator_code}
-  ?format=json
-  &date={start}:{end}
-  &per_page={تعداد نتایج}
-
-برای پاکستان: country_code = PAK
+پارامترهای اصلی:
+  database_id = WB_WDI
+  indicator_id = WB_WDI_NY_GDP_PCAP_CD
+  filters = [{"filterColumn":"REF_AREA","filterValue":"PAK"}]
 """
 
-import requests
-import json
-
-# ---------------------------------------------------
-# تابع کمکی: دریافت داده از API
-# ---------------------------------------------------
-def fetch_worldbank(indicator_code, country="PAK", start=2010, end=2026, per_page=100):
-    """
-    از World Bank API داده می‌گیره.
-
-    Args:
-        indicator_code: کد شاخص (مثل NY.GDP.MKTP.CD برای GDP)
-        country: کد ۳ حرفی کشور
-        start: سال شروع
-        end: سال پایان
-        per_page: حداکثر تعداد نتایج
-
-    Returns:
-        list of dicts یا None اگر خطا داشت
-    """
-    url = (
-        f"https://api.worldbank.org/v2/country/{country}/indicator/{indicator_code}"
-        f"?format=json&date={start}:{end}&per_page={per_page}"
-    )
-
-    print(f"  درحال دریافت: {url}")
-
-    try:
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-
-        data = response.json()
-
-        # API یک لیست ۲ عنصری برمی‌گردونه:
-        # [0] = اطلاعات pagination
-        # [1] = داده‌های واقعی
-        if len(data) < 2 or data[1] is None:
-            print(f"  هیچ داده‌ای برای {indicator_code} پیدا نشد")
-            return []
-
-        return data[1]
-
-    except requests.exceptions.RequestException as e:
-        print(f"  خطا در دریافت داده: {e}")
-        return []
+from data360_client import (
+    fetch_indicator_data,
+    normalize_series,
+    select_best_series,
+    world_bank_code_to_data360_id,
+)
 
 
-# ---------------------------------------------------
-# تست اول: فقط یک شاخص ساده
-# ---------------------------------------------------
 if __name__ == "__main__":
-    print("=" * 60)
-    print("  تست اتصال به World Bank API")
-    print("=" * 60)
+    print("=" * 70)
+    print("  تست اتصال به World Bank Data360 API")
+    print("=" * 70)
 
-    # GDP (تولید ناخالص داخلی) پاکستان
-    print("\n[۱] دریافت GDP پاکستان (2020-2023)...")
-    gdp_data = fetch_worldbank("NY.GDP.MKTP.CD", start=2020, end=2023)
+    indicator_id = world_bank_code_to_data360_id("NY.GDP.PCAP.CD")
+    print(f"\n[۱] دریافت GDP سرانه پاکستان با شناسه Data360: {indicator_id}")
 
-    if gdp_data:
-        print("\n  نتایج خام (JSON):")
-        print(json.dumps(gdp_data[0], indent=4, ensure_ascii=False))
+    rows = fetch_indicator_data(indicator_id)
+    selected = select_best_series(rows)
+    series = normalize_series(selected, start_year=2020, end_year=2024)
+
+    if selected:
+        print("\n  نمونه metadata سری انتخاب‌شده:")
+        print(f"    REF_AREA: {selected.get('REF_AREA')}")
+        print(f"    UNIT_MEASURE: {selected.get('UNIT_MEASURE')}")
+        print(f"    range: {selected.get('range')}")
 
         print("\n  فرمت ساده:")
-        for entry in gdp_data:
-            year = entry.get("date")
-            value = entry.get("value")
+        for year, value in series.items():
             if value is not None:
-                print(f"    سال {year}: ${value:,.0f}")
+                print(f"    سال {year}: {value:,.2f}")
+            else:
+                print(f"    سال {year}: داده منتشر نشده")
 
         print("\n✅ اتصال موفق! گام ۱ کامل شد.")
     else:
-        print("\n❌ خطا در اتصال. اینترنت را چک کنید.")
+        print("\n❌ داده‌ای دریافت نشد. اتصال اینترنت یا endpoint را بررسی کن.")

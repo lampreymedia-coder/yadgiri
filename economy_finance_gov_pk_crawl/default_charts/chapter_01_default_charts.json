@@ -1,0 +1,282 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "GDP (US $ billion)",
+        "data": [
+          271.8,
+          300.4,
+          313.9,
+          339.6,
+          356.8,
+          321.8,
+          300.8,
+          348.9,
+          375.5,
+          337.2,
+          372.1,
+          408.2,
+          null
+        ]
+      },
+      {
+        "name": "Per Capita Income (US $)",
+        "data": [
+          1487,
+          1609,
+          1640,
+          1723,
+          1767.9,
+          1577.6,
+          1457.6,
+          1677.3,
+          1767,
+          1547,
+          1607,
+          1751,
+          1901
+        ]
+      }
+    ],
+    "title": "GDP (US $ billion)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Roads (000 km)",
+        "data": [
+          263.8,
+          265.4,
+          265.9,
+          267,
+          268.9,
+          271,
+          501.4,
+          500.7,
+          501.2,
+          501.2,
+          501.2,
+          501.2,
+          null
+        ]
+      },
+      {
+        "name": "Motor Vehicles on Roads (mln. nos.)",
+        "data": [
+          13.2,
+          13.9,
+          15.6,
+          21.9,
+          24.3,
+          25.2,
+          30,
+          32.1,
+          34.3,
+          35.9,
+          37.4,
+          37.4,
+          null
+        ]
+      }
+    ],
+    "title": "Transport & Communication"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Labour Force (million)",
+        "data": [
+          60.1,
+          61,
+          null,
+          null,
+          65.5,
+          68.8,
+          null,
+          71.8,
+          null,
+          null,
+          null,
+          83.1,
+          null
+        ]
+      },
+      {
+        "name": "Employed Labour Force (million)",
+        "data": [
+          56.5,
+          57.4,
+          null,
+          null,
+          61.7,
+          64,
+          null,
+          67.3,
+          null,
+          null,
+          null,
+          77.2,
+          null
+        ]
+      }
+    ],
+    "title": "Labor Force & Employment"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Expenditure on Education (as % of GDP)",
+        "data": [
+          1.9,
+          2,
+          2,
+          2,
+          2.1,
+          2,
+          1.9,
+          1.4,
+          1.7,
+          1.5,
+          1.2,
+          0.8,
+          null
+        ]
+      },
+      {
+        "name": "Expenditure on Health (as % of GDP)",
+        "data": [
+          0.7,
+          0.7,
+          0.7,
+          0.8,
+          1.1,
+          1,
+          1.1,
+          1,
+          1.4,
+          1,
+          0.9,
+          0.8,
+          null
+        ]
+      }
+    ],
+    "title": "Expenditures on Education and Health "
+  }
+]

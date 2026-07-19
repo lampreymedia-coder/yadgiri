@@ -1,0 +1,106 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14 ",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19 ",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Market Capitalization Rs billion (End June)",
+        "data": [
+          6966,
+          7421,
+          7589,
+          9522,
+          8665,
+          6887,
+          6530,
+          8297,
+          6960,
+          6369,
+          10375,
+          15240,
+          null
+        ]
+      }
+    ],
+    "title": "Market Capitalization Rs billion (End June)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14 ",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19 ",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "KSE-100 Index (End June)",
+        "data": [
+          29343,
+          34398,
+          37784,
+          46565,
+          41911,
+          33902,
+          34422,
+          47356,
+          41541,
+          41453,
+          78445,
+          125627,
+          null
+        ]
+      }
+    ],
+    "title": "KSE-100 Index (End June)"
+  }
+]

@@ -1,0 +1,176 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          " 2022-23",
+          " 2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Current Account Balance ($ Million)",
+        "data": [
+          -3130,
+          -2815,
+          -4961,
+          -12270,
+          -19195,
+          -13434,
+          -4449,
+          -2820,
+          -17481,
+          -3275,
+          -2072,
+          1838,
+          null
+        ]
+      }
+    ],
+    "title": "Current Account Balance ($ Million)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          " 2022-23",
+          " 2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Worker's Remittances ($ Million)",
+        "data": [
+          15837,
+          18721,
+          19917,
+          19351,
+          19914,
+          21740,
+          23131,
+          29450,
+          31279,
+          27333,
+          30251,
+          38300,
+          null
+        ]
+      }
+    ],
+    "title": "Worker's Remittances ($ Million)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          " 2022-23",
+          " 2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Exports of Goods FOB ($ Million)",
+        "data": [
+          25078,
+          24090,
+          21972,
+          22003,
+          24768,
+          24257,
+          22536,
+          25639,
+          32493,
+          27876,
+          30980,
+          32343,
+          null
+        ]
+      },
+      {
+        "name": "Imports of Goods FOB ($ Million)",
+        "data": [
+          41668,
+          41357,
+          41118,
+          48001,
+          55671,
+          51869,
+          43645,
+          54273,
+          71543,
+          52695,
+          53157,
+          59146,
+          null
+        ]
+      }
+    ],
+    "title": "Exports and Imports ($ Million)"
+  }
+]

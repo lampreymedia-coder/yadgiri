@@ -1,0 +1,164 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013",
+          "2014",
+          "2015",
+          "2016",
+          "2017",
+          "2018",
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Unemployment Rate (%)",
+        "data": [
+          6.24,
+          6,
+          5.9,
+          null,
+          null,
+          5.8,
+          6.9,
+          null,
+          6.3,
+          null,
+          null,
+          null,
+          7.09,
+          null
+        ]
+      }
+    ],
+    "title": "Unemployment Rate (%)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013",
+          "2014",
+          "2015",
+          "2016",
+          "2017",
+          "2018",
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Labour Force Participation pation Rates (%)",
+        "data": [
+          32.88,
+          32.28,
+          32.3,
+          null,
+          null,
+          31.7,
+          32.2,
+          null,
+          32.3,
+          null,
+          null,
+          null,
+          33.18,
+          null
+        ]
+      }
+    ],
+    "title": "Labour Force Participation pation Rates (%)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013",
+          "2014",
+          "2015",
+          "2016",
+          "2017",
+          "2018",
+          "2019",
+          "2020",
+          "2021",
+          "2022",
+          "2023",
+          "2024",
+          "2025",
+          "2026"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Population (mn)",
+        "data": [
+          184.35,
+          188.02,
+          191.71,
+          198.78,
+          207.68,
+          211.82,
+          216.08,
+          220.4,
+          224.78,
+          229.22,
+          241.5,
+          246.97,
+          252.09,
+          null
+        ]
+      }
+    ],
+    "title": "Population (mn)"
+  }
+]

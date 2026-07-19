@@ -1,0 +1,210 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Number of Hospitals",
+        "data": [
+          1113,
+          1143,
+          1172,
+          1243,
+          1264,
+          1279,
+          1282,
+          1289,
+          1276,
+          1696,
+          1934,
+          1934,
+          null
+        ]
+      }
+    ],
+    "title": "Number of Hospitals"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Registerd Doctors (Numbers)",
+        "data": [
+          167759,
+          175223,
+          184711,
+          195896,
+          208007,
+          220829,
+          233261,
+          245987,
+          266430,
+          299113,
+          319572,
+          336582,
+          null
+        ]
+      }
+    ],
+    "title": "Registerd Doctors (Numbers)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Registerd Nurses (Numbers)",
+        "data": [
+          86183,
+          90276,
+          94766,
+          99228,
+          103777,
+          108474,
+          112123,
+          116659,
+          121245,
+          134708,
+          138391,
+          138391,
+          null
+        ]
+      }
+    ],
+    "title": "Registerd Nurses (Numbers)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Rural Health Centres",
+        "data": [
+          667,
+          669,
+          684,
+          668,
+          688,
+          686,
+          670,
+          719,
+          736,
+          783,
+          802,
+          802,
+          null
+        ]
+      }
+    ],
+    "title": "Rural Health Centres"
+  }
+]

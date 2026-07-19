@@ -1,0 +1,170 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Expressway (in Kilometers)",
+        "data": [
+          null,
+          460,
+          428,
+          428,
+          428,
+          428,
+          428,
+          null
+        ]
+      }
+    ],
+    "title": "Transport (Roads)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Locomotives (Numbers)",
+        "data": [
+          472,
+          473,
+          467,
+          466,
+          461,
+          451,
+          449,
+          null
+        ]
+      }
+    ],
+    "title": "Railways"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "PIA Fleet Number of Planes",
+        "data": [
+          32,
+          30,
+          30,
+          35,
+          32,
+          33,
+          31,
+          null
+        ]
+      }
+    ],
+    "title": "Pakistan International Airlines Corporation-Operational"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Motorcycle (2 Wheels) (Numbers)",
+        "data": [
+          22001277,
+          23407865,
+          25330702,
+          26904510,
+          28085965,
+          28852582,
+          30456102,
+          null
+        ]
+      }
+    ],
+    "title": "Motor Vehicles Registered"
+  }
+]

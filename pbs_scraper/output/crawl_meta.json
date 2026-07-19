@@ -1,0 +1,43 @@
+{
+  "source": "https://www.pbs.gov.pk",
+  "started_at": "2026-07-19T09:23:57Z",
+  "finished_at": "2026-07-19T09:36:25Z",
+  "counts": {
+    "content_items": 167,
+    "by_type": {
+      "pages": 73,
+      "posts": 58,
+      "product": 20,
+      "docs": 16
+    },
+    "media_documents": 4188,
+    "discovered_files": 7891,
+    "sitemap_urls": 299,
+    "taxonomies": {
+      "categories": 10,
+      "tags": 17,
+      "product_cat": 6,
+      "product_tag": 6,
+      "doc_category": 13
+    }
+  },
+  "outputs": [
+    "all_content.csv",
+    "all_content.json",
+    "all_content_full.json",
+    "crawl.log",
+    "discovered_files.csv",
+    "discovered_files.json",
+    "media_documents.csv",
+    "media_documents.json",
+    "pbs_crawl.xlsx",
+    "raw_awsm_job_openings.json",
+    "raw_docs.json",
+    "raw_pages.json",
+    "raw_posts.json",
+    "raw_product.json",
+    "report.txt",
+    "sitemap_urls.csv",
+    "taxonomies.json"
+  ]
+}

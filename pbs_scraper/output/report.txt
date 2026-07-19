@@ -1,0 +1,147 @@
+Pakistan Bureau of Statistics — Crawl Report
+اداره آمار پاکستان — گزارش خزش
+============================================================
+Source: https://www.pbs.gov.pk
+Crawled at (UTC): 2026-07-19T09:36:25Z
+
+## Content counts / شمار محتوا
+- docs: 16
+- pages: 73
+- posts: 58
+- product: 20
+- sitemap URLs: 299
+- media documents cataloged: 4188
+- downloadable files discovered in HTML: 7891
+
+## Media by MIME / رسانه بر اساس نوع
+- application/pdf: 2909
+- application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: 720
+- application/vnd.ms-excel: 432
+- application/zip: 58
+- application/vnd.openxmlformats-officedocument.wordprocessingml.document: 45
+- application/msword: 24
+
+## Discovered file extensions / پسوند فایل‌های کشف‌شده
+- .xlsx: 4735
+- .pdf: 2715
+- .xls: 322
+- .zip: 58
+- .docx: 29
+- .doc: 18
+- .pptx: 12
+- .: 2
+
+## Taxonomies / رده‌بندی‌ها
+- categories: 10
+- tags: 17
+- product_cat: 6
+- product_tag: 6
+- doc_category: 13
+
+## Latest content / تازه‌ترین مطالب
+- [2026-07-15] Summary of Provisional Quantum Index Numbers of Large Scale Manufacturing Industries (QIM) for May 2026 — https://www.pbs.gov.pk/summary-of-provisional-quantum-index-numbers-of-large-scale-manufacturing-industries-qim-for-may-2026/
+- [2026-07-09] Agricultural Census 2024 Report Launch — https://www.pbs.gov.pk/agricultural-census-report-launch-2024-25/
+- [2026-07-01] Monthly Inflation Report for June 2026 — https://www.pbs.gov.pk/monthly-inflation-report-for-june-2026/
+- [2026-06-16] Monthly Advance releases on Foreign Trade Statistics for May 2026 — https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-may-2026/
+- [2026-06-15] Summary of Provisional Quantum Index Numbers of Large Scale Manufacturing Industries (QIM) for April 2026 — https://www.pbs.gov.pk/summary-of-provisional-quantum-index-numbers-of-large-scale-manufacturing-industries-qim-for-april-2026/
+- [2026-06-12] Weekly Sensitive Price Indicator (SPI) for the week ended on 11-06-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-11-06-2026/
+- [2026-06-05] Weekly Sensitive Price Indicator (SPI) for the week ended on 4-06-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-4-06-2026/
+- [2026-06-03] Monthly Summary on Foreign Trade Statistics for May, 2026 — https://www.pbs.gov.pk/monthly-summary-on-foreign-trade-statistics-for-may-2026/
+- [2026-06-01] Monthly Inflation Report for May 2026 — https://www.pbs.gov.pk/monthly-inflation-report-for-may-2026/
+- [2026-05-22] Weekly Sensitive Price Indicator (SPI) for the week ended on 21-05-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-21-05-2026/
+- [2026-05-18] Monthly Advance releases on Foreign Trade Statistics for April 2026 — https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-april-2026/
+- [2026-05-05] Summary of Provisional Quantum Index Numbers of Large Scale Manufacturing Industries (QIM) for March 2026 — https://www.pbs.gov.pk/summary-of-provisional-quantum-index-numbers-of-large-scale-manufacturing-industries-qim-for-march-2026/
+- [2026-05-01] Monthly Inflation Report for April 2026 — https://www.pbs.gov.pk/monthly-inflation-report-for-april-2026/
+- [2026-04-16] Monthly Advance releases on Foreign Trade Statistics for April 2026 — https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-march-2026/
+- [2026-04-16] Quantum Index of Large Scale Manufacturing Industries (QIM) for Feb 2026 — https://www.pbs.gov.pk/quantum-index-of-large-scale-manufacturing-industries-qim-for-feb-2026/
+- [2026-04-10] Weekly Sensitive Price Indicator (SPI) for the week ended on 09-04-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-09-04-2026/
+- [2026-04-03] Weekly Sensitive Price Indicator (SPI) for the week ended on 02-04-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-02-04-2026/
+- [2026-04-02] National Accounts Committee (NAC) Meeting — https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-for-fy-2025-26/
+- [2026-04-02] Monthly Summary on Foreign Trade Statistics for April, 2026 — https://www.pbs.gov.pk/monthly-summary-on-foreign-trade-statistics-for-march-2026/
+- [2026-04-01] Monthly Inflation Report for March 2026 — https://www.pbs.gov.pk/monthly-inflation-report-for-march-2026/
+- [2026-03-27] Weekly Sensitive Price Indicator (SPI) for the week ended on 26-03-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-26-03-2026/
+- [2026-03-16] Summary of Provisional Quantum Index Numbers of Large Scale Manufacturing Industries (QIM) for January 2026 — https://www.pbs.gov.pk/summary-of-provisional-quantum-index-numbers-of-large-scale-manufacturing-industries-qim-for-january-2026/
+- [2026-03-12] Monthly Advance releases on Foreign Trade Statistics for Feburary 2026 — https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-feburary-2026/
+- [2026-03-12] Weekly Sensitive Price Indicator (SPI) for the week ended on 11-03-2026 — https://www.pbs.gov.pk/weekly-sensitive-price-indicator-spi-for-the-week-ended-on-11-03-2026/
+- [2026-03-10] PBS library — https://www.pbs.gov.pk/pbs-library/
+
+## Thematic index (heuristic) / نمایه موضوعی
+- agriculture: 8 pages
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/agricultural-census-report-launch-2024-25/
+  - https://www.pbs.gov.pk/agriculture-census/
+  - https://www.pbs.gov.pk/agriculture-sector-of-pakistan-importance-role-key-statistics/
+  - https://www.pbs.gov.pk/demographic-and-research/
+  - https://www.pbs.gov.pk/mouza-census/
+  - https://www.pbs.gov.pk/press-release/
+- census: 20 pages
+  - https://www.pbs.gov.pk/45th-cci/
+  - https://www.pbs.gov.pk/agricultural-census-report-launch-2024-25/
+  - https://www.pbs.gov.pk/agriculture-census/
+  - https://www.pbs.gov.pk/census/
+  - https://www.pbs.gov.pk/censusarchive/
+  - https://www.pbs.gov.pk/consultative-meetings-with-provinces/
+  - https://www.pbs.gov.pk/demographic-and-research/
+  - https://www.pbs.gov.pk/digital-census/
+- industry: 15 pages
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/docs/qim/
+  - https://www.pbs.gov.pk/industry-2/
+  - https://www.pbs.gov.pk/quantum-index-of-large-scale-manufacturing-industries-qim-for-december-2025/
+  - https://www.pbs.gov.pk/quantum-index-of-large-scale-manufacturing-industries-qim-for-feb-2026/
+  - https://www.pbs.gov.pk/quantum-index-of-large-scale-manufacturing-industries-qim-for-march-2025/
+  - https://www.pbs.gov.pk/quantum-index-of-large-scale-manufacturing-industries-qim-for-nomember-2025/
+- labour: 5 pages
+  - https://www.pbs.gov.pk/content/child-labour-survey-graph/
+  - https://www.pbs.gov.pk/docs/labour-force-survey-section/
+  - https://www.pbs.gov.pk/labour-force-publications/
+  - https://www.pbs.gov.pk/labour-force-statistics/
+  - https://www.pbs.gov.pk/training-wing-web-portal-page/
+- national_accounts: 11 pages
+  - https://www.pbs.gov.pk/49th-cci/
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-advance-release-calendar-of-national-accounts-for-fy-2023-24-and-fy-2024-25/
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/advance-release-calendar-of-national-accounts-for-fy-2025-26/
+  - https://www.pbs.gov.pk/docs/national-account/
+  - https://www.pbs.gov.pk/docs/national-accounts/
+  - https://www.pbs.gov.pk/faqs/
+  - https://www.pbs.gov.pk/national-accounts-2/
+- prices_inflation: 27 pages
+  - https://www.pbs.gov.pk/cpi-presess-release-october-2019/
+  - https://www.pbs.gov.pk/cpi-press-release-january-14/
+  - https://www.pbs.gov.pk/cpi-press-release-june-14/
+  - https://www.pbs.gov.pk/detail-info/
+  - https://www.pbs.gov.pk/docs/price-faqs/
+  - https://www.pbs.gov.pk/monthly-inflation-report-for-april-2026/
+  - https://www.pbs.gov.pk/monthly-inflation-report-for-dec-2025/
+  - https://www.pbs.gov.pk/monthly-inflation-report-for-february-2026/
+- pslm_hies: 5 pages
+  - https://www.pbs.gov.pk/disability-statistics/
+  - https://www.pbs.gov.pk/docs/pakistan-social-and-living-standard-measurement-survey-pslm/
+  - https://www.pbs.gov.pk/hies/
+  - https://www.pbs.gov.pk/household-integrated-economic-survey-hies-2024-25/
+  - https://www.pbs.gov.pk/pslm-3/
+- trade: 20 pages
+  - https://www.pbs.gov.pk/advance-release-on-foreign-trade-statistics/
+  - https://www.pbs.gov.pk/agriculture-sector-of-pakistan-importance-role-key-statistics/
+  - https://www.pbs.gov.pk/consultative-meetings-with-provinces/
+  - https://www.pbs.gov.pk/cpi-presess-release-october-2019/
+  - https://www.pbs.gov.pk/docs/external-trade/
+  - https://www.pbs.gov.pk/external-trade-statistics/
+  - https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-april-2026/
+  - https://www.pbs.gov.pk/monthly-advance-releases-on-foreign-trade-statistics-for-feburary-2026/
+
+## Output files / فایل‌های خروجی
+- all_content.json / all_content.csv
+- media_documents.json / media_documents.csv
+- discovered_files.json / discovered_files.csv
+- sitemap_urls.csv
+- taxonomies.json
+- pbs_crawl.xlsx
+- report.txt (this file)
+
+Note: Binary files (PDF/Excel) are cataloged with public URLs;
+full binary download of thousands of media objects is intentionally
+not performed in this pass to keep the dataset portable.

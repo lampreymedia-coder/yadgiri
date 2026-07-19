@@ -1,0 +1,170 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Telecom Revenues (Rs. bln)",
+        "data": [
+          608,
+          599,
+          641,
+          717,
+          817,
+          957,
+          1075,
+          null
+        ]
+      }
+    ],
+    "title": "Telecom Revenues (Rs. bln)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Telecom Subscribers (mln. nos.)",
+        "data": [
+          null,
+          171.5,
+          186.8,
+          197.2,
+          193.5,
+          195.1,
+          200.3,
+          null
+        ]
+      }
+    ],
+    "title": "Telecom Subscribers (mln. nos.)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Teledensity (percent)",
+        "data": [
+          75.1,
+          76.3,
+          81.7,
+          84.6,
+          81.4,
+          80.5,
+          81,
+          null
+        ]
+      }
+    ],
+    "title": "Teledensity (percent)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Broadband Subscribers (mln.nos.)",
+        "data": [
+          71.5,
+          83.8,
+          102.7,
+          118.8,
+          127.6,
+          139,
+          150,
+          null
+        ]
+      }
+    ],
+    "title": "Broadband Subscribers (mln.nos.)"
+  }
+]

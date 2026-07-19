@@ -1,0 +1,106 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Installed Capacity (MW)",
+        "data": [
+          23531,
+          23759,
+          25889,
+          29944,
+          33554,
+          35114,
+          36701,
+          36536,
+          41402,
+          45605,
+          45292,
+          45380,
+          null
+        ]
+      }
+    ],
+    "title": "Installed Capacity (MW)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Electricity, Commercial (Gwh)",
+        "data": [
+          6375,
+          6512,
+          7181,
+          7856,
+          8606,
+          8513,
+          7975,
+          8501,
+          8652,
+          9005,
+          9195,
+          9721,
+          null
+        ]
+      }
+    ],
+    "title": "Electricity, Commercial (Gwh)"
+  }
+]

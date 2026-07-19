@@ -1,0 +1,106 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Fiscal Deficit (% of GDP)",
+        "data": [
+          5,
+          4.8,
+          4.1,
+          5.2,
+          5.8,
+          7.9,
+          7.1,
+          6.1,
+          7.9,
+          7.8,
+          6.8,
+          5.4,
+          null
+        ]
+      }
+    ],
+    "title": "Fiscal Deficit (% of GDP)"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Total Revenue (% of GDP)",
+        "data": [
+          13,
+          12.9,
+          13.6,
+          13.9,
+          13.3,
+          11.2,
+          13.2,
+          12.4,
+          12.1,
+          11.5,
+          12.6,
+          15.8,
+          null
+        ]
+      }
+    ],
+    "title": "Total Revenue (% of GDP)"
+  }
+]

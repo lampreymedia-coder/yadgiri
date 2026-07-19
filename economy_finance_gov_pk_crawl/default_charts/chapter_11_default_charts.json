@@ -1,0 +1,160 @@
+[
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Degree Colleges (Numbers), Total",
+        "data": [
+          1086,
+          1410,
+          1418,
+          1431,
+          1659,
+          2893,
+          2983,
+          3021,
+          2487,
+          2573,
+          2468,
+          2383,
+          null
+        ]
+      },
+      {
+        "name": "Technical & Vocational Institutions (Numbers), Total",
+        "data": [
+          3323,
+          3579,
+          3746,
+          3798,
+          3740,
+          3740,
+          3740,
+          3740,
+          4182,
+          4406,
+          4549,
+          4746,
+          null
+        ]
+      },
+      {
+        "name": "Higher Sec/Inter Colleges (Numbers), Total",
+        "data": [
+          5179,
+          5393,
+          5470,
+          5130,
+          5754,
+          5876,
+          5898,
+          7102,
+          8113,
+          9004,
+          11258,
+          13304,
+          null
+        ]
+      }
+    ],
+    "title": "Number of Educational Institutions"
+  },
+  {
+    "options": {
+      "markers": {
+        "size": 5
+      },
+      "dataLabels": {
+        "enabled": false
+      },
+      "xaxis": {
+        "categories": [
+          "2013-14",
+          "2014-15",
+          "2015-16",
+          "2016-17",
+          "2017-18",
+          "2018-19",
+          "2019-20",
+          "2020-21",
+          "2021-22",
+          "2022-23",
+          "2023-24",
+          "2024-25",
+          "2025-26"
+        ]
+      },
+      "grid": {
+        "show": true,
+        "strokeDashArray": 10
+      }
+    },
+    "series": [
+      {
+        "name": "Degree Colleges (Numbers), Total",
+        "data": [
+          25964,
+          36587,
+          37082,
+          37857,
+          41233,
+          61602,
+          60064,
+          59455,
+          57709,
+          60130,
+          58311,
+          57971,
+          null
+        ]
+      },
+      {
+        "name": "Universities (Numbers), Total",
+        "data": [
+          77557,
+          88288,
+          83375,
+          58733,
+          56885,
+          60279,
+          60279,
+          60279,
+          69604,
+          98030,
+          102123,
+          102123,
+          null
+        ]
+      }
+    ],
+    "title": "Number of Teachers"
+  }
+]

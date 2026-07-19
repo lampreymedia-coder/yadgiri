@@ -1,0 +1,704 @@
+[
+  {
+    "value": "1.1",
+    "label": "GDP (Rs billion)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.2",
+    "label": "GDP (US $ billion)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.3",
+    "label": "GDP Growth Rate (%)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.3.1",
+    "label": "Agriculture Growth Rate (%)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.3.2",
+    "label": "Manufacturing Growth Rate (%)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.3.3",
+    "label": "Commodity Producing Sector Growth Rate (%)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.3.4",
+    "label": "Services Sector Growth Rate (%)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4",
+    "label": "Total Investment Growth Rates (at current mp) %",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.4.1",
+    "label": "Fixed Investment Growth Rates (%, at current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.2",
+    "label": "Public Investment Growth Rates (%, at current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.3",
+    "label": "Private Investment Growth Rates (including general govt., %, at current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.4",
+    "label": "National Savings (as % of Total Investment)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.5",
+    "label": "Foreign Savings (as % of Total Investment)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.6",
+    "label": "Total Investment (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.7",
+    "label": "Total Investment, Fixed (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.8",
+    "label": "Total Investment, Public (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.9",
+    "label": "Total Investment, Private (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.10",
+    "label": "National Savings (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.11",
+    "label": "Foreign Savings (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.12",
+    "label": "Domestic Savings (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.4.13",
+    "label": "Per Capita Income (mp-US $)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.5",
+    "label": "GDP Deflator (growth %)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.6",
+    "label": "Consumer Price Index (CPI) (growth %)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.7",
+    "label": "Total Revenue (as % of GDP mp)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.7.1",
+    "label": "Tax Revenue (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.7.2",
+    "label": "Non-Tax Revenue (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.8",
+    "label": "Total Expenditure (as % of GDP mp)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.8.1",
+    "label": "Current Expenditure (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.8.2",
+    "label": "Current Expenditure, Defence (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.8.3",
+    "label": "Current Expenditure, Markup Payments (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.8.4",
+    "label": "Current Expenditure, Others (as % of GDP mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.9",
+    "label": "Development Expenditure (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.10",
+    "label": "Overall Deficit (as % of GDP current mp)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.11",
+    "label": "Money and Credit (growth %)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.11.1",
+    "label": "Monetary Assets (M2) (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.11.2",
+    "label": "Domestic Assets (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.12",
+    "label": "Stock Exchange (growth %)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.12.1",
+    "label": "KSE 100 Index (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.12.2",
+    "label": "Aggregate Market Capitalization (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13",
+    "label": "Trade and Payments (growth %)",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.13.1",
+    "label": "Exports (fob) (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.2",
+    "label": "Imports (fob) (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.3",
+    "label": "Workers' Remittances (growth %)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.4",
+    "label": "Exports (fob) As % of GDP (mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.5",
+    "label": "Imports (fob) As % of GDP (mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.6",
+    "label": "Trade Deficit As % of GDP (mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.13.7",
+    "label": "Current Account Deficit As % of GDP (mp)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14",
+    "label": "Agriculture",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.14.1",
+    "label": "Total Cropped Area (mln. Hectares)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.2",
+    "label": "Production",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.3",
+    "label": "Production, Wheat (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.4",
+    "label": "Production, Rice (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.5",
+    "label": "Production, Sugarcane (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.6",
+    "label": "Production, Cotton (mln. bales)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.7",
+    "label": "Fertilizer Offtake (mln.N/tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.14.8",
+    "label": "Credit Disbursed (bln. Rs.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15",
+    "label": "Manufacturing",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.15.1",
+    "label": "Cotton Yarn (mln. Kg.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.2",
+    "label": "Cotton Cloth (mln. sq. mtr.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.3",
+    "label": "Fertilizer Offtake (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.4",
+    "label": "Sugar (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.5",
+    "label": "Cement (mln. tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.6",
+    "label": "Soda Ash (000 tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.7",
+    "label": "Caustic Soda (000 tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.8",
+    "label": "Cigarettes (bln. nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.15.9",
+    "label": "Jute Goods (000 tons)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.16",
+    "label": "Energy",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.16.1",
+    "label": "Crude Oil Extraction (mln. Barrels)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.16.2",
+    "label": "Gas (production) (mcf)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.16.3",
+    "label": "Electricity (installed capacity) (000 MW)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.17",
+    "label": "Transport & Communications",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.17.1",
+    "label": "Roads (000 km)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.17.2",
+    "label": "Motor Vehicles on Roads (mln. nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.17.3",
+    "label": "Post Offices (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.17.4",
+    "label": "TV Sets (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.18",
+    "label": "Information Technology and Telecom",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.18.1",
+    "label": "Telephones (mln. nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.18.2",
+    "label": "Mobile Phones (mln. nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.18.3",
+    "label": "Telecom Revenues (Rs. bln.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.18.4",
+    "label": "Teledensity (percent)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.18.5",
+    "label": "Broadband Subscribers (mln. nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.19",
+    "label": "Population (million)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.20",
+    "label": "Crude Birth Rate (per 1000 person)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.21",
+    "label": "Crude Death Rate (per 1000 person)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.22",
+    "label": "Infant Mortality Rate (per 1000 person)",
+    "has_children": false,
+    "depth": 1
+  },
+  {
+    "value": "1.23",
+    "label": "Labour Force & Employment",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.23.1",
+    "label": "Labour Force (million)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.23.2",
+    "label": "Employed Labour Force (million)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.23.3",
+    "label": "Un-employed Labour Force (million)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.23.4",
+    "label": "Un-employment Rate (% per annum)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24",
+    "label": "Education",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.24.1",
+    "label": "Primary Schools (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.2",
+    "label": "Primary Schools (000 nos.) Male",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.3",
+    "label": "Primary Schools (000 nos.) Female",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.4",
+    "label": "Middle Schools (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.5",
+    "label": "Middle Schools (000 nos.) Male",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.6",
+    "label": "Middle Schools (000 nos.) Female",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.7",
+    "label": "High Schools (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.8",
+    "label": "High Schools (000 nos.) Male",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.9",
+    "label": "High Schools (000 nos.) Female",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.10",
+    "label": "Technical / Vocational Institutions (nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.11",
+    "label": "Technical / Vocational Institutions (nos.) Male",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.12",
+    "label": "Technical / Vocational Institutions (nos.) Female",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.13",
+    "label": "Literacy Rate (percent)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.14",
+    "label": "Literacy Rate (percent) Male",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.15",
+    "label": "Literacy Rate (percent) Female",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.24.16",
+    "label": "Expenditure on Education (as % of GDP)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25",
+    "label": "Health",
+    "has_children": true,
+    "depth": 1
+  },
+  {
+    "value": "1.25.1",
+    "label": "Registered Doctors (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.2",
+    "label": "Registered Nurses (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.3",
+    "label": "Registered Dentists (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.4",
+    "label": "Hospitals (nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.5",
+    "label": "Dispensaries (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.6",
+    "label": "Rural Health Centers (nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.7",
+    "label": "TB Centres (nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.8",
+    "label": "Total Beds (000 nos.)",
+    "has_children": false,
+    "depth": 2
+  },
+  {
+    "value": "1.25.9",
+    "label": "Expenditure on Health (as % of GDP)",
+    "has_children": false,
+    "depth": 2
+  }
+]

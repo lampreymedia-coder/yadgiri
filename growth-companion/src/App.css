@@ -493,8 +493,38 @@
 }
 
 .chart-shell {
-  height: 280px;
-  margin-top: 8px;
+  display: grid;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.mini-chart__row {
+  display: grid;
+  gap: 8px;
+}
+
+.mini-chart__label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.mini-chart__label span {
+  color: #64748b;
+}
+
+.mini-chart__track {
+  height: 14px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.16);
+  overflow: hidden;
+}
+
+.mini-chart__bar {
+  height: 100%;
+  border-radius: 999px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
 .quick-form {

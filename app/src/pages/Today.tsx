@@ -14,6 +14,7 @@ import {
 import { generateDayPlan, summarize, nowAndNext, type Task } from '../engine/plan';
 import { toJalali, J_MONTHS, weekdayFa, dayKey, WEEKDAYS_FA } from '../lib/jalali';
 import { toFa, minToTime, durationFa } from '../lib/fmt';
+import Icon from '../ui/Icon';
 
 const PILLAR_COLOR: Record<Pillar, string> = {
   worship: 'var(--c-worship)',
@@ -24,9 +25,9 @@ const PILLAR_COLOR: Record<Pillar, string> = {
 };
 
 const INTENSITIES: { code: Intensity; title: string; hint: string }[] = [
-  { code: 'min', title: '🪨 کف', hint: 'روز سخت — فقط ضروری‌ها' },
-  { code: 'normal', title: '⚖️ عادی', hint: 'برنامه‌ی کامل روز' },
-  { code: 'peak', title: '🔥 اوج', hint: 'روز پرانرژی' },
+  { code: 'min', title: 'کف', hint: 'روز سخت — فقط ضروری‌ها' },
+  { code: 'normal', title: 'عادی', hint: 'برنامه‌ی کامل روز' },
+  { code: 'peak', title: 'اوج', hint: 'روز پرانرژی' },
 ];
 
 function Ring({ value, color, size = 40 }: { value: number; color: string; size?: number }) {
@@ -90,7 +91,6 @@ export default function Today() {
   const toggle = (task: Task) => {
     const isDone = !!checks[task.id];
     if (!isDone) {
-      // انیمیشن محو، سپس ثبت
       setFading((prev) => new Set(prev).add(task.id));
       window.setTimeout(() => {
         setFading((prev) => {
@@ -115,9 +115,7 @@ export default function Today() {
     }
   };
 
-  const setIntensity = (code: Intensity) => {
-    updateDay(key, { intensity: code });
-  };
+  const setIntensity = (code: Intensity) => updateDay(key, { intensity: code });
 
   const removeHabit = (habitId: string) => {
     if (!confirm('این برنامه حذف شود؟')) return;
@@ -127,152 +125,172 @@ export default function Today() {
   const pending = plan.tasks.filter((t) => !checks[t.id]);
   const done = plan.tasks.filter((t) => checks[t.id]);
   const pct = summary.total ? summary.done / summary.total : 0;
+  const allDone = pending.length === 0 && summary.total > 0;
 
   return (
     <>
-      <div className="card" style={{ paddingBottom: 12 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: '1.05rem' }}>{dateLine}</div>
-            <div className="muted" style={{ marginTop: 2 }}>
-              {plan.templateTitle} · {plan.mission}
-            </div>
-          </div>
-          <div style={{ position: 'relative', width: 54, height: 54 }}>
-            <Ring value={pct} color="var(--c-accent)" size={54} />
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'grid',
-                placeItems: 'center',
-                fontSize: '0.72rem',
-                fontWeight: 900,
-              }}
-            >
-              {toFa(Math.round(pct * 100))}٪
-            </div>
-          </div>
-        </div>
-        <div className="chips" style={{ marginTop: 12 }}>
-          {INTENSITIES.map((i) => (
-            <button
-              key={i.code}
-              className={`chip ${intensity === i.code ? 'active' : ''}`}
-              onClick={() => setIntensity(i.code)}
-              title={i.hint}
-            >
-              {i.title}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {current && (
-        <div className="now-card">
-          <div className="label">⏱ اکنون</div>
-          <div className="block-title">{current.title}</div>
-          <div className="muted" style={{ marginBottom: 10 }}>
-            {minToTime(current.start!)}
-            {current.duration > 0 && ` · ${durationFa(current.duration)}`}
-            {next && ` — بعدی: ${next.title} (${minToTime(next.start!)})`}
-          </div>
-          <button className="btn btn-primary" onClick={() => toggle(current)}>
-            ✅ انجام شد
-          </button>
-        </div>
-      )}
-      {!current && next && (
-        <div className="now-card">
-          <div className="label">🔜 برنامه‌ی بعدی</div>
-          <div className="block-title">{next.title}</div>
-          <div className="muted">ساعت {minToTime(next.start!)}</div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="pillars-row">
-          {PILLARS.map((p) => {
-            const s = summary.pillars[p.code];
-            return (
-              <div className="pillar-cell" key={p.code}>
-                <Ring
-                  value={s.total ? s.done / s.total : 0}
-                  color={PILLAR_COLOR[p.code]}
-                />
-                <div className="name">
-                  {p.emoji} {p.title}
+      <div className="desktop-grid">
+        <div>
+          <div className="card" style={{ paddingBottom: 14 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: '1.08rem', color: 'var(--text-strong)' }}>
+                  {dateLine}
+                </div>
+                <div className="muted" style={{ marginTop: 2 }}>
+                  {plan.templateTitle} · {plan.mission}
                 </div>
               </div>
-            );
-          })}
+              <div style={{ position: 'relative', width: 56, height: 56 }}>
+                <Ring value={pct} color="var(--c-accent)" size={56} />
+                <div
+                  style={{
+                    position: 'absolute',
+                    inset: 0,
+                    display: 'grid',
+                    placeItems: 'center',
+                    fontSize: '0.74rem',
+                    fontWeight: 900,
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {toFa(Math.round(pct * 100))}٪
+                </div>
+              </div>
+            </div>
+            <div className="chips" style={{ marginTop: 14 }}>
+              {INTENSITIES.map((i) => (
+                <button
+                  key={i.code}
+                  className={`chip ${intensity === i.code ? 'active' : ''}`}
+                  onClick={() => setIntensity(i.code)}
+                  title={i.hint}
+                >
+                  {i.title}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {current && (
+            <div className="now-card">
+              <div className="label">اکنون</div>
+              <div className="block-title">{current.title}</div>
+              <div className="muted" style={{ marginBottom: 12 }}>
+                {minToTime(current.start!)}
+                {current.duration > 0 && ` · ${durationFa(current.duration)}`}
+                {next && ` — بعدی: ${next.title} (${minToTime(next.start!)})`}
+              </div>
+              <button className="btn btn-primary" onClick={() => toggle(current)}>
+                <Icon name="check" size={16} />
+                انجام شد
+              </button>
+            </div>
+          )}
+          {!current && next && (
+            <div className="now-card">
+              <div className="label">برنامه‌ی بعدی</div>
+              <div className="block-title">{next.title}</div>
+              <div className="muted">ساعت {minToTime(next.start!)}</div>
+            </div>
+          )}
+
+          <div className={`card ${allDone ? 'celebrate' : ''}`}>
+            <div className="pillars-row">
+              {PILLARS.map((p) => {
+                const s = summary.pillars[p.code];
+                return (
+                  <div className="pillar-cell" key={p.code}>
+                    <Ring value={s.total ? s.done / s.total : 0} color={PILLAR_COLOR[p.code]} />
+                    <div className="name">
+                      <Icon name={p.icon} size={12} />
+                      {p.title}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="section-title" style={{ marginTop: 0 }}>
+            کارهای امروز
+            <span className="muted" style={{ fontWeight: 600 }}>
+              ({toFa(pending.length)})
+            </span>
+          </div>
+
+          {allDone ? (
+            <div className="card empty-state celebrate">
+              <div className="big">
+                <Icon name="check" size={36} />
+              </div>
+              <div style={{ fontWeight: 800, color: 'var(--text-strong)' }}>
+                همه‌ی کارهای امروز انجام شد
+              </div>
+              <div className="muted">نمودار رشدتان خودش جلو رفت. آفرین.</div>
+            </div>
+          ) : (
+            pending.map((t) => (
+              <div key={t.id} className={`task ${fading.has(t.id) ? 'fading' : ''}`}>
+                <button
+                  className={`check ${fading.has(t.id) ? 'on' : ''}`}
+                  onClick={() => toggle(t)}
+                  aria-label="انجام شد"
+                >
+                  <Icon name="check" size={14} />
+                </button>
+                <div style={{ flex: 1 }}>
+                  <div className="t-title">{t.title}</div>
+                  <div className="t-meta">
+                    <span className="pill-dot" style={{ background: PILLAR_COLOR[t.pillar] }} />
+                    {PILLAR_TITLE[t.pillar]}
+                    {t.duration > 0 && <span>· {durationFa(t.duration)}</span>}
+                    {t.source === 'review' && <span>· از مرور دیشب</span>}
+                    {t.isDeep && <span>· عمیق</span>}
+                  </div>
+                </div>
+                {t.start !== undefined && (
+                  <span className="time-badge">{minToTime(t.start)}</span>
+                )}
+                {t.source === 'habit' && (
+                  <button
+                    className="icon-btn"
+                    style={{ width: 30, height: 30 }}
+                    onClick={() => removeHabit(t.id.slice(2))}
+                    aria-label="حذف"
+                  >
+                    <Icon name="close" size={12} />
+                  </button>
+                )}
+              </div>
+            ))
+          )}
+
+          {done.length > 0 && (
+            <details className="done-list">
+              <summary>
+                انجام‌شده‌های امروز ({toFa(done.length)}) — نمایش یا پنهان
+              </summary>
+              {done.map((t) => (
+                <div key={t.id} className="task" style={{ opacity: 0.55 }}>
+                  <button className="check on" onClick={() => toggle(t)}>
+                    <Icon name="check" size={14} />
+                  </button>
+                  <div className="t-title" style={{ textDecoration: 'line-through' }}>
+                    {t.title}
+                  </div>
+                </div>
+              ))}
+            </details>
+          )}
         </div>
       </div>
 
-      <div className="section-title">📋 کارهای امروز ({toFa(pending.length)})</div>
-      {pending.length === 0 ? (
-        <div className="card empty-state">
-          <div className="big">🎉</div>
-          <div style={{ fontWeight: 800 }}>همه‌ی کارهای امروز انجام شد!</div>
-          <div className="muted">آفرین! نمودار رشدت خودش جلو رفت.</div>
-        </div>
-      ) : (
-        pending.map((t) => (
-          <div key={t.id} className={`task ${fading.has(t.id) ? 'fading' : ''}`}>
-            <button
-              className={`check ${fading.has(t.id) ? 'on' : ''}`}
-              onClick={() => toggle(t)}
-              aria-label="انجام شد"
-            >
-              ✓
-            </button>
-            <div style={{ flex: 1 }}>
-              <div className="t-title">{t.title}</div>
-              <div className="t-meta">
-                <span
-                  className="pill-dot"
-                  style={{ background: PILLAR_COLOR[t.pillar] }}
-                />
-                {PILLAR_TITLE[t.pillar]}
-                {t.duration > 0 && <span>· {durationFa(t.duration)}</span>}
-                {t.source === 'review' && <span>· 📌 از مرور دیشب</span>}
-                {t.isDeep && <span>· 🧠 عمیق</span>}
-              </div>
-            </div>
-            {t.start !== undefined && (
-              <span className="time-badge">{minToTime(t.start)}</span>
-            )}
-            {t.source === 'habit' && (
-              <button
-                className="icon-btn"
-                style={{ width: 30, height: 30, fontSize: '0.7rem' }}
-                onClick={() => removeHabit(t.id.slice(2))}
-              >
-                ✕
-              </button>
-            )}
-          </div>
-        ))
-      )}
-
-      {done.length > 0 && (
-        <details className="done-list">
-          <summary>✅ انجام‌شده‌های امروز ({toFa(done.length)}) — نمایش/پنهان</summary>
-          {done.map((t) => (
-            <div key={t.id} className="task" style={{ opacity: 0.55 }}>
-              <button className="check on" onClick={() => toggle(t)}>
-                ✓
-              </button>
-              <div className="t-title" style={{ textDecoration: 'line-through' }}>
-                {t.title}
-              </div>
-            </div>
-          ))}
-        </details>
-      )}
-
       <button className="fab" onClick={() => setShowAdd(true)}>
-        ＋ برنامه‌ی جدید
+        <Icon name="plus" size={16} />
+        برنامه‌ی جدید
       </button>
 
       {showAdd && <AddModal onClose={() => setShowAdd(false)} todayKey={key} />}
@@ -307,7 +325,7 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ marginTop: 0 }}>➕ برنامه یا جلسه‌ی جدید</h3>
+        <h3 style={{ marginTop: 0 }}>برنامه یا جلسه‌ی جدید</h3>
         <div className="field">
           <label htmlFor="add-title">عنوان</label>
           <input
@@ -322,10 +340,15 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
         </div>
         <div className="field">
           <label htmlFor="add-pillar">ستون مرتبط</label>
-          <select id="add-pillar" name="pillar" value={pillar} onChange={(e) => setPillar(e.target.value as Pillar)}>
+          <select
+            id="add-pillar"
+            name="pillar"
+            value={pillar}
+            onChange={(e) => setPillar(e.target.value as Pillar)}
+          >
             {PILLARS.map((p) => (
               <option key={p.code} value={p.code}>
-                {p.emoji} {p.title}
+                {p.title}
               </option>
             ))}
           </select>
@@ -333,7 +356,13 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
         <div style={{ display: 'flex', gap: 10 }}>
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="add-time">ساعت (اختیاری)</label>
-            <input id="add-time" name="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            <input
+              id="add-time"
+              name="time"
+              type="time"
+              value={time}
+              onChange={(e) => setTime(e.target.value)}
+            />
           </div>
           <div className="field" style={{ flex: 1 }}>
             <label htmlFor="add-duration">مدت (دقیقه)</label>

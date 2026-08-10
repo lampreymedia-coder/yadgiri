@@ -3,12 +3,12 @@ import { useSyncExternalStore } from 'react';
 export type Pillar = 'worship' | 'knowledge' | 'body' | 'people' | 'order';
 export type Intensity = 'min' | 'normal' | 'peak';
 
-export const PILLARS: { code: Pillar; title: string; emoji: string }[] = [
-  { code: 'worship', title: 'عبادت', emoji: '🕌' },
-  { code: 'knowledge', title: 'علم', emoji: '📚' },
-  { code: 'body', title: 'بدن', emoji: '💪' },
-  { code: 'people', title: 'خلق', emoji: '🤝' },
-  { code: 'order', title: 'نظم', emoji: '🗂️' },
+export const PILLARS: { code: Pillar; title: string; icon: string }[] = [
+  { code: 'worship', title: 'عبادت', icon: 'worship' },
+  { code: 'knowledge', title: 'علم', icon: 'knowledge' },
+  { code: 'body', title: 'بدن', icon: 'body' },
+  { code: 'people', title: 'خلق', icon: 'people' },
+  { code: 'order', title: 'نظم', icon: 'order' },
 ];
 
 export const PILLAR_TITLE: Record<Pillar, string> = {
@@ -19,16 +19,13 @@ export const PILLAR_TITLE: Record<Pillar, string> = {
   order: 'نظم',
 };
 
-/** برنامه یا جلسه‌ای که کاربر خودش اضافه می‌کند */
 export interface CustomHabit {
   id: string;
   title: string;
   pillar: Pillar;
-  /** روزهای تکرار با getDay()؛ خالی یعنی فقط یک روز مشخص */
   weekdays: number[];
-  /** برای جلسه‌ی یک‌باره: کلید روز */
   date?: string;
-  time?: string; // "HH:MM"
+  time?: string;
   durationMinutes?: number;
   createdAt: number;
 }
@@ -63,6 +60,26 @@ export interface FocusSession {
   at: number;
 }
 
+export interface ReadingBook {
+  id: string;
+  title: string;
+  author: string;
+  totalPages: number;
+  pagesRead: number;
+  status: 'active' | 'done' | 'paused';
+  essence?: string;
+  startedAt: number;
+  finishedAt?: number;
+}
+
+export interface ReadingLog {
+  id: string;
+  bookId: string;
+  date: string;
+  pages: number;
+  at: number;
+}
+
 export interface AppState {
   theme: 'dark' | 'light';
   city: { name: string; lat: number; lng: number };
@@ -70,6 +87,8 @@ export interface AppState {
   days: Record<string, DayState>;
   reviews: Record<string, Review>;
   focus: FocusSession[];
+  books: ReadingBook[];
+  readingLogs: ReadingLog[];
 }
 
 const KEY = 'rooznama-state-v1';
@@ -81,6 +100,8 @@ const DEFAULT_STATE: AppState = {
   days: {},
   reviews: {},
   focus: [],
+  books: [],
+  readingLogs: [],
 };
 
 function load(): AppState {
@@ -104,7 +125,7 @@ function persist() {
     try {
       localStorage.setItem(KEY, JSON.stringify(state));
     } catch {
-      /* حافظه پر — نادیده بگیر */
+      /* حافظه پر */
     }
   }, 150);
 }

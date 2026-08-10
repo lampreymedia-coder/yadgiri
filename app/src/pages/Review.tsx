@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useAppState, setState, PILLARS, type Pillar, type Review } from '../lib/store';
 import { dayKey, addDays, toJalali, J_MONTHS, weekdayFa, keyToDate } from '../lib/jalali';
 import { toFa } from '../lib/fmt';
+import Icon from '../ui/Icon';
 
 const EMPTY_PILLARS: Record<Pillar, boolean> = {
   worship: false,
@@ -17,7 +18,6 @@ export default function ReviewPage() {
   const key = dayKey(today);
   const saved = state.reviews[key];
 
-  // پیشنهاد اولیه‌ی ستون‌ها از روی تیک‌های امروز
   const suggested = useMemo(() => {
     const s = state.days[key]?.summary;
     if (!s) return EMPTY_PILLARS;
@@ -29,9 +29,7 @@ export default function ReviewPage() {
     return out;
   }, [state.days, key]);
 
-  const [pillars, setPillars] = useState<Record<Pillar, boolean>>(
-    saved?.pillars ?? suggested,
-  );
+  const [pillars, setPillars] = useState<Record<Pillar, boolean>>(saved?.pillars ?? suggested);
   const [bestMoment, setBestMoment] = useState(saved?.bestMoment ?? '');
   const [shortfall, setShortfall] = useState(saved?.shortfall ?? '');
   const [tomorrowChange, setTomorrowChange] = useState(saved?.tomorrowChange ?? '');
@@ -59,7 +57,6 @@ export default function ReviewPage() {
     window.setTimeout(() => setJustSaved(false), 2500);
   };
 
-  // مرورهای ۷ روز گذشته
   const history = useMemo(() => {
     const out: Review[] = [];
     for (let i = 1; i <= 7; i += 1) {
@@ -71,16 +68,16 @@ export default function ReviewPage() {
   }, [state.reviews]);
 
   return (
-    <>
+    <div className="desktop-grid">
       <div className="card">
-        <h3>🌙 مرور و محاسبه‌ی امشب</h3>
+        <h3>مرور و محاسبه‌ی امشب</h3>
         <p className="muted" style={{ marginTop: -4 }}>
           پنج دقیقه، پنج پرسش — بدون قضاوت، فقط ثبت. امتیاز امروز:{' '}
           <b style={{ color: 'var(--c-accent)' }}>{toFa(score)} از ۵</b>
         </p>
 
         <div className="section-title" style={{ marginTop: 8 }}>
-          ۱️⃣ کدام ستون‌ها امروز سبز شدند؟
+          ۱. کدام ستون‌ها امروز سبز شدند؟
         </div>
         {PILLARS.map((p) => (
           <div
@@ -88,14 +85,25 @@ export default function ReviewPage() {
             className={`pillar-toggle ${pillars[p.code] ? 'on' : ''}`}
             onClick={() => setPillars((prev) => ({ ...prev, [p.code]: !prev[p.code] }))}
           >
-            <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>
-              {p.emoji} {p.title}
+            <span
+              style={{
+                fontWeight: 700,
+                fontSize: '0.88rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+              }}
+            >
+              <Icon name={p.icon} size={16} />
+              {p.title}
             </span>
-            <span style={{ fontSize: '1.1rem' }}>{pillars[p.code] ? '✅' : '⬜'}</span>
+            <span style={{ color: pillars[p.code] ? 'var(--done)' : 'var(--muted)' }}>
+              <Icon name="check" size={18} />
+            </span>
           </div>
         ))}
 
-        <div className="section-title">۲️⃣ بهترین لحظه‌ی امروز چه بود؟</div>
+        <div className="section-title">۲. بهترین لحظه‌ی امروز چه بود؟</div>
         <div className="field">
           <input
             type="text"
@@ -107,7 +115,7 @@ export default function ReviewPage() {
           />
         </div>
 
-        <div className="section-title">۳️⃣ کجا از خودم عقب ماندم؟</div>
+        <div className="section-title">۳. کجا از خودم عقب ماندم؟</div>
         <div className="field">
           <input
             type="text"
@@ -119,7 +127,7 @@ export default function ReviewPage() {
           />
         </div>
 
-        <div className="section-title">۴️⃣ فردا یک چیز را متفاوت انجام می‌دهم:</div>
+        <div className="section-title">۴. فردا یک چیز را متفاوت انجام می‌دهم</div>
         <div className="field">
           <input
             type="text"
@@ -131,9 +139,9 @@ export default function ReviewPage() {
           />
         </div>
 
-        <div className="section-title">۵️⃣ سه کار مهم فردا</div>
+        <div className="section-title">۵. سه کار مهم فردا</div>
         <p className="muted" style={{ marginTop: -6 }}>
-          این سه کار، فردا خودکار در صفحه‌ی «امروز» ظاهر می‌شوند. 📌
+          این سه کار، فردا به‌صورت خودکار در صفحه‌ی «امروز» ظاهر می‌شوند.
         </p>
         {[
           [t1, setT1],
@@ -153,7 +161,7 @@ export default function ReviewPage() {
         ))}
 
         <div className="field">
-          <label htmlFor="sleep-hours">🛌 دیشب چند ساعت خوابیدی؟ (اختیاری)</label>
+          <label htmlFor="sleep-hours">دیشب چند ساعت خوابیدید؟ (اختیاری)</label>
           <input
             id="sleep-hours"
             name="sleepHours"
@@ -168,7 +176,7 @@ export default function ReviewPage() {
         </div>
 
         <button className="btn btn-primary" onClick={save}>
-          {justSaved ? '✅ ثبت شد — شب بخیر!' : '💾 ثبت مرور امشب'}
+          {justSaved ? 'ثبت شد — شب بخیر' : 'ثبت مرور امشب'}
         </button>
         {saved && !justSaved && (
           <p className="muted" style={{ textAlign: 'center', marginBottom: 0 }}>
@@ -177,58 +185,68 @@ export default function ReviewPage() {
         )}
       </div>
 
-      {history.length > 0 && (
-        <div className="card">
-          <h3>🗓 مرورهای هفته‌ی گذشته</h3>
-          {history.map((r) => {
-            const d = keyToDate(r.date);
-            const j = toJalali(d);
-            const s = Object.values(r.pillars).filter(Boolean).length;
-            return (
-              <div
-                key={r.date}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '10px 4px',
-                  borderBottom: '1px solid var(--border)',
-                  fontSize: '0.85rem',
-                }}
-              >
-                <div>
-                  <b>
-                    {weekdayFa(d)} {toFa(j.jd)} {J_MONTHS[j.jm - 1]}
-                  </b>
-                  {r.bestMoment && (
-                    <div className="muted" style={{ fontSize: '0.75rem' }}>
-                      ✨ {r.bestMoment}
-                    </div>
-                  )}
+      <div>
+        {history.length > 0 ? (
+          <div className="card">
+            <h3>مرورهای هفته‌ی گذشته</h3>
+            {history.map((r) => {
+              const d = keyToDate(r.date);
+              const j = toJalali(d);
+              const s = Object.values(r.pillars).filter(Boolean).length;
+              return (
+                <div
+                  key={r.date}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '12px 4px',
+                    borderBottom: '1px solid var(--border)',
+                    fontSize: '0.85rem',
+                  }}
+                >
+                  <div>
+                    <b>
+                      {weekdayFa(d)} {toFa(j.jd)} {J_MONTHS[j.jm - 1]}
+                    </b>
+                    {r.bestMoment && (
+                      <div className="muted" style={{ fontSize: '0.75rem' }}>
+                        {r.bestMoment}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                    {PILLARS.map((p) => (
+                      <span
+                        key={p.code}
+                        className="pill-dot"
+                        style={{
+                          width: 12,
+                          height: 12,
+                          background: r.pillars[p.code] ? 'var(--c-accent)' : 'var(--card-2)',
+                          border: '1px solid var(--border)',
+                        }}
+                        title={p.title}
+                      />
+                    ))}
+                    <b style={{ marginInlineStart: 6 }}>{toFa(s)}/۵</b>
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {PILLARS.map((p) => (
-                    <span
-                      key={p.code}
-                      className="pill-dot"
-                      style={{
-                        width: 12,
-                        height: 12,
-                        background: r.pillars[p.code]
-                          ? 'var(--c-accent)'
-                          : 'var(--card-2)',
-                        border: '1px solid var(--border)',
-                      }}
-                      title={p.title}
-                    />
-                  ))}
-                  <b style={{ marginInlineStart: 6 }}>{toFa(s)}/۵</b>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card empty-state">
+            <div className="big">
+              <Icon name="review" size={32} />
+            </div>
+            <div style={{ fontWeight: 800, color: 'var(--text-strong)' }}>
+              هنوز مروری ثبت نشده
+            </div>
+            <div className="muted">اولین مرور امشب، همین‌جا شروع می‌شود.</div>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

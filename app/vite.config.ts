@@ -11,16 +11,16 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icons/icon-192.png', 'icons/icon-512.png'],
       manifest: {
-        name: 'روزنما — برنامه‌ریز و ردیاب رشد',
+        name: 'روزنما — زندگی، رشد و تمرکز',
         short_name: 'روزنما',
         description:
-          'برنامه‌ریز زندگی، ردیاب عادت و حالت تمرکز — کاملاً آفلاین و خصوصی',
+          'برنامه‌ریز زندگی، ردیاب رشد، کتاب‌خانه و حالت تمرکز — کاملاً آفلاین و خصوصی',
         lang: 'fa',
         dir: 'rtl',
         display: 'standalone',
-        orientation: 'portrait',
-        theme_color: '#0e1120',
-        background_color: '#0e1120',
+        orientation: 'any',
+        theme_color: '#0b0f1a',
+        background_color: '#0b0f1a',
         start_url: './',
         scope: './',
         icons: [

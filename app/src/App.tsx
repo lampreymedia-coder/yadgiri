@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useAppState, setState, exportJSON, importJSON } from './lib/store';
+import Icon from './ui/Icon';
 import Today from './pages/Today';
 import Progress from './pages/Progress';
 import Focus from './pages/Focus';
 import Review from './pages/Review';
+import Books from './pages/Books';
 
-type Tab = 'today' | 'progress' | 'focus' | 'review';
+export type Tab = 'today' | 'progress' | 'focus' | 'books' | 'review';
 
-const TABS: { id: Tab; title: string; ico: string }[] = [
-  { id: 'today', title: 'امروز', ico: '☀️' },
-  { id: 'progress', title: 'روند رشد', ico: '📈' },
-  { id: 'focus', title: 'حالت تمرکز', ico: '🎯' },
-  { id: 'review', title: 'مرور روز', ico: '🌙' },
+const TABS: { id: Tab; title: string; icon: string }[] = [
+  { id: 'today', title: 'امروز', icon: 'today' },
+  { id: 'progress', title: 'روند رشد', icon: 'progress' },
+  { id: 'focus', title: 'حالت تمرکز', icon: 'focus' },
+  { id: 'books', title: 'کتاب‌خانه', icon: 'book' },
+  { id: 'review', title: 'مرور روز', icon: 'review' },
 ];
 
 const CITIES = [
@@ -33,7 +36,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', state.theme);
     const meta = document.querySelector('meta[name="theme-color"]');
-    meta?.setAttribute('content', state.theme === 'dark' ? '#0e1120' : '#f4f6fc');
+    meta?.setAttribute('content', state.theme === 'dark' ? '#0b0f1a' : '#f3f5fb');
   }, [state.theme]);
 
   const toggleTheme = () =>
@@ -56,50 +59,86 @@ export default function App() {
       const file = input.files?.[0];
       if (!file) return;
       const ok = importJSON(await file.text());
-      alert(ok ? 'بازیابی با موفقیت انجام شد ✅' : 'فایل نامعتبر است ❌');
+      alert(ok ? 'بازیابی با موفقیت انجام شد.' : 'فایل نامعتبر است.');
     };
     input.click();
   };
 
+  const NavButtons = ({ className }: { className?: string }) => (
+    <div className={className}>
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          className={`nav-item ${tab === t.id ? 'active' : ''}`}
+          onClick={() => setTab(t.id)}
+        >
+          <Icon name={t.icon} size={20} />
+          {t.title}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="app">
-      <div className="header">
-        <div>
-          <div className="title">روزنما ✨</div>
-          <div className="subtitle">برنامه‌ی زندگی، رشد و تمرکز</div>
+    <div className="shell">
+      <aside className="side-rail">
+        <div className="side-brand">
+          <div className="brand-mark">
+            <Icon name="check" size={20} />
+          </div>
+          <div>
+            <div className="brand-title">روزنما</div>
+            <div className="brand-sub">زندگی، رشد، تمرکز</div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            className="icon-btn"
-            onClick={toggleTheme}
-            title={state.theme === 'dark' ? 'حالت روز' : 'حالت شب'}
-          >
-            {state.theme === 'dark' ? '☀️' : '🌙'}
-          </button>
-          <button className="icon-btn" onClick={() => setShowSettings(true)} title="تنظیمات">
-            ⚙️
-          </button>
+        <NavButtons className="side-nav" />
+        <div className="side-foot">کاملاً آفلاین و خصوصی · روی همین دستگاه</div>
+      </aside>
+
+      <div className="shell-body">
+        <div className="main-pane">
+          <header className="topbar">
+            <div className="brand">
+              <div className="brand-mark">
+                <Icon name="check" size={18} />
+              </div>
+              <div>
+                <p className="brand-title">روزنما</p>
+                <p className="brand-sub">برنامه‌ی زندگی، رشد و تمرکز</p>
+              </div>
+            </div>
+            <div className="top-actions">
+              <button
+                className="icon-btn"
+                onClick={toggleTheme}
+                title={state.theme === 'dark' ? 'حالت روز' : 'حالت شب'}
+                aria-label="تعویض تم"
+              >
+                <Icon name={state.theme === 'dark' ? 'sun' : 'moon'} size={18} />
+              </button>
+              <button
+                className="icon-btn"
+                onClick={() => setShowSettings(true)}
+                title="تنظیمات"
+                aria-label="تنظیمات"
+              >
+                <Icon name="settings" size={18} />
+              </button>
+            </div>
+          </header>
+
+          <main className="content">
+            {tab === 'today' && <Today />}
+            {tab === 'progress' && <Progress />}
+            {tab === 'focus' && <Focus />}
+            {tab === 'books' && <Books />}
+            {tab === 'review' && <Review />}
+          </main>
         </div>
       </div>
 
-      {tab === 'today' && <Today />}
-      {tab === 'progress' && <Progress />}
-      {tab === 'focus' && <Focus />}
-      {tab === 'review' && <Review />}
-
       <nav className="bottom-nav">
-        <div className="max">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              className={`nav-item ${tab === t.id ? 'active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="ico">{t.ico}</span>
-              {t.title}
-            </button>
-          ))}
-        </div>
+        <NavButtons className="max" />
       </nav>
 
       {showSettings && (
@@ -107,7 +146,7 @@ export default function App() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>تنظیمات</h3>
             <div className="field">
-              <label htmlFor="city-select">شهر (برای محاسبه‌ی اوقات شرعی — کاملاً آفلاین)</label>
+              <label htmlFor="city-select">شهر برای محاسبه‌ی اوقات شرعی</label>
               <select
                 id="city-select"
                 name="city"
@@ -127,14 +166,16 @@ export default function App() {
             <div className="section-title">پشتیبان‌گیری</div>
             <p className="muted">
               همه‌ی داده‌ها فقط روی همین دستگاه ذخیره می‌شود. برای جابه‌جایی بین گوشی و
-              رایانه، از خروجی JSON استفاده کنید.
+              رایانه از خروجی JSON استفاده کنید.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-soft" style={{ flex: 1 }} onClick={doExport}>
-                📤 گرفتن پشتیبان
+                <Icon name="export" size={16} />
+                گرفتن پشتیبان
               </button>
               <button className="btn btn-soft" style={{ flex: 1 }} onClick={doImport}>
-                📥 بازیابی پشتیبان
+                <Icon name="import" size={16} />
+                بازیابی
               </button>
             </div>
             <button

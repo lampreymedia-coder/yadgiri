@@ -107,8 +107,10 @@ export default function App() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ marginTop: 0 }}>تنظیمات</h3>
             <div className="field">
-              <label>شهر (برای محاسبه‌ی اوقات شرعی — کاملاً آفلاین)</label>
+              <label htmlFor="city-select">شهر (برای محاسبه‌ی اوقات شرعی — کاملاً آفلاین)</label>
               <select
+                id="city-select"
+                name="city"
                 value={state.city.name}
                 onChange={(e) => {
                   const c = CITIES.find((x) => x.name === e.target.value);

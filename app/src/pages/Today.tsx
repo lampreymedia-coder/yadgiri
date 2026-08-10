@@ -309,8 +309,10 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3 style={{ marginTop: 0 }}>➕ برنامه یا جلسه‌ی جدید</h3>
         <div className="field">
-          <label>عنوان</label>
+          <label htmlFor="add-title">عنوان</label>
           <input
+            id="add-title"
+            name="title"
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -319,8 +321,8 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
           />
         </div>
         <div className="field">
-          <label>ستون مرتبط</label>
-          <select value={pillar} onChange={(e) => setPillar(e.target.value as Pillar)}>
+          <label htmlFor="add-pillar">ستون مرتبط</label>
+          <select id="add-pillar" name="pillar" value={pillar} onChange={(e) => setPillar(e.target.value as Pillar)}>
             {PILLARS.map((p) => (
               <option key={p.code} value={p.code}>
                 {p.emoji} {p.title}
@@ -330,12 +332,14 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <div className="field" style={{ flex: 1 }}>
-            <label>ساعت (اختیاری)</label>
-            <input type="time" value={time} onChange={(e) => setTime(e.target.value)} />
+            <label htmlFor="add-time">ساعت (اختیاری)</label>
+            <input id="add-time" name="time" type="time" value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
           <div className="field" style={{ flex: 1 }}>
-            <label>مدت (دقیقه)</label>
+            <label htmlFor="add-duration">مدت (دقیقه)</label>
             <input
+              id="add-duration"
+              name="duration"
               type="number"
               value={duration}
               onChange={(e) => setDuration(e.target.value)}
@@ -348,6 +352,7 @@ function AddModal({ onClose, todayKey }: { onClose: () => void; todayKey: string
           <label>
             <input
               type="checkbox"
+              name="repeat"
               checked={repeat}
               onChange={(e) => setRepeat(e.target.checked)}
               style={{ marginInlineEnd: 6 }}

@@ -99,6 +99,8 @@ export default function ReviewPage() {
         <div className="field">
           <input
             type="text"
+            name="bestMoment"
+            aria-label="بهترین لحظه‌ی امروز"
             value={bestMoment}
             onChange={(e) => setBestMoment(e.target.value)}
             placeholder="یک جمله…"
@@ -109,6 +111,8 @@ export default function ReviewPage() {
         <div className="field">
           <input
             type="text"
+            name="shortfall"
+            aria-label="کجا عقب ماندم"
             value={shortfall}
             onChange={(e) => setShortfall(e.target.value)}
             placeholder="فقط ثبت، بدون سرزنش…"
@@ -119,6 +123,8 @@ export default function ReviewPage() {
         <div className="field">
           <input
             type="text"
+            name="tomorrowChange"
+            aria-label="تغییر فردا"
             value={tomorrowChange}
             onChange={(e) => setTomorrowChange(e.target.value)}
             placeholder="مثلاً: گوشی را زودتر کنار می‌گذارم"
@@ -137,6 +143,8 @@ export default function ReviewPage() {
           <div className="field" key={i}>
             <input
               type="text"
+              name={`tomorrowTask${i + 1}`}
+              aria-label={`کار فردا ${toFa(i + 1)}`}
               value={val as string}
               onChange={(e) => (setter as (v: string) => void)(e.target.value)}
               placeholder={`کار ${toFa(i + 1)}…`}
@@ -145,8 +153,10 @@ export default function ReviewPage() {
         ))}
 
         <div className="field">
-          <label>🛌 دیشب چند ساعت خوابیدی؟ (اختیاری)</label>
+          <label htmlFor="sleep-hours">🛌 دیشب چند ساعت خوابیدی؟ (اختیاری)</label>
           <input
+            id="sleep-hours"
+            name="sleepHours"
             type="number"
             value={sleep}
             onChange={(e) => setSleep(e.target.value)}

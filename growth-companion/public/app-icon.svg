@@ -1,0 +1,30 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="512" height="512" rx="128" fill="url(#bg)" />
+  <circle cx="256" cy="224" r="132" fill="url(#orb)" />
+  <path
+    d="M164 232C164 181.19 205.19 140 256 140C306.81 140 348 181.19 348 232V248C348 322.006 288.006 382 214 382H194"
+    stroke="#0F172A"
+    stroke-width="28"
+    stroke-linecap="round"
+  />
+  <path
+    d="M296 324L256 364L216 324"
+    stroke="#0F172A"
+    stroke-width="28"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <rect x="124" y="104" width="76" height="76" rx="24" fill="#ffffff" fill-opacity="0.7" />
+  <path d="M146 142L161 157L179 127" stroke="#7C3AED" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" />
+  <defs>
+    <linearGradient id="bg" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDE68A" />
+      <stop offset="0.52" stop-color="#FDBA74" />
+      <stop offset="1" stop-color="#F9A8D4" />
+    </linearGradient>
+    <linearGradient id="orb" x1="168" y1="126" x2="350" y2="352" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" stop-opacity="0.95" />
+      <stop offset="1" stop-color="#E0E7FF" stop-opacity="0.92" />
+    </linearGradient>
+  </defs>
+</svg>

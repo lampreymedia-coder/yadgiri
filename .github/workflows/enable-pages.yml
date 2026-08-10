@@ -1,20 +1,28 @@
-name: enable-pages
+name: deploy-pages
 on:
   push:
     branches: [gh-pages]
+  workflow_dispatch:
 permissions:
+  contents: read
   pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
 jobs:
-  enable:
+  deploy:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Enable GitHub Pages from gh-pages branch
-        run: |
-          code=$(curl -s -o /tmp/resp.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github+json" \
-            https://api.github.com/repos/${{ github.repository }}/pages \
-            -d '{"build_type":"legacy","source":{"branch":"gh-pages","path":"/"}}')
-          cat /tmp/resp.json
-          echo "HTTP $code"
-          if [ "$code" = "201" ] || [ "$code" = "409" ]; then exit 0; else exit 1; fi
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deployment
+        uses: actions/deploy-pages@v4

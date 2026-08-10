@@ -16,7 +16,12 @@ const getAudioContext = () => {
     return null
   }
 
-  return new AudioCtor()
+  if (activeContext && activeContext.state !== 'closed') {
+    return activeContext
+  }
+
+  activeContext = new AudioCtor()
+  return activeContext
 }
 
 const createNoiseBuffer = (context: AudioContext, tint: 'white' | 'brown') => {
@@ -34,7 +39,7 @@ const createNoiseBuffer = (context: AudioContext, tint: 'white' | 'brown') => {
       continue
     }
 
-    channelData[index] = white * 0.28
+    channelData[index] = white * 0.35
   }
 
   return buffer
@@ -42,6 +47,17 @@ const createNoiseBuffer = (context: AudioContext, tint: 'white' | 'brown') => {
 
 const addCleanup = (cleanup: CleanupFn) => {
   cleanupFns.push(cleanup)
+}
+
+const clearNodes = async () => {
+  cleanupFns.forEach((cleanup) => {
+    try {
+      cleanup()
+    } catch {
+      // ignore cleanup errors from already-stopped nodes
+    }
+  })
+  cleanupFns = []
 }
 
 const makeLoopingSource = (
@@ -62,7 +78,11 @@ const makeLoopingSource = (
   source.start()
 
   addCleanup(() => {
-    source.stop()
+    try {
+      source.stop()
+    } catch {
+      // already stopped
+    }
     source.disconnect()
     gainNode.disconnect()
   })
@@ -70,58 +90,71 @@ const makeLoopingSource = (
 
 const createCosmicSound = (context: AudioContext) => {
   const master = context.createGain()
-  master.gain.value = 0.18
+  master.gain.value = 0.42
   master.connect(context.destination)
 
   const drone = context.createOscillator()
   drone.type = 'sine'
-  drone.frequency.value = 110
+  drone.frequency.value = 98
 
   const layer = context.createOscillator()
   layer.type = 'triangle'
-  layer.frequency.value = 220
+  layer.frequency.value = 196
+
+  const shimmer = context.createOscillator()
+  shimmer.type = 'sine'
+  shimmer.frequency.value = 392
 
   const lfo = context.createOscillator()
   lfo.type = 'sine'
-  lfo.frequency.value = 0.14
+  lfo.frequency.value = 0.12
 
   const modGain = context.createGain()
-  modGain.gain.value = 18
+  modGain.gain.value = 28
 
   const droneGain = context.createGain()
-  droneGain.gain.value = 0.28
+  droneGain.gain.value = 0.45
 
   const layerGain = context.createGain()
-  layerGain.gain.value = 0.08
+  layerGain.gain.value = 0.18
+
+  const shimmerGain = context.createGain()
+  shimmerGain.gain.value = 0.06
 
   const filter = context.createBiquadFilter()
   filter.type = 'lowpass'
-  filter.frequency.value = 900
-  filter.Q.value = 0.7
+  filter.frequency.value = 1100
+  filter.Q.value = 0.8
 
   lfo.connect(modGain)
   modGain.connect(filter.frequency)
 
   drone.connect(droneGain)
   layer.connect(layerGain)
+  shimmer.connect(shimmerGain)
   droneGain.connect(filter)
   layerGain.connect(filter)
+  shimmerGain.connect(filter)
   filter.connect(master)
 
   drone.start()
   layer.start()
+  shimmer.start()
   lfo.start()
 
   addCleanup(() => {
     drone.stop()
     layer.stop()
+    shimmer.stop()
     lfo.stop()
     drone.disconnect()
     layer.disconnect()
+    shimmer.disconnect()
     lfo.disconnect()
     modGain.disconnect()
     droneGain.disconnect()
     layerGain.disconnect()
+    shimmerGain.disconnect()
     filter.disconnect()
     master.disconnect()
   })
@@ -129,22 +162,22 @@ const createCosmicSound = (context: AudioContext) => {
 
 const createRainSound = (context: AudioContext) => {
   const master = context.createGain()
-  master.gain.value = 0.16
+  master.gain.value = 0.38
   master.connect(context.destination)
 
   const highPass = context.createBiquadFilter()
   highPass.type = 'highpass'
-  highPass.frequency.value = 900
+  highPass.frequency.value = 700
 
   const bandPass = context.createBiquadFilter()
   bandPass.type = 'bandpass'
-  bandPass.frequency.value = 2600
-  bandPass.Q.value = 0.8
+  bandPass.frequency.value = 2200
+  bandPass.Q.value = 0.7
 
   highPass.connect(bandPass)
   bandPass.connect(master)
 
-  makeLoopingSource(context, createNoiseBuffer(context, 'white'), highPass, 0.18)
+  makeLoopingSource(context, createNoiseBuffer(context, 'white'), highPass, 0.55)
 
   addCleanup(() => {
     highPass.disconnect()
@@ -155,16 +188,16 @@ const createRainSound = (context: AudioContext) => {
 
 const createBrownSound = (context: AudioContext) => {
   const master = context.createGain()
-  master.gain.value = 0.12
+  master.gain.value = 0.4
   master.connect(context.destination)
 
   const filter = context.createBiquadFilter()
   filter.type = 'lowpass'
-  filter.frequency.value = 520
+  filter.frequency.value = 480
   filter.Q.value = 0.5
   filter.connect(master)
 
-  makeLoopingSource(context, createNoiseBuffer(context, 'brown'), filter, 0.22)
+  makeLoopingSource(context, createNoiseBuffer(context, 'brown'), filter, 0.7)
 
   addCleanup(() => {
     filter.disconnect()
@@ -174,33 +207,51 @@ const createBrownSound = (context: AudioContext) => {
 
 const createPulseSound = (context: AudioContext) => {
   const master = context.createGain()
-  master.gain.value = 0.18
+  master.gain.value = 0.4
   master.connect(context.destination)
 
   const tone = context.createOscillator()
   tone.type = 'sine'
   tone.frequency.value = 174
 
+  const soft = context.createOscillator()
+  soft.type = 'triangle'
+  soft.frequency.value = 261.6
+
   const gainNode = context.createGain()
-  gainNode.gain.value = 0.01
+  gainNode.gain.value = 0.02
+
+  const softGain = context.createGain()
+  softGain.gain.value = 0.01
 
   tone.connect(gainNode)
+  soft.connect(softGain)
   gainNode.connect(master)
+  softGain.connect(master)
   tone.start()
+  soft.start()
 
   const intervalId = window.setInterval(() => {
     const now = context.currentTime
     gainNode.gain.cancelScheduledValues(now)
-    gainNode.gain.setValueAtTime(0.01, now)
-    gainNode.gain.linearRampToValueAtTime(0.09, now + 0.05)
-    gainNode.gain.linearRampToValueAtTime(0.015, now + 0.4)
-  }, 1800)
+    gainNode.gain.setValueAtTime(0.02, now)
+    gainNode.gain.linearRampToValueAtTime(0.18, now + 0.08)
+    gainNode.gain.linearRampToValueAtTime(0.03, now + 0.55)
+
+    softGain.gain.cancelScheduledValues(now)
+    softGain.gain.setValueAtTime(0.01, now)
+    softGain.gain.linearRampToValueAtTime(0.08, now + 0.1)
+    softGain.gain.linearRampToValueAtTime(0.015, now + 0.7)
+  }, 1600)
 
   addCleanup(() => {
     window.clearInterval(intervalId)
     tone.stop()
+    soft.stop()
     tone.disconnect()
+    soft.disconnect()
     gainNode.disconnect()
+    softGain.disconnect()
     master.disconnect()
   })
 }
@@ -214,14 +265,22 @@ const soundFactories: Record<Exclude<Soundscape, 'silent'>, (context: AudioConte
 
 export const soundLabels: Record<Soundscape, string> = {
   cosmic: 'فضای کیهانی',
-  brown: 'نویز عمیق',
+  brown: 'صدای عمیق',
   rain: 'باران نرم',
-  pulse: 'نبض تمرکز',
+  pulse: 'نبض آرام',
   silent: 'بی‌صدا',
 }
 
+export const soundHints: Record<Soundscape, string> = {
+  cosmic: 'برای مطالعه عمیق',
+  brown: 'برای کار طولانی',
+  rain: 'برای آرامش ذهن',
+  pulse: 'برای شروع تمرکز',
+  silent: 'فقط تایمر',
+}
+
 export const startAmbientSound = async (sound: Soundscape) => {
-  await stopAmbientSound()
+  await clearNodes()
 
   if (sound === 'silent') {
     return true
@@ -233,19 +292,16 @@ export const startAmbientSound = async (sound: Soundscape) => {
     return false
   }
 
-  activeContext = context
-  soundFactories[sound](context)
-
   if (context.state === 'suspended') {
     await context.resume()
   }
 
+  soundFactories[sound](context)
   return true
 }
 
 export const stopAmbientSound = async () => {
-  cleanupFns.forEach((cleanup) => cleanup())
-  cleanupFns = []
+  await clearNodes()
 
   if (!activeContext) {
     return
@@ -254,14 +310,22 @@ export const stopAmbientSound = async () => {
   const context = activeContext
   activeContext = null
 
-  await context.close()
+  if (context.state !== 'closed') {
+    await context.close()
+  }
 }
 
 export const playCompletionChime = async () => {
-  const context = getAudioContext()
+  const AudioCtor = window.AudioContext ?? globalWindow.webkitAudioContext
 
-  if (!context) {
+  if (!AudioCtor) {
     return
+  }
+
+  const context = new AudioCtor()
+
+  if (context.state === 'suspended') {
+    await context.resume()
   }
 
   const oscillator = context.createOscillator()
@@ -272,7 +336,7 @@ export const playCompletionChime = async () => {
   oscillator.frequency.linearRampToValueAtTime(523.25, context.currentTime + 0.7)
 
   gainNode.gain.setValueAtTime(0.0001, context.currentTime)
-  gainNode.gain.linearRampToValueAtTime(0.14, context.currentTime + 0.05)
+  gainNode.gain.linearRampToValueAtTime(0.22, context.currentTime + 0.05)
   gainNode.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 1)
 
   oscillator.connect(gainNode)

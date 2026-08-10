@@ -37,13 +37,6 @@ export interface HabitDefinition {
   group: 'anchors' | 'minimums' | 'growth'
 }
 
-export interface WeeklyRating {
-  id: string
-  title: string
-  description: string
-  color: string
-}
-
 export interface QuickTask {
   id: string
   dateKey: string

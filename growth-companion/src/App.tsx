@@ -1,47 +1,67 @@
-import { useEffect, useMemo, useState } from 'react'
-import dayjs from 'dayjs'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AudioLines,
   CheckCircle2,
-  Flame,
-  ListTodo,
+  Coffee,
+  Home,
+  Moon,
   NotebookPen,
   Pause,
   Play,
   Plus,
   RotateCcw,
-  Sparkles,
+  Sun,
+  Target,
   Timer,
   Trash2,
+  TrendingUp,
 } from 'lucide-react'
 
 import './App.css'
 import ProgressChart from './components/ProgressChart'
 import SectionCard from './components/SectionCard'
-import { appName, dayTemplates, focusPresets, habits, weeklyRatings } from './data/appData'
-import { usePlannerStore } from './store/usePlannerStore'
-import type { BlockCategory, ScheduleBlock, Soundscape } from './types'
-import { playCompletionChime, soundLabels, startAmbientSound, stopAmbientSound } from './utils/ambientAudio'
 import {
-  formatCompactPersianDate,
-  formatPersianDate,
-  fromDateKey,
-  getNextDays,
-  getWeekStart,
-  toDateKey,
-} from './utils/date'
+  appName,
+  dayTemplates,
+  focusPresets,
+  habitGroupLabels,
+  habits,
+  restPresets,
+} from './data/appData'
+import { type AppTab, usePlannerStore } from './store/usePlannerStore'
+import type { BlockCategory, ScheduleBlock, Soundscape } from './types'
+import {
+  playCompletionChime,
+  soundHints,
+  soundLabels,
+  startAmbientSound,
+  stopAmbientSound,
+} from './utils/ambientAudio'
+import { formatPersianDate, fromDateKey, toDateKey } from './utils/date'
+import { buildProgressSummary, type ProgressRange } from './utils/progress'
+
+type TimerMode = 'focus' | 'rest'
+
+const tabs: Array<{ id: AppTab; label: string; icon: typeof Home }> = [
+  { id: 'today', label: 'امروز', icon: Home },
+  { id: 'progress', label: 'پیشرفت', icon: TrendingUp },
+  { id: 'focus', label: 'تمرکز', icon: Target },
+  { id: 'review', label: 'مرور روز', icon: NotebookPen },
+]
 
 function App() {
   const {
     selectedDateKey,
+    activeTab,
+    theme,
     completedBlocksByDate,
     completedHabitsByDate,
     quickTasks,
     focusSessions,
     notesByDate,
     tomorrowByDate,
-    weeklyRatings: persistedRatings,
     setSelectedDate,
+    setActiveTab,
+    toggleTheme,
     toggleBlock,
     toggleHabit,
     addQuickTask,
@@ -49,16 +69,27 @@ function App() {
     addFocusSession,
     setNote,
     setTomorrowLines,
-    setWeeklyRating,
   } = usePlannerStore()
 
   const [quickTitle, setQuickTitle] = useState('')
   const [quickCategory, setQuickCategory] = useState<BlockCategory>('focus')
   const [quickDuration, setQuickDuration] = useState('')
   const [focusMinutes, setFocusMinutes] = useState(50)
+  const [restMinutes, setRestMinutes] = useState(5)
+  const [timerMode, setTimerMode] = useState<TimerMode>('focus')
   const [remainingSeconds, setRemainingSeconds] = useState(50 * 60)
   const [isRunning, setIsRunning] = useState(false)
   const [selectedSound, setSelectedSound] = useState<Soundscape>('cosmic')
+  const [isPreviewingSound, setIsPreviewingSound] = useState(false)
+  const [progressRange, setProgressRange] = useState<ProgressRange>('week')
+  const previewTimeoutRef = useRef<number | null>(null)
+
+  const clearPreviewTimeout = () => {
+    if (previewTimeoutRef.current !== null) {
+      window.clearTimeout(previewTimeoutRef.current)
+      previewTimeoutRef.current = null
+    }
+  }
 
   const selectedDate = fromDateKey(selectedDateKey)
   const todayKey = toDateKey(new Date())
@@ -69,99 +100,55 @@ function App() {
     title: task.title,
     start: task.durationLabel ? `${task.durationLabel} دقیقه` : 'افزوده‌شده',
     category: task.category,
-    note: 'بلوک سفارشی شما',
+    note: 'برنامه اضافه شما',
   }))
-  const scheduleBlocks = [...selectedTemplate.blocks, ...quickBlocks]
+  const allBlocks = [...selectedTemplate.blocks, ...quickBlocks]
   const completedBlocks = completedBlocksByDate[selectedDateKey] ?? []
   const completedHabits = completedHabitsByDate[selectedDateKey] ?? []
-  const nextDays = getNextDays(selectedDateKey, 6)
+  const visibleBlocks = allBlocks.filter((block) => !completedBlocks.includes(block.id))
+  const visibleHabits = habits.filter((habit) => !completedHabits.includes(habit.id))
+  const doneTodayCount = completedBlocks.length + completedHabits.length
+  const totalTodayCount = allBlocks.length + habits.length
+  const todayPercent = totalTodayCount ? Math.round((doneTodayCount / totalTodayCount) * 100) : 0
 
-  const blockCompletion = scheduleBlocks.length
-    ? Math.round((completedBlocks.length / scheduleBlocks.length) * 100)
-    : 0
-  const habitCompletion = habits.length ? Math.round((completedHabits.length / habits.length) * 100) : 0
+  const progressSummary = useMemo(
+    () =>
+      buildProgressSummary(
+        progressRange,
+        selectedDateKey,
+        completedBlocksByDate,
+        completedHabitsByDate,
+        focusSessions,
+      ),
+    [completedBlocksByDate, completedHabitsByDate, focusSessions, progressRange, selectedDateKey],
+  )
 
-  const weeklyFocusMinutes = useMemo(() => {
-    const weekStart = getWeekStart(selectedDateKey)
-    const weekEnd = weekStart.add(6, 'day')
-
-    return focusSessions
-      .filter((session) => {
-        const current = dayjs(session.dateKey)
-
-        return current.isAfter(weekStart.subtract(1, 'day')) && current.isBefore(weekEnd.add(1, 'day'))
-      })
-      .reduce((sum, session) => sum + session.durationMinutes, 0)
-  }, [focusSessions, selectedDateKey])
-
-  const anchorStreak = useMemo(() => {
-    const anchorIds = habits.filter((habit) => habit.group === 'anchors').map((habit) => habit.id)
-    let cursor = dayjs(todayKey)
-    let streak = 0
-
-    while (streak < 60) {
-      const key = cursor.format('YYYY-MM-DD')
-      const completed = new Set(completedHabitsByDate[key] ?? [])
-
-      if (!anchorIds.every((id) => completed.has(id))) {
-        break
-      }
-
-      streak += 1
-      cursor = cursor.subtract(1, 'day')
-    }
-
-    return streak
-  }, [completedHabitsByDate, todayKey])
-
-  const chartData = weeklyRatings.map((rating) => ({
-    name: rating.title,
-    value: persistedRatings[rating.id] ?? 3,
-    color: rating.color,
-  }))
-
-  const statCards = [
-    {
-      icon: <ListTodo size={18} />,
-      title: 'انجام برنامه امروز',
-      value: `${blockCompletion}%`,
-      note: `${completedBlocks.length} از ${scheduleBlocks.length} بلوک`,
-    },
-    {
-      icon: <CheckCircle2 size={18} />,
-      title: 'هبیت‌های امروز',
-      value: `${habitCompletion}%`,
-      note: `${completedHabits.length} از ${habits.length} عادت`,
-    },
-    {
-      icon: <Timer size={18} />,
-      title: 'تمرکز این هفته',
-      value: `${weeklyFocusMinutes}د`,
-      note: 'مجموع سشن‌های فوکس',
-    },
-    {
-      icon: <Flame size={18} />,
-      title: 'استریک لنگرها',
-      value: `${anchorStreak} روز`,
-      note: 'روزهای پیوسته با ۵ لنگر',
-    },
-  ]
-
-  const groupedHabits = {
-    anchors: habits.filter((habit) => habit.group === 'anchors'),
-    minimums: habits.filter((habit) => habit.group === 'minimums'),
-    growth: habits.filter((habit) => habit.group === 'growth'),
+  const groupedVisibleHabits = {
+    anchors: visibleHabits.filter((habit) => habit.group === 'anchors'),
+    minimums: visibleHabits.filter((habit) => habit.group === 'minimums'),
+    growth: visibleHabits.filter((habit) => habit.group === 'growth'),
   }
 
-  const lastFocusSessions = focusSessions.slice(0, 4)
   const noteValue = notesByDate[selectedDateKey] ?? ''
   const tomorrowText = (tomorrowByDate[selectedDateKey] ?? []).join('\n')
+  const lastFocusSessions = focusSessions.slice(0, 5)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+
+  useEffect(() => {
+    if (selectedDateKey !== todayKey) {
+      setSelectedDate(todayKey)
+    }
+  }, [selectedDateKey, setSelectedDate, todayKey])
 
   useEffect(() => {
     if (!isRunning) {
-      setRemainingSeconds(focusMinutes * 60)
+      const minutes = timerMode === 'focus' ? focusMinutes : restMinutes
+      setRemainingSeconds(minutes * 60)
     }
-  }, [focusMinutes, isRunning])
+  }, [focusMinutes, isRunning, restMinutes, timerMode])
 
   useEffect(() => {
     if (!isRunning) {
@@ -182,20 +169,34 @@ function App() {
       return
     }
 
-    setIsRunning(false)
-    void stopAmbientSound()
-    void playCompletionChime()
-    addFocusSession(selectedDateKey, focusMinutes, selectedSound)
-    setRemainingSeconds(focusMinutes * 60)
-  }, [addFocusSession, focusMinutes, isRunning, remainingSeconds, selectedDateKey, selectedSound])
+    const finishCycle = async () => {
+      setIsRunning(false)
+      await stopAmbientSound()
+      setIsPreviewingSound(false)
+      await playCompletionChime()
 
-  useEffect(() => {
-    if (!isRunning) {
-      return
+      if (timerMode === 'focus') {
+        addFocusSession(selectedDateKey, focusMinutes, selectedSound)
+        setTimerMode('rest')
+        setRemainingSeconds(restMinutes * 60)
+        return
+      }
+
+      setTimerMode('focus')
+      setRemainingSeconds(focusMinutes * 60)
     }
 
-    void startAmbientSound(selectedSound)
-  }, [isRunning, selectedSound])
+    void finishCycle()
+  }, [
+    addFocusSession,
+    focusMinutes,
+    isRunning,
+    remainingSeconds,
+    restMinutes,
+    selectedDateKey,
+    selectedSound,
+    timerMode,
+  ])
 
   useEffect(() => {
     return () => {
@@ -213,21 +214,55 @@ function App() {
     setQuickDuration('')
   }
 
-  const handleToggleTimer = async () => {
-    if (isRunning) {
-      setIsRunning(false)
+  const handleSelectSound = async (sound: Soundscape) => {
+    clearPreviewTimeout()
+    setSelectedSound(sound)
+
+    if (sound === 'silent') {
       await stopAmbientSound()
+      setIsPreviewingSound(false)
       return
     }
 
-    await startAmbientSound(selectedSound)
+    const started = await startAmbientSound(sound)
+    setIsPreviewingSound(started)
+
+    if (!isRunning) {
+      previewTimeoutRef.current = window.setTimeout(() => {
+        void stopAmbientSound()
+        setIsPreviewingSound(false)
+      }, 4500)
+    }
+  }
+
+  const handleToggleTimer = async () => {
+    clearPreviewTimeout()
+
+    if (isRunning) {
+      setIsRunning(false)
+      await stopAmbientSound()
+      setIsPreviewingSound(false)
+      return
+    }
+
+    if (timerMode === 'focus' && selectedSound !== 'silent') {
+      const started = await startAmbientSound(selectedSound)
+      setIsPreviewingSound(started)
+    } else {
+      await stopAmbientSound()
+      setIsPreviewingSound(false)
+    }
+
     setIsRunning(true)
   }
 
   const handleResetTimer = async () => {
+    clearPreviewTimeout()
     setIsRunning(false)
+    setTimerMode('focus')
     setRemainingSeconds(focusMinutes * 60)
     await stopAmbientSound()
+    setIsPreviewingSound(false)
   }
 
   const formatTimer = (totalSeconds: number) => {
@@ -237,326 +272,369 @@ function App() {
     return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
   }
 
+  const rangeLabel =
+    progressRange === 'week' ? 'این هفته' : progressRange === 'month' ? 'این ماه' : 'امسال'
+
   return (
-    <main className="app-shell">
-      <section className="hero-panel">
-        <div className="hero-panel__copy">
-          <span className="eyebrow">
-            <Sparkles size={16} />
-            برنامه‌ریز رشد، عبادت و تمرکز
-          </span>
+    <div className="app-frame">
+      <header className="topbar">
+        <div>
+          <p className="brand-kicker">برنامه‌ریز شخصی</p>
           <h1>{appName}</h1>
-          <p className="hero-panel__lead">
-            یک همراه سبک و نصب‌پذیر برای اندروید و دسکتاپ که برنامه‌های تکرارشونده‌ات را
-            خودش می‌چیند، پیشرفتت را نشان می‌دهد و برای مطالعه و تمرکز فضاسازی می‌کند.
-          </p>
-          <div className="hero-badges">
-            <span>نصب‌پذیر (PWA)</span>
-            <span>آفلاین و سبک</span>
-            <span>برنامه خودکار روزانه</span>
-          </div>
         </div>
+        <button type="button" className="theme-toggle" onClick={toggleTheme} aria-label="تغییر حالت شب و روز">
+          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          {theme === 'dark' ? 'حالت روز' : 'حالت شب'}
+        </button>
+      </header>
 
-        <div className="hero-panel__insight">
-          <div className="insight-chip">
-            <NotebookPen size={18} />
-            {selectedTemplate.title}
-          </div>
-          <p>{selectedTemplate.summary}</p>
-          <ul>
-            {selectedTemplate.prompts.map((prompt) => (
-              <li key={prompt}>{prompt}</li>
-            ))}
-          </ul>
-        </div>
-      </section>
-
-      <section className="date-strip" aria-label="انتخاب روز">
-        {nextDays.map((date) => {
-          const key = date.format('YYYY-MM-DD')
-          const active = key === selectedDateKey
-
-          return (
-            <button
-              key={key}
-              type="button"
-              className={active ? 'date-pill active' : 'date-pill'}
-              onClick={() => setSelectedDate(key)}
+      <main className="page-shell">
+        {activeTab === 'today' ? (
+          <section className="page-stack">
+            <SectionCard
+              title="امروز"
+              subtitle={formatPersianDate(selectedDate.toDate())}
+              action={<span className="pill-soft">{todayPercent}% انجام‌شده</span>}
             >
-              <span>{formatCompactPersianDate(date.toDate())}</span>
-              {key === todayKey ? <small>امروز</small> : null}
-            </button>
-          )
-        })}
-      </section>
-
-      <section className="stats-grid">
-        {statCards.map((card) => (
-          <article key={card.title} className="stat-card">
-            <div className="stat-card__icon">{card.icon}</div>
-            <div>
-              <p className="stat-card__title">{card.title}</p>
-              <strong>{card.value}</strong>
-              <span>{card.note}</span>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      <section className="content-grid">
-        <SectionCard
-          title="امروز چه چیزی برایت از قبل آماده شده؟"
-          subtitle={`${formatPersianDate(selectedDate.toDate())} • ${selectedTemplate.mood}`}
-          className="schedule-card"
-        >
-          <div className="schedule-list">
-            {scheduleBlocks.map((block) => {
-              const isChecked = completedBlocks.includes(block.id)
-
-              return (
-                <label
-                  key={block.id}
-                  className={isChecked ? 'schedule-item done' : 'schedule-item'}
-                  data-category={block.category}
-                >
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => toggleBlock(selectedDateKey, block.id)}
-                  />
-                  <div className="schedule-item__time">{block.start}</div>
-                  <div className="schedule-item__body">
-                    <div className="schedule-item__title-row">
-                      <strong>{block.title}</strong>
-                      {block.autoGenerated ? <span className="mini-badge">خودکار</span> : null}
-                    </div>
-                    {block.end ? (
-                      <span className="schedule-item__range">
-                        تا {block.end}
-                      </span>
-                    ) : null}
-                    {block.note ? <p>{block.note}</p> : null}
-                  </div>
-                </label>
-              )
-            })}
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="عادت‌ها و حداقل‌های شکست‌ناپذیر"
-          subtitle="روز بد داشته باش، روز صفر هرگز"
-          className="habits-card"
-        >
-          <div className="habit-groups">
-            {(
-              [
-                ['anchors', '۵ لنگر ثابت'],
-                ['minimums', 'حداقل‌ها'],
-                ['growth', 'رشد نرم'],
-              ] as const
-            ).map(([groupKey, label]) => (
-              <div key={groupKey} className="habit-group">
-                <h3>{label}</h3>
-                <div className="habit-list">
-                  {groupedHabits[groupKey].map((habit) => {
-                    const isChecked = completedHabits.includes(habit.id)
-
-                    return (
-                      <button
-                        key={habit.id}
-                        type="button"
-                        className={isChecked ? 'habit-pill checked' : 'habit-pill'}
-                        onClick={() => toggleHabit(selectedDateKey, habit.id)}
-                      >
-                        <div>
-                          <strong>{habit.title}</strong>
-                          <span>{habit.description}</span>
-                        </div>
-                        {isChecked ? <CheckCircle2 size={18} /> : null}
-                      </button>
-                    )
-                  })}
+              <div className="today-summary">
+                <div>
+                  <strong>{selectedTemplate.title}</strong>
+                  <p>{selectedTemplate.summary}</p>
+                </div>
+                <div className="today-metrics">
+                  <span>{visibleBlocks.length} کار باقی‌مانده</span>
+                  <span>{visibleHabits.length} عادت باقی‌مانده</span>
                 </div>
               </div>
-            ))}
-          </div>
-        </SectionCard>
+            </SectionCard>
 
-        <SectionCard
-          title="فوکِس مود"
-          subtitle="یک بازه عمیق بساز و با صدای محیط واردش شو"
-          className="focus-card"
-          action={
-            <div className="timer-live">
-              <AudioLines size={16} />
-              <span>{soundLabels[selectedSound]}</span>
-            </div>
-          }
-        >
-          <div className="focus-card__top">
-            <div className="preset-row">
-              {focusPresets.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  className={focusMinutes === preset ? 'preset active' : 'preset'}
-                  onClick={() => setFocusMinutes(preset)}
-                >
-                  {preset} دقیقه
-                </button>
-              ))}
-            </div>
+            <SectionCard title="کارهای امروز" subtitle="با تیک‌زدن، کار از لیست امروز حذف و در پیشرفت ثبت می‌شود">
+              <div className="schedule-list">
+                {visibleBlocks.length ? (
+                  visibleBlocks.map((block) => (
+                    <label key={block.id} className="schedule-item" data-category={block.category}>
+                      <input
+                        type="checkbox"
+                        checked={false}
+                        onChange={() => toggleBlock(selectedDateKey, block.id)}
+                      />
+                      <div className="schedule-item__time">{block.start}</div>
+                      <div className="schedule-item__body">
+                        <div className="schedule-item__title-row">
+                          <strong>{block.title}</strong>
+                          {block.autoGenerated ? <span className="mini-badge">از برنامه</span> : null}
+                        </div>
+                        {block.end ? <span className="schedule-item__range">تا {block.end}</span> : null}
+                        {block.note ? <p>{block.note}</p> : null}
+                      </div>
+                    </label>
+                  ))
+                ) : (
+                  <p className="empty-state">عالی؛ کارهای امروز تمام شد.</p>
+                )}
+              </div>
+            </SectionCard>
 
-            <label className="sound-select">
-              <span>فضای پخش</span>
-              <select
-                value={selectedSound}
-                onChange={(event) => setSelectedSound(event.target.value as Soundscape)}
-              >
-                {Object.entries(soundLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+            <SectionCard title="عادت‌ها و حداقل‌ها" subtitle="روز بد داشته باش، روز صفر هرگز">
+              <div className="habit-groups">
+                {(Object.keys(habitGroupLabels) as Array<keyof typeof habitGroupLabels>).map((groupKey) => {
+                  const items = groupedVisibleHabits[groupKey]
 
-          <div className="timer-shell">
-            <div className="timer-orb">
-              <span>{formatTimer(remainingSeconds)}</span>
-              <small>{isRunning ? 'در حال تمرکز' : 'آماده برای شروع'}</small>
-            </div>
+                  if (!items.length) {
+                    return null
+                  }
 
-            <div className="timer-actions">
-              <button type="button" className="primary-btn" onClick={() => void handleToggleTimer()}>
-                {isRunning ? <Pause size={18} /> : <Play size={18} />}
-                {isRunning ? 'توقف موقت' : 'شروع تمرکز'}
-              </button>
-              <button type="button" className="ghost-btn" onClick={() => void handleResetTimer()}>
-                <RotateCcw size={18} />
-                بازنشانی
-              </button>
-            </div>
-          </div>
+                  return (
+                    <div key={groupKey} className="habit-group">
+                      <h3>{habitGroupLabels[groupKey]}</h3>
+                      <div className="habit-list">
+                        {items.map((habit) => (
+                          <button
+                            key={habit.id}
+                            type="button"
+                            className="habit-pill"
+                            onClick={() => toggleHabit(selectedDateKey, habit.id)}
+                          >
+                            <div>
+                              <strong>{habit.title}</strong>
+                              <span>{habit.description}</span>
+                            </div>
+                            <CheckCircle2 size={18} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                {!visibleHabits.length ? <p className="empty-state">همه عادت‌های امروز ثبت شد.</p> : null}
+              </div>
+            </SectionCard>
 
-          <div className="focus-history">
-            <h3>آخرین سشن‌ها</h3>
-            <div className="focus-history__list">
-              {lastFocusSessions.length ? (
-                lastFocusSessions.map((session) => (
-                  <div key={session.id} className="focus-history__item">
-                    <strong>{session.durationMinutes} دقیقه</strong>
-                    <span>{formatPersianDate(session.dateKey, { month: 'short', day: 'numeric' })}</span>
-                    <small>{soundLabels[session.sound]}</small>
-                  </div>
-                ))
-              ) : (
-                <p className="empty-state">اولین سشن تمرکزت را شروع کن تا اینجا ثبت شود.</p>
-              )}
-            </div>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="روند رشد هفتگی"
-          subtitle="هر ستون را از ۱ تا ۵ امتیاز بده تا پیشرفتت دیده شود"
-          className="progress-card"
-        >
-          <div className="rating-grid">
-            {weeklyRatings.map((rating) => (
-              <label key={rating.id} className="rating-card">
-                <div className="rating-card__header">
-                  <strong>{rating.title}</strong>
-                  <span>{persistedRatings[rating.id] ?? 3} / ۵</span>
-                </div>
-                <p>{rating.description}</p>
+            <SectionCard title="افزودن کار یا جلسه" subtitle="اگر چیزی خارج از برنامه پیش آمد، سریع ثبت کن">
+              <div className="quick-form">
                 <input
-                  type="range"
-                  min={1}
-                  max={5}
-                  step={1}
-                  value={persistedRatings[rating.id] ?? 3}
-                  onChange={(event) => setWeeklyRating(rating.id, Number(event.target.value))}
-                  style={{ accentColor: rating.color }}
+                  type="text"
+                  value={quickTitle}
+                  onChange={(event) => setQuickTitle(event.target.value)}
+                  placeholder="مثلاً جلسه مدرسه یا خرید ضروری"
                 />
-              </label>
-            ))}
-          </div>
-          <ProgressChart data={chartData} />
-        </SectionCard>
+                <select
+                  value={quickCategory}
+                  onChange={(event) => setQuickCategory(event.target.value as BlockCategory)}
+                >
+                  <option value="focus">تمرکز</option>
+                  <option value="study">مطالعه</option>
+                  <option value="family">خانواده</option>
+                  <option value="custom">سایر</option>
+                </select>
+                <input
+                  type="text"
+                  value={quickDuration}
+                  onChange={(event) => setQuickDuration(event.target.value)}
+                  placeholder="مدت تقریبی"
+                />
+                <button type="button" className="primary-btn" onClick={handleAddQuickTask}>
+                  <Plus size={18} />
+                  افزودن
+                </button>
+              </div>
 
-        <SectionCard
-          title="اضافه‌کردن سریع برنامه یا جلسه"
-          subtitle="وقتی چیز تازه‌ای پیش آمد، با کمترین اصطکاک واردش کن"
-          className="capture-card"
-        >
-          <div className="quick-form">
-            <input
-              type="text"
-              value={quickTitle}
-              onChange={(event) => setQuickTitle(event.target.value)}
-              placeholder="مثلاً جلسه مدرسه، خرید ضروری یا مطالعه اضافه"
-            />
-            <select
-              value={quickCategory}
-              onChange={(event) => setQuickCategory(event.target.value as BlockCategory)}
+              <div className="quick-list">
+                {quickTasksForDay.length ? (
+                  quickTasksForDay.map((task) => (
+                    <div key={task.id} className="quick-list__item">
+                      <div>
+                        <strong>{task.title}</strong>
+                        <span>{task.durationLabel ? `${task.durationLabel} دقیقه` : 'بدون مدت مشخص'}</span>
+                      </div>
+                      <button type="button" onClick={() => removeQuickTask(task.id)} aria-label="حذف">
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-state">هنوز کار سفارشی برای امروز نداری.</p>
+                )}
+              </div>
+            </SectionCard>
+          </section>
+        ) : null}
+
+        {activeTab === 'progress' ? (
+          <section className="page-stack">
+            <SectionCard
+              title="روند پیشرفت"
+              subtitle="هر تیک امروز، خودکار نمودار هفته، ماه و سال را جلو می‌برد"
             >
-              <option value="focus">تمرکز</option>
-              <option value="study">مطالعه</option>
-              <option value="family">خانواده</option>
-              <option value="custom">سایر</option>
-            </select>
-            <input
-              type="text"
-              value={quickDuration}
-              onChange={(event) => setQuickDuration(event.target.value)}
-              placeholder="مدت تقریبی"
-            />
-            <button type="button" className="primary-btn" onClick={handleAddQuickTask}>
-              <Plus size={18} />
-              افزودن
-            </button>
-          </div>
+              <div className="range-row">
+                {(
+                  [
+                    ['week', 'هفته'],
+                    ['month', 'ماه'],
+                    ['year', 'سال'],
+                  ] as const
+                ).map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={progressRange === value ? 'preset active' : 'preset'}
+                    onClick={() => setProgressRange(value)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
 
-          <div className="quick-list">
-            {quickTasksForDay.length ? (
-              quickTasksForDay.map((task) => (
-                <div key={task.id} className="quick-list__item">
-                  <div>
-                    <strong>{task.title}</strong>
-                    <span>{task.durationLabel ? `${task.durationLabel} دقیقه` : 'بدون مدت مشخص'}</span>
+              <div className="progress-hero">
+                <div>
+                  <p>پیشرفت {rangeLabel}</p>
+                  <strong>{progressSummary.percent}%</strong>
+                </div>
+                <div className="progress-hero__bars">
+                  <span>{progressSummary.doneBlocks} کار انجام‌شده</span>
+                  <span>{progressSummary.doneHabits} عادت ثبت‌شده</span>
+                  <span>{progressSummary.focusMinutes} دقیقه تمرکز</span>
+                </div>
+              </div>
+
+              <ProgressChart data={progressSummary.chart} />
+            </SectionCard>
+
+            <SectionCard title="خلاصه خودکار" subtitle="این اعداد از روی تیک‌های واقعی ساخته می‌شوند">
+              <div className="summary-grid">
+                <article>
+                  <p>کارها</p>
+                  <strong>
+                    {progressSummary.doneBlocks} از {progressSummary.expectedBlocks}
+                  </strong>
+                </article>
+                <article>
+                  <p>عادت‌ها</p>
+                  <strong>
+                    {progressSummary.doneHabits} از {progressSummary.expectedHabits}
+                  </strong>
+                </article>
+                <article>
+                  <p>تمرکز</p>
+                  <strong>{progressSummary.focusMinutes} دقیقه</strong>
+                </article>
+              </div>
+            </SectionCard>
+          </section>
+        ) : null}
+
+        {activeTab === 'focus' ? (
+          <section className="page-stack">
+            <SectionCard
+              title="حالت تمرکز"
+              subtitle="یک بازه کار عمیق بگذار و بعد استراحت کن"
+              action={
+                <span className="pill-soft">
+                  <Timer size={14} />
+                  {timerMode === 'focus' ? 'بازه تمرکز' : 'استراحت'}
+                </span>
+              }
+            >
+              <div className="focus-card__top">
+                <div>
+                  <p className="field-label">مدت تمرکز</p>
+                  <div className="preset-row">
+                    {focusPresets.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={focusMinutes === preset && timerMode === 'focus' ? 'preset active' : 'preset'}
+                        onClick={() => {
+                          setFocusMinutes(preset)
+                          setTimerMode('focus')
+                        }}
+                      >
+                        {preset} دقیقه
+                      </button>
+                    ))}
                   </div>
-                  <button type="button" onClick={() => removeQuickTask(task.id)} aria-label="حذف">
-                    <Trash2 size={16} />
+                </div>
+
+                <div>
+                  <p className="field-label">مدت استراحت</p>
+                  <div className="preset-row">
+                    {restPresets.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className={restMinutes === preset ? 'preset active' : 'preset'}
+                        onClick={() => setRestMinutes(preset)}
+                      >
+                        {preset} دقیقه
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="sound-grid">
+                {(Object.keys(soundLabels) as Soundscape[]).map((sound) => (
+                  <button
+                    key={sound}
+                    type="button"
+                    className={selectedSound === sound ? 'sound-card active' : 'sound-card'}
+                    onClick={() => void handleSelectSound(sound)}
+                  >
+                    <strong>{soundLabels[sound]}</strong>
+                    <span>{soundHints[sound]}</span>
+                    {selectedSound === sound && isPreviewingSound ? <small>در حال پخش</small> : null}
+                  </button>
+                ))}
+              </div>
+
+              <div className="timer-shell">
+                <div className={timerMode === 'rest' ? 'timer-orb rest' : 'timer-orb'}>
+                  <span>{formatTimer(remainingSeconds)}</span>
+                  <small>
+                    {isRunning
+                      ? timerMode === 'focus'
+                        ? 'در حال تمرکز'
+                        : 'در حال استراحت'
+                      : timerMode === 'focus'
+                        ? 'آماده برای شروع'
+                        : 'نوبت استراحت'}
+                  </small>
+                </div>
+
+                <div className="timer-actions">
+                  <button type="button" className="primary-btn" onClick={() => void handleToggleTimer()}>
+                    {isRunning ? <Pause size={18} /> : <Play size={18} />}
+                    {isRunning ? 'توقف موقت' : timerMode === 'focus' ? 'شروع تمرکز' : 'شروع استراحت'}
+                  </button>
+                  <button type="button" className="ghost-btn" onClick={() => void handleResetTimer()}>
+                    <RotateCcw size={18} />
+                    از نو
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost-btn"
+                    onClick={() => {
+                      setTimerMode('rest')
+                      setIsRunning(false)
+                      setRemainingSeconds(restMinutes * 60)
+                      void stopAmbientSound()
+                      setIsPreviewingSound(false)
+                    }}
+                  >
+                    <Coffee size={18} />
+                    برو به استراحت
                   </button>
                 </div>
-              ))
-            ) : (
-              <p className="empty-state">برای این روز هنوز برنامه سفارشی اضافه نکرده‌ای.</p>
-            )}
-          </div>
-        </SectionCard>
+              </div>
+            </SectionCard>
 
-        <SectionCard
-          title="محاسبه شب و فردای روشن"
-          subtitle="یادداشت روزت را بنویس و فقط سه اولویت فردا را مشخص کن"
-          className="reflection-card"
-        >
-          <div className="reflection-grid">
-            <label>
-              <span>مرور امروز</span>
+            <SectionCard title="آخرین بازه‌های تمرکز" subtitle="ثبت خودکار بعد از پایان هر بازه">
+              <div className="focus-history__list">
+                {lastFocusSessions.length ? (
+                  lastFocusSessions.map((session) => (
+                    <div key={session.id} className="focus-history__item">
+                      <strong>{session.durationMinutes} دقیقه</strong>
+                      <span>{formatPersianDate(session.dateKey, { month: 'short', day: 'numeric' })}</span>
+                      <small>{soundLabels[session.sound]}</small>
+                    </div>
+                  ))
+                ) : (
+                  <p className="empty-state">هنوز بازه تمرکزی ثبت نشده است.</p>
+                )}
+              </div>
+            </SectionCard>
+          </section>
+        ) : null}
+
+        {activeTab === 'review' ? (
+          <section className="page-stack">
+            <SectionCard title="محاسبه روز" subtitle="مرور کوتاه امروز و ثبت کارهای فردا">
+              <div className="review-stats">
+                <article>
+                  <p>کارهای انجام‌شده امروز</p>
+                  <strong>{completedBlocks.length}</strong>
+                </article>
+                <article>
+                  <p>عادت‌های ثبت‌شده امروز</p>
+                  <strong>{completedHabits.length}</strong>
+                </article>
+                <article>
+                  <p>پیشرفت امروز</p>
+                  <strong>{todayPercent}%</strong>
+                </article>
+              </div>
+            </SectionCard>
+
+            <SectionCard title="مرور امروز" subtitle="چه چیزی خوب بود؟ کجا نیاز به جبران داری؟">
               <textarea
-                rows={6}
+                rows={8}
                 value={noteValue}
                 onChange={(event) => setNote(selectedDateKey, event.target.value)}
-                placeholder="چه چیزی خوب بود؟ کجا نیاز به جبران دارم؟"
+                placeholder="مرور کوتاه امروز را اینجا بنویس..."
               />
-            </label>
+            </SectionCard>
 
-            <label>
-              <span>سه کار فردا</span>
+            <SectionCard title="یادآوری فردا" subtitle="فقط سه اولویت مهم فردا را ثبت کن">
               <textarea
                 rows={6}
                 value={tomorrowText}
@@ -569,13 +647,31 @@ function App() {
                       .filter(Boolean),
                   )
                 }
-                placeholder="هر خط یک اولویت"
+                placeholder={'هر خط یک کار\nمثلاً مطالعه کتاب ماه\nمثلاً تماس با خانواده'}
               />
-            </label>
-          </div>
-        </SectionCard>
-      </section>
-    </main>
+            </SectionCard>
+          </section>
+        ) : null}
+      </main>
+
+      <nav className="bottom-nav" aria-label="منوی اصلی">
+        {tabs.map((tab) => {
+          const Icon = tab.icon
+
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              className={activeTab === tab.id ? 'nav-item active' : 'nav-item'}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <Icon size={20} />
+              <span>{tab.label}</span>
+            </button>
+          )
+        })}
+      </nav>
+    </div>
   )
 }
 

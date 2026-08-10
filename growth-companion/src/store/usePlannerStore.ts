@@ -1,20 +1,26 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
-import { weeklyRatings } from '../data/appData'
 import type { BlockCategory, FocusSession, QuickTask, Soundscape } from '../types'
 import { toDateKey } from '../utils/date'
 
+export type ThemeMode = 'dark' | 'light'
+export type AppTab = 'today' | 'progress' | 'focus' | 'review'
+
 interface PlannerState {
   selectedDateKey: string
+  activeTab: AppTab
+  theme: ThemeMode
   completedBlocksByDate: Record<string, string[]>
   completedHabitsByDate: Record<string, string[]>
   quickTasks: QuickTask[]
   focusSessions: FocusSession[]
   notesByDate: Record<string, string>
   tomorrowByDate: Record<string, string[]>
-  weeklyRatings: Record<string, number>
   setSelectedDate: (dateKey: string) => void
+  setActiveTab: (tab: AppTab) => void
+  setTheme: (theme: ThemeMode) => void
+  toggleTheme: () => void
   toggleBlock: (dateKey: string, blockId: string) => void
   toggleHabit: (dateKey: string, habitId: string) => void
   addQuickTask: (dateKey: string, title: string, category: BlockCategory, durationLabel?: string) => void
@@ -22,10 +28,7 @@ interface PlannerState {
   addFocusSession: (dateKey: string, durationMinutes: number, sound: Soundscape) => void
   setNote: (dateKey: string, note: string) => void
   setTomorrowLines: (dateKey: string, lines: string[]) => void
-  setWeeklyRating: (ratingId: string, value: number) => void
 }
-
-const defaultRatings = Object.fromEntries(weeklyRatings.map((rating) => [rating.id, 3]))
 
 const toggleCollection = (collection: Record<string, string[]>, key: string, itemId: string) => {
   const current = collection[key] ?? []
@@ -43,14 +46,21 @@ export const usePlannerStore = create<PlannerState>()(
   persist(
     (set) => ({
       selectedDateKey: toDateKey(new Date()),
+      activeTab: 'today',
+      theme: 'dark',
       completedBlocksByDate: {},
       completedHabitsByDate: {},
       quickTasks: [],
       focusSessions: [],
       notesByDate: {},
       tomorrowByDate: {},
-      weeklyRatings: defaultRatings,
       setSelectedDate: (dateKey) => set({ selectedDateKey: dateKey }),
+      setActiveTab: (tab) => set({ activeTab: tab }),
+      setTheme: (theme) => set({ theme }),
+      toggleTheme: () =>
+        set((state) => ({
+          theme: state.theme === 'dark' ? 'light' : 'dark',
+        })),
       toggleBlock: (dateKey, blockId) =>
         set((state) => ({
           completedBlocksByDate: toggleCollection(state.completedBlocksByDate, dateKey, blockId),
@@ -103,17 +113,10 @@ export const usePlannerStore = create<PlannerState>()(
             [dateKey]: lines.filter(Boolean).slice(0, 3),
           },
         })),
-      setWeeklyRating: (ratingId, value) =>
-        set((state) => ({
-          weeklyRatings: {
-            ...state.weeklyRatings,
-            [ratingId]: value,
-          },
-        })),
     }),
     {
       name: 'roshdyar-store',
-      version: 1,
+      version: 2,
     },
   ),
 )

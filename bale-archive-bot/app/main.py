@@ -1,0 +1,305 @@
+"""Application entrypoint: polling or webhook mode.
+
+Polling (Bale has no long-polling): a short-interval adaptive loop with a
+manually computed offset. Webhook: FastAPI on a secret random path, ports
+443/88 are terminated by Caddy in front.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import signal
+from collections.abc import AsyncIterator
+from typing import Any
+
+import uvicorn
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from fastapi import FastAPI, Request, Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+from app.bale.capabilities import probe_capabilities
+from app.bale.client import BaleClient
+from app.bale.errors import BaleAPIError, NetworkError
+from app.bale.methods import BaleAPI
+from app.bale.models import Update
+from app.config import RunMode, Settings, get_settings
+from app.core.context import BotContext
+from app.core.dispatcher import Dispatcher
+from app.core.ratelimit import OutboundRateLimiter
+from app.db.session import Database
+from app.observability import metrics as app_metrics
+from app.observability.health import health_payload
+from app.observability.logging import configure_logging, get_logger
+from app.workers.digest import run_weekly_digest
+from app.workers.media_worker import build_storage, run_media_once
+from app.workers.outbox import run_outbox_once
+from app.workers.ttl_sweeper import run_expiry_once, run_nightly_cleanup, run_reminders_once
+
+logger = get_logger(__name__)
+
+_WEBHOOK_BODY_LIMIT = 20 * 1024 * 1024
+
+
+class Application:
+    """Owns the runtime: context, dispatcher, scheduler and shutdown."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        limiter = OutboundRateLimiter(
+            settings.rate_global_rps,
+            settings.rate_per_chat_per_sec,
+            settings.rate_per_group_per_min,
+        )
+        client = BaleClient(settings.bale_bot_token, settings.bale_api_base, limiter)
+        self.api = BaleAPI(client)
+        self.db = Database(settings.database_url, settings.db_pool_size, settings.db_max_overflow)
+        self.ctx: BotContext | None = None
+        self.dispatcher: Dispatcher | None = None
+        self.scheduler = AsyncIOScheduler(timezone=settings.tz)
+        self.stop_event = asyncio.Event()
+        self.started_event = asyncio.Event()
+        self._inflight: set[asyncio.Task[None]] = set()
+
+    async def startup(self) -> None:
+        redis_client: Any | None = None
+        if self.settings.redis_url and self.settings.state_backend != "postgres":
+            try:
+                import redis.asyncio as aioredis
+
+                redis_client = aioredis.from_url(
+                    self.settings.redis_url, socket_timeout=3, socket_connect_timeout=3
+                )
+                await redis_client.ping()
+                logger.info("redis_connected")
+            except (ConnectionError, OSError, TimeoutError) as exc:
+                logger.warning("redis_unavailable_falling_back", error=str(exc))
+                redis_client = None
+
+        from app.bale.capabilities import Capabilities
+
+        caps = Capabilities()
+        try:
+            caps = await probe_capabilities(self.api)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("capability_probe_failed", error=str(exc))
+
+        self.ctx = BotContext(
+            settings=self.settings, api=self.api, db=self.db, caps=caps, redis=redis_client
+        )
+        try:
+            me = await self.api.get_me()
+            self.ctx.bot_username = me.username or ""
+            self.ctx.bot_user_id = me.id
+            logger.info("bot_identified", username=me.username, bot_id=me.id)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("get_me_failed", error=str(exc))
+
+        self.dispatcher = Dispatcher(self.ctx)
+        self._register_jobs()
+        self.scheduler.start()
+
+        # Verify archive chat access early — the whole gateway depends on it.
+        try:
+            await self.api.get_chat(self.settings.archive_chat_id)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("archive_chat_check_failed", error=str(exc))
+
+        self.started_event.set()
+
+    def _register_jobs(self) -> None:
+        assert self.ctx is not None
+        ctx = self.ctx
+        storage = build_storage(ctx)
+        self.scheduler.add_job(
+            run_outbox_once, IntervalTrigger(seconds=30), args=[ctx], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_media_once, IntervalTrigger(seconds=20), args=[ctx, storage], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_reminders_once, IntervalTrigger(seconds=60), args=[ctx], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_expiry_once, IntervalTrigger(seconds=60), args=[ctx], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_nightly_cleanup, CronTrigger(hour=3, minute=30), args=[ctx], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_weekly_digest,
+            CronTrigger(day_of_week="thu", hour=20, minute=0),
+            args=[ctx],
+            max_instances=1,
+        )
+        assert self.dispatcher is not None
+        self.scheduler.add_job(
+            self.dispatcher.process_spool, IntervalTrigger(seconds=60), max_instances=1
+        )
+
+    async def shutdown(self) -> None:
+        """Graceful: stop intake, drain in-flight work (≤30s), close pools."""
+        logger.info("shutdown_started")
+        self.stop_event.set()
+        if self.scheduler.running:
+            self.scheduler.shutdown(wait=False)
+        if self.dispatcher is not None:
+            await self.dispatcher.albums.drain()
+        if self._inflight:
+            done, pending = await asyncio.wait(self._inflight, timeout=30)
+            for task in pending:
+                task.cancel()
+            logger.info("inflight_drained", done=len(done), cancelled=len(pending))
+        await self.api.client.close()
+        await self.db.dispose()
+        logger.info("shutdown_complete")
+
+    def _track(self, coro: Any) -> asyncio.Task[None]:
+        task: asyncio.Task[None] = asyncio.create_task(coro)
+        self._inflight.add(task)
+        task.add_done_callback(self._inflight.discard)
+        return task
+
+    # ─── Polling ───
+
+    async def run_polling(self) -> None:
+        """Short-interval adaptive polling with a manually computed offset."""
+        assert self.dispatcher is not None
+        offset: int | None = None
+        # Resume from the last processed update after a restart.
+        try:
+            async with self.db.session() as session:
+                from app.db.repositories.misc import ProcessedUpdateRepository
+
+                last = await ProcessedUpdateRepository(session).last_update_id()
+                if last is not None:
+                    offset = last + 1
+        except Exception as exc:
+            if type(exc).__module__.startswith(("asyncpg", "sqlalchemy")):
+                logger.warning("offset_restore_failed", error=str(exc))
+            else:
+                raise
+
+        logger.info("polling_started", offset=offset)
+        while not self.stop_event.is_set():
+            try:
+                updates = await self.api.get_updates(offset=offset, limit=100)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("get_updates_failed", error=str(exc))
+                await self._sleep(self.settings.polling_idle_sleep)
+                continue
+
+            if updates:
+                offset = max(u.update_id for u in updates) + 1
+                for update in updates:
+                    if self.stop_event.is_set():
+                        break
+                    task = self._track(self.dispatcher.dispatch(update))
+                    await task
+                await self._sleep(self.settings.polling_busy_sleep)
+            else:
+                await self._sleep(self.settings.polling_idle_sleep)
+        logger.info("polling_stopped", offset=offset)
+
+    async def _sleep(self, seconds: float) -> None:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(self.stop_event.wait(), timeout=seconds)
+
+    # ─── Webhook (FastAPI) ───
+
+    def build_webapp(self) -> FastAPI:
+        settings = self.settings
+        app_instance = self
+
+        @contextlib.asynccontextmanager
+        async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+            await app_instance.startup()
+            if settings.run_mode is RunMode.WEBHOOK:
+                try:
+                    await app_instance.api.set_webhook(settings.webhook_url)
+                    logger.info("webhook_registered")
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.error("webhook_registration_failed", error=str(exc))
+            yield
+            await app_instance.shutdown()
+
+        web = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+
+        @web.get("/healthz")
+        async def healthz() -> Response:
+            assert app_instance.ctx is not None
+            healthy, payload = await health_payload(app_instance.ctx)
+            import json
+
+            return Response(
+                content=json.dumps(payload),
+                media_type="application/json",
+                status_code=200 if healthy else 503,
+            )
+
+        if settings.metrics_enabled:
+
+            @web.get("/metrics")
+            async def metrics_endpoint() -> Response:
+                return Response(
+                    content=generate_latest(app_metrics.registry),
+                    media_type=CONTENT_TYPE_LATEST,
+                )
+
+        if settings.run_mode is RunMode.WEBHOOK:
+
+            @web.post(settings.webhook_path)
+            async def webhook(request: Request) -> Response:
+                body = await request.body()
+                if len(body) > _WEBHOOK_BODY_LIMIT:
+                    return Response(status_code=413)
+                try:
+                    update = Update.model_validate_json(body)
+                except ValueError:
+                    logger.warning("webhook_invalid_body")
+                    return Response(status_code=200)
+                assert app_instance.dispatcher is not None
+                app_instance._track(app_instance.dispatcher.dispatch(update))
+                return Response(status_code=200)
+
+        return web
+
+
+async def _run_polling_mode(app_instance: Application) -> None:
+    """Polling mode still serves /healthz and /metrics on port 8000."""
+    web = app_instance.build_webapp()
+    config = uvicorn.Config(web, host="0.0.0.0", port=8000, log_level="warning")  # noqa: S104
+    server = uvicorn.Server(config)
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, app_instance.stop_event.set)
+
+    server_task = asyncio.create_task(server.serve())
+    # Wait for startup() inside lifespan before polling begins.
+    startup_wait = asyncio.create_task(app_instance.started_event.wait())
+    await asyncio.wait({server_task, startup_wait}, return_when=asyncio.FIRST_COMPLETED)
+    if not startup_wait.done():
+        startup_wait.cancel()
+    if app_instance.dispatcher is not None:
+        await app_instance.run_polling()
+    server.should_exit = True
+    await server_task
+
+
+def main() -> None:
+    settings = get_settings()
+    configure_logging(settings.log_level, settings.log_format)
+    app_instance = Application(settings)
+
+    if settings.run_mode is RunMode.POLLING:
+        asyncio.run(_run_polling_mode(app_instance))
+    else:
+        web = app_instance.build_webapp()
+        uvicorn.run(web, host="0.0.0.0", port=8000, log_level="warning")  # noqa: S104
+
+
+if __name__ == "__main__":
+    main()

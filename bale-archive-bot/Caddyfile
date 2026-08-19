@@ -1,0 +1,5 @@
+# Replace your.domain.example with the real domain pointed at this server.
+# Caddy obtains and renews the TLS certificate automatically.
+your.domain.example {
+	reverse_proxy app:8000
+}

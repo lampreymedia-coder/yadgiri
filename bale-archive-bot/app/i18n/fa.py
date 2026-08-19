@@ -448,6 +448,21 @@ def stats_report(
     return "\n".join(parts)
 
 
+TAG_INACTIVE_SUFFIX = " (غیرفعال)"
+
+
+def tag_title_with_state(title_fa: str, is_active: bool) -> str:
+    return title_fa if is_active else f"{title_fa}{TAG_INACTIVE_SUFFIX}"
+
+
+def range_between(label: str, to_date: str) -> str:
+    return f"{label} تا {fa_digits(to_date)}"
+
+
+def matrix_row_total(total: int) -> str:
+    return f"جمع {fa_digits(total)}"
+
+
 def range_label(kind: str) -> str:
     labels = {
         "today": "امروز",

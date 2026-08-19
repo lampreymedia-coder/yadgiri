@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -18,6 +19,16 @@ from app.observability import metrics
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def is_connectivity_error(exc: BaseException) -> bool:
+    """True for errors that indicate the database itself is unreachable."""
+    if isinstance(exc, ConnectionError | OSError | TimeoutError):
+        return True
+    if isinstance(exc, OperationalError | InterfaceError):
+        return True
+    return bool(isinstance(exc, DBAPIError) and exc.connection_invalidated)
+
 
 _FAILURE_THRESHOLD = 5
 _RECOVERY_SECONDS = 30.0
@@ -71,18 +82,26 @@ class Database:
         max_overflow: int = 10,
         command_timeout: float = 10.0,
     ) -> None:
-        engine_kwargs: dict[str, object] = {
-            "pool_pre_ping": True,
-            "pool_recycle": 1800,
-        }
+        engine_kwargs: dict[str, object] = {}
         if url.startswith("postgresql"):
             engine_kwargs.update(
                 {
+                    "pool_pre_ping": True,
+                    "pool_recycle": 1800,
                     "pool_size": pool_size,
                     "max_overflow": max_overflow,
                     "connect_args": {"command_timeout": command_timeout},
                 }
             )
+        elif url.startswith("sqlite"):
+            # SQLite (tests): shared connection for :memory:, generous lock
+            # timeout for file-based concurrency tests.
+            from sqlalchemy.pool import NullPool, StaticPool
+
+            if ":memory:" in url:
+                engine_kwargs.update({"poolclass": StaticPool})
+            else:
+                engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30}})
         self.engine: AsyncEngine = create_async_engine(url, **engine_kwargs)
         self.session_factory = async_sessionmaker(
             self.engine, expire_on_commit=False, class_=AsyncSession
@@ -100,9 +119,9 @@ class Database:
                 await self.breaker.record_failure()
                 raise
             except Exception as exc:
-                # Driver-level disconnects surface as DBAPI errors of various
-                # types; classify by module rather than swallowing anything.
-                if type(exc).__module__.startswith(("asyncpg", "sqlalchemy")):
+                # Only connectivity-class failures feed the breaker; logic
+                # errors (integrity, programming) must not open it.
+                if is_connectivity_error(exc):
                     await self.breaker.record_failure()
                 raise
             else:

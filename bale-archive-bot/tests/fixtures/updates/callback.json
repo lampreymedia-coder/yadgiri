@@ -1,0 +1,23 @@
+{
+  "update_id": 13,
+  "callback_query": {
+    "id": "cbq1",
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "message": {
+      "message_id": 55,
+      "date": 1755600000,
+      "chat": {
+        "id": 12345,
+        "type": "private"
+      },
+      "text": "wizard"
+    },
+    "data": "1|yes|k7f2qa|"
+  }
+}

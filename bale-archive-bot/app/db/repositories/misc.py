@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AppSetting, AuditLog, MediaFile, ProcessedUpdate, StorageStatus
@@ -26,11 +27,13 @@ class ProcessedUpdateRepository:
             )
             result = await self._session.execute(stmt)
             return bool(getattr(result, "rowcount", 0))
-        existing = await self._session.get(ProcessedUpdate, update_id)
-        if existing is not None:
+        # Non-Postgres fallback: a savepoint absorbs the duplicate-key race.
+        try:
+            async with self._session.begin_nested():
+                self._session.add(ProcessedUpdate(update_id=update_id))
+                await self._session.flush()
+        except IntegrityError:
             return False
-        self._session.add(ProcessedUpdate(update_id=update_id))
-        await self._session.flush()
         return True
 
     async def purge_older_than(self, days: int = 7) -> int:

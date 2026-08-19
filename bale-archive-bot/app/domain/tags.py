@@ -7,7 +7,11 @@ import re
 from app.domain.classify import normalize_fa
 
 _SLUG_SANITIZE_RE = re.compile(r"[^a-z0-9_]+")
-_HASHTAG_SANITIZE_RE = re.compile(r"[^\w\u0600-\u06FF_]+")
+# Allowed hashtag characters: Latin word chars plus Arabic/Persian letters
+# and digits — Arabic punctuation (؟ ، ؛ ٪) is explicitly excluded.
+_HASHTAG_SANITIZE_RE = re.compile(
+    r"[^0-9A-Za-z_\u0621-\u063A\u0641-\u064A\u0660-\u0669\u066E-\u06D3\u06F0-\u06F9]+"
+)
 
 # Transliteration used only for building an ASCII slug from a Persian title.
 _FA_TO_ASCII: dict[str, str] = {

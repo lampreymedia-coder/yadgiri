@@ -30,7 +30,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, PortableJSON
+from app.db.base import Base, BigIntPK, PortableJSON
 
 
 def utcnow() -> datetime:
@@ -98,7 +98,7 @@ def _enum(py_enum: type[enum.StrEnum], name: str) -> Enum:
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     bale_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     username: Mapped[str | None] = mapped_column(Text)
     first_name: Mapped[str | None] = mapped_column(Text)
@@ -126,7 +126,7 @@ class User(Base):
 class Group(Base):
     __tablename__ = "groups"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     bale_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
     title: Mapped[str | None] = mapped_column(Text)
     chat_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -162,7 +162,7 @@ class Tag(Base):
 class Submission(Base):
     __tablename__ = "submissions"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     short_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id"))
@@ -244,7 +244,7 @@ class SubmissionTag(Base):
 class MediaFile(Base):
     __tablename__ = "media_files"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     submission_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
     )
@@ -311,7 +311,7 @@ class ProcessedUpdate(Base):
 class OutboxItem(Base):
     __tablename__ = "outbox"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(Text, nullable=False)
     target_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(PortableJSON(), nullable=False)
@@ -333,7 +333,7 @@ class OutboxItem(Base):
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     actor_user_id: Mapped[int | None] = mapped_column(BigInteger)
     action: Mapped[str] = mapped_column(Text, nullable=False)
     entity_type: Mapped[str | None] = mapped_column(Text)

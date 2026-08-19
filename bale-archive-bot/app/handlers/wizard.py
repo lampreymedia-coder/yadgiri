@@ -125,7 +125,7 @@ def render_group_choice(groups: list[Group], sid: str) -> tuple[str, InlineKeybo
 def render_tag_count(
     active_tag_count: int, sid: str, can_back: bool
 ) -> tuple[str, InlineKeyboardMarkup]:
-    # Counts are never hardcoded: offer 1..min(3, n); "همه" appears when n>3.
+    # Counts are never hardcoded: offer 1..min(3, n); "all" appears when n>3.
     numeric_buttons: list[InlineKeyboardButton] = []
     for count in range(1, min(3, active_tag_count) + 1):
         numeric_buttons.append(

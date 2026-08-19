@@ -60,6 +60,7 @@ class BaleClient:
         limiter: OutboundLimiter | None = None,
         request_timeout: float = 30.0,
         connect_timeout: float = 10.0,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._token = token
         self._base = base_url.rstrip("/")
@@ -67,6 +68,7 @@ class BaleClient:
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(request_timeout, connect=connect_timeout),
             follow_redirects=False,
+            transport=transport,
         )
 
     @property

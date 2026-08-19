@@ -1,0 +1,26 @@
+{
+  "update_id": 12,
+  "message": {
+    "message_id": 22,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "text": "متن فوروارد شده",
+    "forward_from": {
+      "id": 777,
+      "is_bot": false,
+      "first_name": "حسین",
+      "username": "hossein"
+    }
+  }
+}

@@ -92,7 +92,7 @@ def parse_range(args: list[str]) -> tuple[datetime | None, datetime | None, str]
             parsed = _parse_jalali(arg[3:])
             if parsed is not None:
                 to_ts = parsed + timedelta(days=1)
-                label = f"{label} تا {fa.fa_digits(arg[3:])}"
+                label = fa.range_between(label, arg[3:])
     return from_ts, to_ts, label
 
 
@@ -109,7 +109,7 @@ async def send_stats(ctx: BotContext, session: AsyncSession, chat_id: int, args:
 
     tag_lines = [
         fa.bar_line(
-            t.title_fa + ("" if t.is_active else " (غیرفعال)"),
+            fa.tag_title_with_state(t.title_fa, t.is_active),
             t.items,
             t.share_pct,
             reports.text_bar(t.share_pct / 100.0),
@@ -171,7 +171,7 @@ async def send_top_tags(
     lines.extend(
         fa.top_tag_line(
             i,
-            t.title_fa + ("" if t.is_active else " (غیرفعال)"),
+            fa.tag_title_with_state(t.title_fa, t.is_active),
             t.hashtag,
             t.items,
             t.contributors,
@@ -240,7 +240,7 @@ async def send_type_report(
             f"{fa.content_type_name('video')} {fa.fa_digits(row.video_count)} · "
             f"{fa.content_type_name('audio')} {fa.fa_digits(row.audio_count)} · "
             f"{fa.content_type_name('document')} {fa.fa_digits(row.document_count)} — "
-            f"جمع {fa.fa_digits(row.total)}"
+            + fa.matrix_row_total(row.total)
         )
     await ctx.api.send_message(chat_id, "\n".join(lines))
 

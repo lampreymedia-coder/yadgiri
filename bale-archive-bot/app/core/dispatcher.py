@@ -49,10 +49,10 @@ class Dispatcher:
         metrics.updates_received.labels(kind=update.kind).inc()
         try:
             await self._dispatch_inner(update)
-        except (ConnectionError, OSError, TimeoutError) as exc:
-            await self._handle_infra_failure(update, exc)
         except Exception as exc:
-            if type(exc).__module__.startswith(("asyncpg", "sqlalchemy")):
+            from app.db.session import is_connectivity_error
+
+            if is_connectivity_error(exc):
                 await self._handle_infra_failure(update, exc)
             else:
                 await handle_update_error(self.ctx, update, exc)

@@ -9,9 +9,10 @@ from __future__ import annotations
 import secrets
 from enum import StrEnum
 from functools import lru_cache
+from typing import Annotated
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class RunMode(StrEnum):
@@ -57,10 +58,14 @@ class Settings(BaseSettings):
     polling_busy_sleep: float = Field(default=0.3, alias="POLLING_BUSY_SLEEP")
 
     # ─── Chats ───
-    archive_chat_id: int = Field(alias="ARCHIVE_CHAT_ID")
+    archive_chat_id: int | None = Field(default=None, alias="ARCHIVE_CHAT_ID")
     admin_chat_id: int | None = Field(default=None, alias="ADMIN_CHAT_ID")
-    admin_user_ids: list[int] = Field(default_factory=list, alias="ADMIN_USER_IDS")
-    allowed_group_ids: list[int] = Field(default_factory=list, alias="ALLOWED_GROUP_IDS")
+    admin_user_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=list, alias="ADMIN_USER_IDS"
+    )
+    allowed_group_ids: Annotated[list[int], NoDecode] = Field(
+        default_factory=list, alias="ALLOWED_GROUP_IDS"
+    )
 
     # ─── Behaviour ───
     ingest_mode: IngestMode = Field(default=IngestMode.HYBRID, alias="INGEST_MODE")

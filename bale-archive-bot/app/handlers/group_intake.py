@@ -16,7 +16,6 @@ from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.users import UserRepository
 from app.domain.classify import classify
-from app.domain.submission import SubmissionService
 from app.handlers.wizard import open_wizard, render_group_choice
 from app.i18n import fa
 from app.observability.logging import get_logger
@@ -35,6 +34,49 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
             if member.id == ctx.bot_user_id:
                 logger.info("bot_added_to_group", chat_id=message.chat.id)
                 await groups.set_active(group.id, True)
+                if message.from_user is not None:
+                    from app.handlers.admin import promote_first_owner
+
+                    await promote_first_owner(ctx, session, message.from_user)
+                title = message.chat.title or fa.fa_digits(message.chat.id)
+                from app.bale.keyboards import button, keyboard
+
+                markup = keyboard(
+                    [
+                        [
+                            button(
+                                fa.BTN_GROUP_IS_RESEARCH,
+                                "srg",
+                                "",
+                                str(message.chat.id),
+                            )
+                        ],
+                        [
+                            button(
+                                fa.BTN_GROUP_IS_ARCHIVE,
+                                "sar",
+                                "",
+                                str(message.chat.id),
+                            )
+                        ],
+                    ]
+                )
+                text = fa.bot_added_ask_role(title)
+                notified = False
+                notify_ids = set(ctx.runtime_admin_ids)
+                if message.from_user is not None:
+                    notify_ids.add(message.from_user.id)
+                for admin_id in notify_ids:
+                    try:
+                        await ctx.api.send_message(admin_id, text, markup)
+                        notified = True
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.info("bot_added_admin_notice_failed", error=str(exc))
+                if not notified:
+                    try:
+                        await ctx.api.send_message(message.chat.id, text, markup, is_group=True)
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.warning("bot_added_group_notice_failed", error=str(exc))
 
 
 def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:
@@ -63,6 +105,8 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
     """Process one buffered batch (single message or album) from a group."""
     primary = messages[0]
     if primary.from_user is None:
+        return
+    if ctx.archive_chat_id is not None and primary.chat.id == ctx.archive_chat_id:
         return
     if ctx.settings.ingest_mode is IngestMode.PRIVATE_FIRST:
         return
@@ -109,7 +153,7 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
             return
 
         classified = classify(messages[0])
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         result = await service.intake(
             messages, classified, user, group, raw_update=messages[0].raw()
         )
@@ -156,12 +200,14 @@ async def process_private_content(ctx: BotContext, message: Message) -> None:
 
         groups_repo = GroupRepository(session)
         active_groups = [
-            g for g in await groups_repo.list_active() if _is_allowed_group(ctx, g.bale_chat_id)
+            g
+            for g in await groups_repo.list_active()
+            if _is_allowed_group(ctx, g.bale_chat_id) and g.bale_chat_id != ctx.archive_chat_id
         ]
         target_group: Group | None = active_groups[0] if len(active_groups) == 1 else None
 
         classified = classify(message)
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         result = await service.intake(
             [message], classified, user, target_group, raw_update=message.raw()
         )

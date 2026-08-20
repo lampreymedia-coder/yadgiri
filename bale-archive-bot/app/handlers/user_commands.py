@@ -6,7 +6,6 @@ from app.bale.models import Message
 from app.core.context import BotContext
 from app.db.models import Group
 from app.db.repositories.users import UserRepository
-from app.domain.submission import SubmissionService
 from app.handlers.wizard import resume_wizard
 from app.i18n import fa
 from app.observability.logging import get_logger
@@ -27,7 +26,14 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
         )
         await users.set_private_chat(user.id, True)
         name = user.display_name or user.username or ""
-    await ctx.api.send_message(message.chat.id, fa.start_message(name))
+        from app.handlers.admin import promote_first_owner
+
+        promoted = await promote_first_owner(ctx, session, message.from_user)
+        if promoted or (ctx.is_runtime_admin(message.from_user.id) and ctx.archive_chat_id is None):
+            text = fa.start_owner_setup(name)
+        else:
+            text = fa.start_message(name)
+    await ctx.api.send_message(message.chat.id, text)
 
 
 async def handle_help(ctx: BotContext, message: Message) -> None:
@@ -43,7 +49,7 @@ async def handle_my(ctx: BotContext, message: Message) -> None:
         if user is None:
             await ctx.api.send_message(message.chat.id, fa.MY_EMPTY)
             return
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         items = await service.submissions.list_recent_by_user(user.id, limit=10)
         if not items:
             await ctx.api.send_message(message.chat.id, fa.MY_EMPTY)
@@ -66,7 +72,7 @@ async def handle_undo(ctx: BotContext, message: Message, args: list[str]) -> Non
         return
     short_id = args[0].strip().lower()
     async with ctx.db.session() as session:
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         submission = await service.submissions.get_by_short_id(short_id)
         users = UserRepository(session)
         user = await users.get_by_bale_id(message.from_user.id)

@@ -28,10 +28,32 @@ class BotContext:
     bot_user_id: int = 0
     redis: Any | None = None
     error_throttle: dict[str, float] = field(default_factory=dict)
+    archive_chat_id: int | None = None
+    admin_notify_chat_id: int | None = None
+    runtime_admin_ids: set[int] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)
+        if self.archive_chat_id is None:
+            self.archive_chat_id = self.settings.archive_chat_id
+        if self.admin_notify_chat_id is None:
+            self.admin_notify_chat_id = self.settings.admin_chat_id
+        self.runtime_admin_ids.update(self.settings.admin_user_ids)
 
     def state_store(self, session: AsyncSession) -> FallbackStateStore:
         redis_store = RedisStateStore(self.redis) if self.redis is not None else None
         return FallbackStateStore(redis_store, PostgresStateStore(session))
+
+    def is_runtime_admin(self, bale_user_id: int) -> bool:
+        return bale_user_id in self.runtime_admin_ids or self.settings.is_admin_user(bale_user_id)
+
+    def submission_service(self, session: AsyncSession) -> Any:
+        from app.domain.submission import SubmissionService
+
+        return SubmissionService(
+            session,
+            self.api,
+            self.settings,
+            archive_chat_id=self.archive_chat_id,
+            admin_chat_id=self.admin_notify_chat_id,
+        )

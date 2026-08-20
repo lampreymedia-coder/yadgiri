@@ -46,10 +46,21 @@ class IntakeResult:
 class SubmissionService:
     """Coordinates the archive-first gateway and publication."""
 
-    def __init__(self, session: AsyncSession, api: BaleAPI, settings: Settings) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        api: BaleAPI,
+        settings: Settings,
+        archive_chat_id: int | None = None,
+        admin_chat_id: int | None = None,
+    ) -> None:
         self._session = session
         self._api = api
         self._settings = settings
+        self._archive_chat_id = (
+            archive_chat_id if archive_chat_id is not None else settings.archive_chat_id
+        )
+        self._admin_chat_id = admin_chat_id if admin_chat_id is not None else settings.admin_chat_id
         self.submissions = SubmissionRepository(session)
         self.users = UserRepository(session)
         self.groups = GroupRepository(session)
@@ -72,27 +83,33 @@ class SubmissionService:
             content_type = ContentType.ALBUM
 
         # Step 2: copy every message to the private archive channel first.
+        # If no archive chat is configured yet, skip copy+delete (bootstrap
+        # mode): the original stays in the group so nothing can be lost.
         archive_ids: list[int] = []
         archived = True
         failure_reason: str | None = None
-        for message in messages:
-            try:
-                new_id = await self._api.copy_message(
-                    chat_id=self._settings.archive_chat_id,
-                    from_chat_id=message.chat.id,
-                    message_id=message.message_id,
-                )
-                archive_ids.append(new_id)
-            except (BaleAPIError, NetworkError) as exc:
-                archived = False
-                failure_reason = f"archive copy failed: {exc}"
-                logger.error(
-                    "archive_copy_failed",
-                    chat_id=message.chat.id,
-                    message_id=message.message_id,
-                    error=str(exc),
-                )
-                break
+        if self._archive_chat_id is None:
+            archived = True
+            failure_reason = None
+        else:
+            for message in messages:
+                try:
+                    new_id = await self._api.copy_message(
+                        chat_id=self._archive_chat_id,
+                        from_chat_id=message.chat.id,
+                        message_id=message.message_id,
+                    )
+                    archive_ids.append(new_id)
+                except (BaleAPIError, NetworkError) as exc:
+                    archived = False
+                    failure_reason = f"archive copy failed: {exc}"
+                    logger.error(
+                        "archive_copy_failed",
+                        chat_id=message.chat.id,
+                        message_id=message.message_id,
+                        error=str(exc),
+                    )
+                    break
 
         if not archived:
             # Do NOT delete; do NOT proceed. Alert the admin via outbox.
@@ -122,7 +139,7 @@ class SubmissionService:
             raw_update=raw_update,
             ttl_minutes=self._settings.submission_ttl_minutes,
         )
-        submission.archive_chat_id = self._settings.archive_chat_id
+        submission.archive_chat_id = self._archive_chat_id
         submission.archive_message_id = archive_ids[0] if archive_ids else None
         submission.meta = {
             **submission.meta,
@@ -148,7 +165,9 @@ class SubmissionService:
 
         # Step 4: delete originals — only now, after archive + DB succeeded.
         deleted = True
-        if group is not None:
+        if self._archive_chat_id is None:
+            deleted = False
+        elif group is not None:
             for message in messages:
                 try:
                     await self._api.delete_message(message.chat.id, message.message_id)
@@ -168,10 +187,10 @@ class SubmissionService:
         return IntakeResult(submission=submission, deleted_original=deleted, archived=True)
 
     async def _alert_admin_intake_failure(self, reason: str) -> None:
-        if self._settings.admin_chat_id is not None:
+        if self._admin_chat_id is not None:
             await self.outbox.enqueue(
                 "admin_notify",
-                self._settings.admin_chat_id,
+                self._admin_chat_id,
                 {"text": fa.admin_intake_failure_alert(reason)},
             )
 
@@ -211,21 +230,46 @@ class SubmissionService:
             sent = await self._api.send_message(group.bale_chat_id, caption, is_group=True)
             published_id = sent.message_id
         else:
-            assert submission.archive_message_id is not None
-            published_id = await self._api.copy_message(
-                chat_id=group.bale_chat_id,
-                from_chat_id=submission.archive_chat_id or self._settings.archive_chat_id,
-                message_id=submission.archive_message_id,
-                caption=caption,
-                is_group=True,
-            )
-            for extra_id in list(submission.meta.get("archive_message_ids", []))[1:]:
-                await self._api.copy_message(
+            source_chat = submission.archive_chat_id or self._archive_chat_id
+            source_msg = submission.archive_message_id
+            if source_chat is None or source_msg is None:
+                origin = submission.meta.get("origin_chat_id")
+                if origin is not None and submission.original_message_id is not None:
+                    sent = await self._api.send_message(
+                        group.bale_chat_id,
+                        caption,
+                        reply_to_message_id=submission.original_message_id,
+                        is_group=True,
+                    )
+                    published_id = sent.message_id
+                    if overflow:
+                        await self._api.send_message(
+                            group.bale_chat_id,
+                            overflow,
+                            reply_to_message_id=published_id,
+                            is_group=True,
+                        )
+                    submission.published_message_id = published_id
+                    await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
+                    metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
+                    return
+                sent = await self._api.send_message(group.bale_chat_id, caption, is_group=True)
+                published_id = sent.message_id
+            else:
+                published_id = await self._api.copy_message(
                     chat_id=group.bale_chat_id,
-                    from_chat_id=submission.archive_chat_id or self._settings.archive_chat_id,
-                    message_id=int(extra_id),
+                    from_chat_id=source_chat,
+                    message_id=source_msg,
+                    caption=caption,
                     is_group=True,
                 )
+                for extra_id in list(submission.meta.get("archive_message_ids", []))[1:]:
+                    await self._api.copy_message(
+                        chat_id=group.bale_chat_id,
+                        from_chat_id=source_chat,
+                        message_id=int(extra_id),
+                        is_group=True,
+                    )
         if overflow:
             await self._api.send_message(
                 group.bale_chat_id,
@@ -255,13 +299,27 @@ class SubmissionService:
             )
             submission.published_message_id = sent.message_id
         else:
-            assert submission.archive_message_id is not None
+            source_chat = submission.archive_chat_id or self._archive_chat_id
+            source_msg = submission.archive_message_id
+            if source_chat is None or source_msg is None:
+                origin = submission.meta.get("origin_chat_id")
+                if origin is not None:
+                    sent = await self._api.send_message(group.bale_chat_id, header, is_group=True)
+                    submission.published_message_id = sent.message_id
+                    await self.submissions.set_status(submission, status)
+                    metrics.submissions_total.labels(status=status.value).inc()
+                    return
+                sent = await self._api.send_message(group.bale_chat_id, header, is_group=True)
+                submission.published_message_id = sent.message_id
+                await self.submissions.set_status(submission, status)
+                metrics.submissions_total.labels(status=status.value).inc()
+                return
             caption_body = submission.caption or ""
             caption = f"{header}\n\n{caption_body}" if caption_body else header
             new_id = await self._api.copy_message(
                 chat_id=group.bale_chat_id,
-                from_chat_id=submission.archive_chat_id or self._settings.archive_chat_id,
-                message_id=submission.archive_message_id,
+                from_chat_id=source_chat,
+                message_id=source_msg,
                 caption=caption[:CAPTION_LIMIT],
                 is_group=True,
             )
@@ -269,7 +327,7 @@ class SubmissionService:
             for extra_id in list(submission.meta.get("archive_message_ids", []))[1:]:
                 await self._api.copy_message(
                     chat_id=group.bale_chat_id,
-                    from_chat_id=submission.archive_chat_id or self._settings.archive_chat_id,
+                    from_chat_id=source_chat,
                     message_id=int(extra_id),
                     is_group=True,
                 )
@@ -307,7 +365,7 @@ class SubmissionService:
     async def notify_admin_completed(
         self, submission: Submission, user: User, group: Group | None, details: str
     ) -> None:
-        if self._settings.admin_chat_id is None:
+        if self._admin_chat_id is None:
             return
         hashtags = " ".join(tag.hashtag for tag in submission.tags)
         today_total = await self.submissions.count_completed_today()
@@ -322,7 +380,7 @@ class SubmissionService:
             dt=datetime.now(UTC),
             today_total=today_total,
         )
-        await self.outbox.enqueue("admin_notify", self._settings.admin_chat_id, {"text": text})
+        await self.outbox.enqueue("admin_notify", self._admin_chat_id, {"text": text})
 
 
 def _split_media(messages: list[Message], classified: ClassifiedContent) -> list[list[Any]]:

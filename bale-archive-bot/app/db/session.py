@@ -101,6 +101,13 @@ class Database:
             if ":memory:" in url:
                 engine_kwargs.update({"poolclass": StaticPool})
             else:
+                from pathlib import Path
+
+                from sqlalchemy.engine.url import make_url
+
+                db_path = make_url(url).database
+                if db_path:
+                    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
                 engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30}})
         self.engine: AsyncEngine = create_async_engine(url, **engine_kwargs)
         self.session_factory = async_sessionmaker(

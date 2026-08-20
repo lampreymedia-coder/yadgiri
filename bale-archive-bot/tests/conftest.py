@@ -28,6 +28,7 @@ from tests.fakes.fake_bale import FakeBaleServer
 @pytest.fixture
 def settings() -> Settings:
     return Settings(
+        _env_file=None,
         BALE_BOT_TOKEN="test-token",
         ARCHIVE_CHAT_ID=-500,
         ADMIN_CHAT_ID=-600,

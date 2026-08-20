@@ -34,17 +34,54 @@ from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-ADMIN_ACTIONS = {"ap", "adty", "adtn", "abcy", "abcn", "atgy", "atgn", "apg"}
+ADMIN_ACTIONS = {"ap", "adty", "adtn", "abcy", "abcn", "atgy", "atgn", "apg", "sar", "srg"}
 
 _PAGE_SIZE = 10
 
 
 async def is_admin(ctx: BotContext, session: AsyncSession, bale_user_id: int) -> bool:
-    if ctx.settings.is_admin_user(bale_user_id):
+    if ctx.is_runtime_admin(bale_user_id):
         return True
     users = UserRepository(session)
     user = await users.get_by_bale_id(bale_user_id)
     return bool(user is not None and user.is_admin)
+
+
+async def promote_first_owner(
+    ctx: BotContext, session: AsyncSession, from_user: object | None
+) -> bool:
+    """If nobody is admin yet, make this Bale user the owner.
+
+    Returns True when this user was just promoted.
+    """
+    if from_user is None:
+        return False
+    bale_user_id = getattr(from_user, "id", None)
+    if not isinstance(bale_user_id, int):
+        return False
+    users = UserRepository(session)
+    existing_admins = await users.list_admins()
+    if existing_admins or ctx.runtime_admin_ids:
+        return False
+    username = getattr(from_user, "username", None)
+    first_name = getattr(from_user, "first_name", None)
+    last_name = getattr(from_user, "last_name", None)
+    user = await users.upsert_from_bale(
+        bale_user_id,
+        username if isinstance(username, str) else None,
+        first_name if isinstance(first_name, str) else None,
+        last_name if isinstance(last_name, str) else None,
+    )
+    await users.set_admin(user.id, True)
+    ctx.runtime_admin_ids.add(bale_user_id)
+    if ctx.admin_notify_chat_id is None:
+        ctx.admin_notify_chat_id = bale_user_id
+    settings_repo = AppSettingsRepository(session)
+    await settings_repo.set("owner_user_id", bale_user_id)
+    await settings_repo.set("admin_notify_chat_id", bale_user_id)
+    await session.flush()
+    logger.info("first_owner_promoted", user_id=bale_user_id)
+    return True
 
 
 def admin_chat_allowed(ctx: BotContext, message: Message) -> bool:
@@ -570,6 +607,23 @@ async def handle_forget(
     await ctx.api.send_message(chat_id, fa.FORGET_DONE)
 
 
+async def persist_archive_chat(ctx: BotContext, session: AsyncSession, chat_id: int) -> None:
+    ctx.archive_chat_id = chat_id
+    settings_repo = AppSettingsRepository(session)
+    await settings_repo.set("archive_chat_id", chat_id)
+    groups = GroupRepository(session)
+    group = await groups.upsert(chat_id, None, "group")
+    await groups.set_active(group.id, True)
+    audit = AuditRepository(session)
+    await audit.record("archive_chat_set", None, "group", str(chat_id), {})
+
+
+async def handle_set_archive(ctx: BotContext, session: AsyncSession, message: Message) -> None:
+    """Mark the current group as the private archive chat."""
+    await persist_archive_chat(ctx, session, message.chat.id)
+    await ctx.api.send_message(message.chat.id, fa.ARCHIVE_SET_DONE, is_group=True)
+
+
 async def handle_onboard(ctx: BotContext, message: Message) -> None:
     """Admin command in a group: pin the getting-started message."""
     text = fa.onboard_message(ctx.bot_username)
@@ -649,6 +703,24 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
         await ctx.api.send_message(chat_id, fa.BROADCAST_CANCELLED)
     elif data.action in ("atgy", "atgn", "abcy", "abcn"):
         await _handle_flow_confirm(ctx, session, cq, data.action, chat_id)
+    elif data.action == "sar":
+        try:
+            archive_id = int(data.arg)
+        except ValueError:
+            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+        else:
+            await persist_archive_chat(ctx, session, archive_id)
+            await ctx.api.send_message(chat_id, fa.ARCHIVE_SET_DONE)
+    elif data.action == "srg":
+        try:
+            group_chat_id = int(data.arg)
+        except ValueError:
+            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+        else:
+            groups = GroupRepository(session)
+            group = await groups.upsert(group_chat_id, None, "group")
+            await groups.set_active(group.id, True)
+            await ctx.api.send_message(chat_id, fa.RESEARCH_GROUP_READY)
 
     if ctx.caps.has("answerCallbackQuery"):
         try:

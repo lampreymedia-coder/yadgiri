@@ -16,7 +16,6 @@ from app.core.context import BotContext
 from app.core.idempotency import purge_old_records
 from app.db.models import Group, SubmissionStatus
 from app.db.repositories.tags import TagRepository
-from app.domain.submission import SubmissionService
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -27,7 +26,7 @@ async def run_reminders_once(ctx: BotContext) -> int:
     """Send the minute-10 reminder for stale in-progress submissions."""
     sent = 0
     async with ctx.db.session() as session:
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         stale = await service.submissions.list_needing_reminder(
             timedelta(minutes=ctx.settings.reminder_after_minutes), datetime.now(UTC)
         )
@@ -50,7 +49,7 @@ async def run_expiry_once(ctx: BotContext) -> int:
     """Apply EXPIRED_POLICY to submissions past their TTL."""
     handled = 0
     async with ctx.db.session() as session:
-        service = SubmissionService(session, ctx.api, ctx.settings)
+        service = ctx.submission_service(session)
         expired = await service.submissions.list_expired_in_progress(datetime.now(UTC))
         for submission in expired:
             handled += 1

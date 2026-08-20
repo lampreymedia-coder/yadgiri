@@ -181,6 +181,21 @@ class Dispatcher:
         # admin chat; non-admins get the generic invalid-command reply.
         async with self.ctx.db.session() as session:
             authorized = await admin.is_admin(self.ctx, session, message.from_user.id)
+            if command in {"onboard", "archive"} and message.is_group_message:
+                if not authorized:
+                    authorized = await admin.promote_first_owner(
+                        self.ctx, session, message.from_user
+                    )
+                if authorized:
+                    if command == "onboard":
+                        await admin.handle_onboard(self.ctx, message)
+                    else:
+                        await admin.handle_set_archive(self.ctx, session, message)
+                elif command == "archive":
+                    await self.ctx.api.send_message(
+                        message.chat.id, fa.ARCHIVE_SET_NEED_PRIVATE, is_group=True
+                    )
+                return
             if not authorized or not admin.admin_chat_allowed(self.ctx, message):
                 if message.is_private_message:
                     await self.ctx.api.send_message(message.chat.id, fa.ERR_UNKNOWN_COMMAND)
@@ -238,8 +253,6 @@ class Dispatcher:
             await admin.start_broadcast_flow(ctx, session, message)
         elif command == "forget":
             await admin.handle_forget(ctx, session, chat_id, args, actor)
-        elif command == "onboard" and message.is_group_message:
-            await admin.handle_onboard(ctx, message)
         else:
             await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
 

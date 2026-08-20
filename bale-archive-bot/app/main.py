@@ -89,6 +89,7 @@ class Application:
         self.ctx = BotContext(
             settings=self.settings, api=self.api, db=self.db, caps=caps, redis=redis_client
         )
+        await self._prepare_store()
         try:
             me = await self.api.get_me()
             self.ctx.bot_username = me.username or ""
@@ -101,13 +102,50 @@ class Application:
         self._register_jobs()
         self.scheduler.start()
 
-        # Verify archive chat access early — the whole gateway depends on it.
-        try:
-            await self.api.get_chat(self.settings.archive_chat_id)
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning("archive_chat_check_failed", error=str(exc))
+        if self.ctx.archive_chat_id is not None:
+            try:
+                await self.api.get_chat(self.ctx.archive_chat_id)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("archive_chat_check_failed", error=str(exc))
 
         self.started_event.set()
+
+    async def _prepare_store(self) -> None:
+        """Create tables (sqlite), seed tags, restore runtime settings."""
+        assert self.ctx is not None
+        if self.settings.database_url.startswith("sqlite"):
+            from app.db.base import Base
+
+            async with self.db.engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+        from app.db.repositories.misc import AppSettingsRepository
+        from app.db.repositories.tags import TagRepository
+        from app.db.repositories.users import UserRepository
+        from app.i18n.fa import SEED_TAGS
+
+        async with self.db.session() as session:
+            tags = TagRepository(session)
+            for slug, title_fa, hashtag in SEED_TAGS:
+                if await tags.get_by_slug(slug) is None:
+                    await tags.create(slug=slug, title_fa=title_fa, hashtag=hashtag)
+            stored = AppSettingsRepository(session)
+            archive_id = await stored.get("archive_chat_id")
+            notify_id = await stored.get("admin_notify_chat_id")
+            owner_id = await stored.get("owner_user_id")
+            if archive_id is not None:
+                self.ctx.archive_chat_id = int(archive_id)
+            if notify_id is not None:
+                self.ctx.admin_notify_chat_id = int(notify_id)
+            if owner_id is not None:
+                self.ctx.runtime_admin_ids.add(int(owner_id))
+            users = UserRepository(session)
+            for admin_user in await users.list_admins():
+                self.ctx.runtime_admin_ids.add(admin_user.bale_user_id)
+        logger.info(
+            "store_ready",
+            archive_chat_id=self.ctx.archive_chat_id,
+            admins=len(self.ctx.runtime_admin_ids),
+        )
 
     def _register_jobs(self) -> None:
         assert self.ctx is not None

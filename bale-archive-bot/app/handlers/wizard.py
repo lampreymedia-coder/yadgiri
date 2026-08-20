@@ -299,7 +299,7 @@ async def handle_wizard_callback(ctx: BotContext, session: AsyncSession, cq: Cal
         await _answer(ctx, cq)
         return
 
-    service = SubmissionService(session, ctx.api, ctx.settings)
+    service = ctx.submission_service(session)
     submission = await service.submissions.get_by_short_id(data.sid)
     if submission is None or submission.status in TERMINAL_STATUSES:
         await _show_expired(ctx, cq)
@@ -601,7 +601,7 @@ async def handle_note_input(
     """A text message arriving while state == AWAITING_NOTE becomes the note."""
     note = (message.text or "").strip()
     sid = str(conversation.payload.get("sid", ""))
-    service = SubmissionService(session, ctx.api, ctx.settings)
+    service = ctx.submission_service(session)
     submission = await service.submissions.get_by_short_id(sid)
     if submission is None or submission.status in TERMINAL_STATUSES:
         await ctx.api.send_message(message.chat.id, fa.ERR_EXPIRED)
@@ -639,7 +639,7 @@ async def resume_wizard(ctx: BotContext, session: AsyncSession, message: Message
     if conversation is None or conversation.state is WizardState.IDLE:
         return False
     sid = str(conversation.payload.get("sid", ""))
-    service = SubmissionService(session, ctx.api, ctx.settings)
+    service = ctx.submission_service(session)
     submission = await service.submissions.get_by_short_id(sid)
     if submission is None or submission.status in TERMINAL_STATUSES:
         await store.clear(message.chat.id, message.from_user.id)

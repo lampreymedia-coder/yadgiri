@@ -55,6 +55,10 @@ def configure_logging(level: str = "INFO", log_format: str = "json") -> None:
     """Configure structlog + stdlib logging once at startup."""
     log_level = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=log_level)
+    # httpx logs the full URL (including the bot token) at INFO.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
     renderer: structlog.typing.Processor
     if log_format == "json":

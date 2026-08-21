@@ -59,7 +59,7 @@ class BaleClient:
         token: str,
         base_url: str = "https://tapi.bale.ai",
         limiter: OutboundLimiter | None = None,
-        request_timeout: float = 30.0,
+        request_timeout: float = 60.0,
         connect_timeout: float = 10.0,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:

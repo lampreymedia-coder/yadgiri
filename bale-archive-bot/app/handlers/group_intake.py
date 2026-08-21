@@ -49,14 +49,17 @@ def role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     )
 
 
-async def ask_group_role(ctx: BotContext, message: Message, group: Group) -> bool:
+async def ask_group_role(
+    ctx: BotContext, message: Message, group: Group, *, force: bool = False
+) -> bool:
     """Ask in the group itself whether this chat is research or archive.
 
     Returns True when a prompt was posted (or attempted).
     """
-    if role_already_asked(group) or group_role(group) is not None:
+    if not force and (role_already_asked(group) or group_role(group) is not None):
         return False
-    set_group_role(group, ROLE_RESEARCH)
+    if not force:
+        set_group_role(group, ROLE_RESEARCH)
     title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
     text = fa.bot_added_ask_role(title)
     markup = role_keyboard(message.chat.id)
@@ -68,6 +71,7 @@ async def ask_group_role(ctx: BotContext, message: Message, group: Group) -> boo
             reply_to_message_id=message.message_id,
             is_group=True,
         )
+        group.settings = {**group.settings, "role_asked": True}
         return True
     except (BaleAPIError, NetworkError) as exc:
         logger.warning("bot_added_group_notice_failed", chat_id=message.chat.id, error=str(exc))
@@ -85,7 +89,7 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
             from app.handlers.admin import promote_first_owner
 
             await promote_first_owner(ctx, session, message.from_user)
-        asked = await ask_group_role(ctx, message, group)
+        asked = await ask_group_role(ctx, message, group, force=True)
     if asked:
         return
     try:
@@ -236,6 +240,10 @@ async def process_private_content(ctx: BotContext, message: Message) -> None:
     if message.from_user is None:
         return
     if _should_ignore(ctx, message):
+        try:
+            await ctx.api.send_message(message.chat.id, fa.GROUP_GOT_IT)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("private_ignore_notice_failed", error=str(exc))
         return
 
     async with ctx.db.session() as session:

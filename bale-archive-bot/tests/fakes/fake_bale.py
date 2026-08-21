@@ -152,6 +152,10 @@ class FakeBaleServer:
             return {"url": ""}
         if method == "setWebhook":
             return True
+        if method == "deleteWebhook":
+            return True
+        if method == "setMyCommands":
+            return True
         if method == "sendMessage":
             chat_id = int(params["chat_id"])
             if chat_id in self.forbidden_private_chats:

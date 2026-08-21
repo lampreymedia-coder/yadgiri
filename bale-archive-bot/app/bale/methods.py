@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.bale.client import BaleClient
-from app.bale.errors import BaleAPIError, NotFound
+from app.bale.errors import BadRequest, BaleAPIError, NotFound
 from app.bale.models import (
     Chat,
     File,
@@ -31,6 +31,7 @@ class BaleAPI:
 
     def __init__(self, client: BaleClient) -> None:
         self.client = client
+        self._poll_timeout: int | None = 25
 
     # ─── Bot lifecycle ───
 
@@ -46,10 +47,20 @@ class BaleAPI:
     # ─── Updates ───
 
     async def get_updates(self, offset: int | None = None, limit: int = 100) -> list[Update]:
-        # Bale getUpdates supports only offset & limit (1..100); no long-polling.
-        result = await self.client.request(
-            "getUpdates", {"offset": offset, "limit": max(1, min(limit, 100))}
-        )
+        params: dict[str, Any] = {"offset": offset, "limit": max(1, min(limit, 100))}
+        if self._poll_timeout:
+            params["timeout"] = self._poll_timeout
+        try:
+            result = await self.client.request("getUpdates", params)
+        except BadRequest as exc:
+            if self._poll_timeout is not None:
+                logger.info("get_updates_timeout_unsupported", error=str(exc))
+                self._poll_timeout = None
+                result = await self.client.request(
+                    "getUpdates", {"offset": offset, "limit": max(1, min(limit, 100))}
+                )
+            else:
+                raise
         updates: list[Update] = []
         for item in result or []:
             try:
@@ -61,8 +72,18 @@ class BaleAPI:
     async def set_webhook(self, url: str) -> bool:
         return bool(await self.client.request("setWebhook", {"url": url}))
 
+    async def delete_webhook(self) -> bool:
+        return bool(await self.client.request("deleteWebhook", {}))
+
     async def get_webhook_info(self) -> WebhookInfo:
         return WebhookInfo.model_validate(await self.client.request("getWebhookInfo"))
+
+    async def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
+        try:
+            return bool(await self.client.request("setMyCommands", {"commands": commands}))
+        except (BaleAPIError, NotFound):
+            logger.info("set_my_commands_unsupported")
+            return False
 
     # ─── Sending ───
 

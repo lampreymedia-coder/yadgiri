@@ -177,9 +177,42 @@ class Application:
         await self.db.dispose()
         logger.info("shutdown_complete")
 
+    async def _prepare_polling(self) -> None:
+        try:
+            await self.api.delete_webhook()
+            logger.info("webhook_deleted")
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("delete_webhook_failed", error=str(exc))
+            try:
+                await self.api.set_webhook("")
+            except (BaleAPIError, NetworkError) as inner:
+                logger.warning("webhook_clear_failed", error=str(inner))
+        try:
+            info = await self.api.get_webhook_info()
+            logger.info(
+                "webhook_info",
+                url=info.url or "",
+                pending=info.pending_update_count,
+            )
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("webhook_info_failed", error=str(exc))
+        try:
+            ok = await self.api.set_my_commands(
+                [
+                    {"command": "start", "description": "فعال‌سازی ربات"},
+                    {"command": "archive", "description": "این گروه آرشیو خصوصی شود"},
+                    {"command": "help", "description": "راهنما"},
+                    {"command": "panel", "description": "منوی مدیریت"},
+                ]
+            )
+            logger.info("commands_registered", ok=ok)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("commands_register_failed", error=str(exc))
+
     async def _notify_owner_ready(self) -> None:
         """Tell the owner the process is live — also proves private sendMessage works."""
         assert self.ctx is not None
+        from app.bale.keyboards import keyboard, url_button
         from app.i18n import fa
 
         owner_id = next(iter(self.ctx.runtime_admin_ids), None)
@@ -187,8 +220,20 @@ class Application:
             owner_id = self.ctx.admin_notify_chat_id
         if owner_id is None:
             return
+        markup = None
+        if self.ctx.bot_username:
+            markup = keyboard(
+                [
+                    [
+                        url_button(
+                            fa.BTN_ADD_TO_GROUP,
+                            f"https://ble.ir/{self.ctx.bot_username}?startgroup=start",
+                        )
+                    ]
+                ]
+            )
         try:
-            await self.api.send_message(owner_id, fa.BOT_READY_PING)
+            await self.api.send_message(owner_id, fa.BOT_READY_PING, markup)
             logger.info("owner_ready_ping_sent", chat_id=owner_id)
         except (BaleAPIError, NetworkError) as exc:
             logger.warning("owner_ready_ping_failed", chat_id=owner_id, error=str(exc))
@@ -219,17 +264,10 @@ class Application:
             else:
                 raise
 
-        try:
-            info = await self.api.get_webhook_info()
-            if info.url:
-                logger.warning("webhook_was_set_clearing", url=info.url)
-                await self.api.set_webhook("")
-                logger.info("webhook_cleared_for_polling")
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning("webhook_clear_failed", error=str(exc))
-
+        await self._prepare_polling()
         await self._notify_owner_ready()
         logger.info("polling_started", offset=offset)
+        empty_cycles = 0
         while not self.stop_event.is_set():
             try:
                 updates = await self.api.get_updates(offset=offset, limit=100)
@@ -239,6 +277,7 @@ class Application:
                 continue
 
             if updates:
+                empty_cycles = 0
                 offset = max(u.update_id for u in updates) + 1
                 for update in updates:
                     if self.stop_event.is_set():
@@ -247,7 +286,11 @@ class Application:
                     await task
                 await self._sleep(self.settings.polling_busy_sleep)
             else:
-                await self._sleep(self.settings.polling_idle_sleep)
+                empty_cycles += 1
+                if empty_cycles == 1 or empty_cycles % 30 == 0:
+                    logger.info("polling_idle", offset=offset, empty_cycles=empty_cycles)
+                pause = 0.2 if self.api._poll_timeout else self.settings.polling_idle_sleep
+                await self._sleep(pause)
         logger.info("polling_stopped", offset=offset)
 
     async def _sleep(self, seconds: float) -> None:

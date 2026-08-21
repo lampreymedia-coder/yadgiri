@@ -186,10 +186,26 @@ class Dispatcher:
     async def _on_group_message(self, message: Message) -> None:
         text = message.text or ""
         command = parse_command(text)
+        mention_tokens: set[str] = set()
+        if self.ctx.bot_username:
+            name = self.ctx.bot_username.lower()
+            mention_tokens = {f"@{name}", name}
+        if command is None and (text or "").strip().lower() in mention_tokens:
+            await group_intake.handle_group_hello(self.ctx, message)
+            return
         if command is not None:
             await self._on_command(message, command[0], command[1])
             return
         if group_intake._should_ignore(self.ctx, message):
+            try:
+                await self.ctx.api.send_message(
+                    message.chat.id,
+                    fa.GROUP_GOT_IT,
+                    reply_to_message_id=message.message_id,
+                    is_group=True,
+                )
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("group_ignore_notice_failed", error=str(exc))
             return
         await self.albums.add(message)
 

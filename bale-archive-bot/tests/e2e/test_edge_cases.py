@@ -41,6 +41,8 @@ def test_parse_command() -> None:
     assert parse_command("/stats today") == ("stats", ["today"])
     assert parse_command("/start@archive_bot") == ("start", [])
     assert parse_command("plain text") is None
+    assert parse_command("آرشیو") == ("archive", [])
+    assert parse_command("ارشیوم") == ("archive", [])
 
 
 async def test_empty_and_whitespace_message_ignored(
@@ -72,10 +74,10 @@ async def test_caption_over_1024_splits_into_reply(
     await asyncio.sleep(0.2)  # album window
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
-    markup = fake_bale.last_markup(USER_ID)
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
+    markup = fake_bale.last_markup(GROUP_ID)
     assert markup is not None
     tag_cb = next(
         btn["callback_data"]
@@ -83,9 +85,9 @@ async def test_caption_over_1024_splits_into_reply(
         for btn in row
         if "|tg|" in btn.get("callback_data", "")
     )
-    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_cb, GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
 
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
@@ -105,10 +107,10 @@ async def test_undo_within_window(
     await dispatcher.dispatch(Update.model_validate(load_update("text")))
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
-    markup = fake_bale.last_markup(USER_ID)
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
+    markup = fake_bale.last_markup(GROUP_ID)
     assert markup is not None
     tag_cb = next(
         btn["callback_data"]
@@ -116,9 +118,9 @@ async def test_undo_within_window(
         for btn in row
         if "|tg|" in btn.get("callback_data", "")
     )
-    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_cb, GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
 
     undo_update = load_update("text")
     undo_update["message"]["chat"] = {"id": USER_ID, "type": "private"}
@@ -239,9 +241,9 @@ async def test_double_click_second_ignored_while_locked(
     await dispatcher.dispatch(Update.model_validate(load_update("text")))
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    first = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    second = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    first = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    second = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
     await asyncio.gather(first, second)
     submission = await get_submission(ctx)
     # Exactly one forward transition happened.

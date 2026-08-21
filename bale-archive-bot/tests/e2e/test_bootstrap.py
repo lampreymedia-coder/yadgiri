@@ -89,3 +89,66 @@ async def test_group_archive_command_registers_chat(
     async with ctx.db.session() as session:
         stored = await AppSettingsRepository(session).get("archive_chat_id")
         assert int(stored) == ARCHIVE_GROUP
+
+
+async def test_persian_archive_word_registers_chat(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    _clear_bootstrap(ctx)
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900003,
+                "message": {
+                    "message_id": 3,
+                    "date": 1,
+                    "chat": {
+                        "id": ARCHIVE_GROUP,
+                        "type": "group",
+                        "title": "آرشیو خصوصی",
+                    },
+                    "from": {
+                        "id": OWNER_ID,
+                        "is_bot": False,
+                        "first_name": "مینا",
+                    },
+                    "text": "آرشیوم",
+                },
+            }
+        )
+    )
+    assert ctx.archive_chat_id == ARCHIVE_GROUP
+    texts = "\n".join(fake_bale.sent_texts(ARCHIVE_GROUP))
+    assert "ثبت شد" in texts
+
+
+async def test_group_content_opens_wizard_in_group(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    import asyncio
+
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900004,
+                "message": {
+                    "message_id": 11,
+                    "date": 1,
+                    "chat": {"id": -100200300, "type": "group", "title": "رصد"},
+                    "from": {
+                        "id": 12345,
+                        "is_bot": False,
+                        "first_name": "علی",
+                    },
+                    "text": "این یک متن آزمایشی برای بایگانی است",
+                },
+            }
+        )
+    )
+    await asyncio.sleep(0.2)
+    markup = fake_bale.last_markup(-100200300)
+    assert markup is not None
+    data = [btn.get("callback_data", "") for row in markup["inline_keyboard"] for btn in row]
+    assert any("|yes|" in item for item in data)

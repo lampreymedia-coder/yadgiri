@@ -24,11 +24,10 @@ lacks `btrim`, so the ORM computes `display_name` as a Python property and the
 report SQL uses `coalesce(u.display_name, '')`. Production behaviour is
 identical to the spec.
 
-## D-04: Conversation state is written to Postgres even when Redis is up
-`STATE_BACKEND=auto` uses Redis for speed but always mirrors to
-`conversation_states`. Redis may evict or restart without persistence; the
-spec's hard requirement is that a container restart mid-wizard loses nothing.
-Double-write costs one small UPSERT per step and removes a whole failure mode.
+## D-04: Conversation state lives only in Postgres
+Redis is not installed and is not a dependency. `STATE_BACKEND` is forced to
+`postgres`. Wizard state is the `conversation_states` table; cross-process
+locks are `pg_advisory_xact_lock`.
 
 ## D-05: private-first submissions with multiple groups get a group-choice step
 The spec doesn't say which group a private-first submission belongs to when
@@ -55,10 +54,11 @@ naturally paces work anyway) and still dispatches every update as a concurrent
 duplicate pair, so the zero-duplicates guarantee is fully exercised. The p95 <
 2s target for production is meant for PostgreSQL.
 
-## D-09: `sendMessage` failure inside the wizard falls back to the group
-Opening the wizard tries the private chat first. `403` means "user never
-pressed /start" → `users.has_private_chat=false` and the in-group single-message
-wizard is used, including a URL button to the bot (`https://ble.ir/<bot>`).
+## D-09: Group-origin wizard is posted in the group
+Bale returns 404 when DMing a user who never pressed Start. Opening the
+wizard for group content posts the decision keyboard in that group as a
+reply. Private-origin content still uses the private chat. Every send is
+caught so a 404 cannot swallow the update.
 
 ## D-10: Republish uses copyMessage from the archive, not forward
 The spec's open question ("bot-authored repost vs forward") is resolved toward
@@ -86,3 +86,10 @@ observed 429 behaviour to inform tuning.
 Listed in the spec as "exists but must be probed". `capabilities.py` probes it
 at startup; every call site checks `caps.has("answerCallbackQuery")` and
 degrades to silence (the keyboard still works, only toasts disappear).
+
+## D-15: Windows-native single machine
+No Docker, Redis, Caddy, or cloud object storage. Media is written under
+`MEDIA_ROOT` through the `Storage` protocol (`LocalStorage` now, `S3Storage`
+behind `STORAGE_BACKEND=s3`). The process is an NSSM Windows service.
+`PYTHONUTF8=1` and `tzdata` keep Persian text and Jalali dates correct.
+

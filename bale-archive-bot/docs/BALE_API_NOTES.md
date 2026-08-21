@@ -11,7 +11,7 @@
 |------|------------------------------|
 | `Update` has only `message`, `edited_message`, `callback_query` | join/leave detection via `new_chat_members` only (`group_intake.register_group_events`) |
 | `getUpdates` has only `offset`, `limit` (1..100); no long-polling | adaptive short-interval loop in `app/main.py` with manual offset |
-| Webhook: only `url` param; ports 443/88 | secret random path `/webhook/<random>`; Caddy terminates TLS |
+| Webhook: only `url` param | optional; default run mode is polling on Windows |
 | `getChatMember` does not exist | admins tracked in `ADMIN_USER_IDS` + `users.is_admin` |
 | `editMessageText` accepts `reply_markup`; no `editMessageReplyMarkup` | all keyboard updates send text+keyboard together via `safe_edit()` |
 | `callback_data` ≤ 64 bytes | ASCII scheme `<v>|<act>|<sid>|<arg>` (`app/bale/keyboards.py`) |
@@ -40,9 +40,8 @@ After running the probe this file will contain:
 
 ## How to run
 
-```bash
-BALE_BOT_TOKEN=<token> PROBE_CHAT_ID=<test group id> python scripts/api_probe.py
-# optional: PROBE_WINDOW_S=120 to lengthen the live-update capture window
+```
+python scripts\api_probe.py
 ```
 
 During the capture window, send one of each content type into the test group.

@@ -2,7 +2,7 @@
 
 The mandated SQL is implemented verbatim with bound parameters. These
 queries target PostgreSQL (FILTER/LATERAL/similarity); integration tests
-run them against a real Postgres via testcontainers.
+run them against a real Postgres when POSTGRES_TEST_URL is set.
 """
 
 from __future__ import annotations

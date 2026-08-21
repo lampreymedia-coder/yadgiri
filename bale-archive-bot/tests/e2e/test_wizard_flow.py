@@ -100,7 +100,7 @@ async def test_gateway_archive_before_delete(
     copy_call = fake_bale.calls_for("copyMessage")[0]
     assert int(copy_call["chat_id"]) == ARCHIVE_ID
     # Wizard opened in the user's private chat.
-    assert fake_bale.last_markup(USER_ID) is not None
+    assert fake_bale.last_markup(GROUP_ID) is not None
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.AWAITING_DECISION
     assert submission.archive_message_id is not None
@@ -125,36 +125,36 @@ async def test_full_happy_path_two_tags(
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, USER_ID)
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
 
     # Step 1: yes
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, GROUP_ID)
     assert any("|cnt|" in cb for cb in buttons.values())
 
     # Step 2: two tags
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|2", USER_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|2", GROUP_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, GROUP_ID)
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
     assert len(tag_callbacks) == 3
 
     # Step 3: toggle two tags; a third toggle must be rejected via toast.
-    await dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(tag_callbacks[1], USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[0], GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[1], GROUP_ID, msg_id))
     calls_before = len(fake_bale.calls_for("editMessageText"))
-    await dispatcher.dispatch(callback_update(tag_callbacks[2], USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[2], GROUP_ID, msg_id))
     assert len(fake_bale.calls_for("editMessageText")) == calls_before  # unchanged
     answers = fake_bale.calls_for("answerCallbackQuery")
     assert any(a.get("text") and "دو" in str(a["text"]) for a in answers)
 
     # Step 4: continue → preview
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, GROUP_ID)
     assert any("|fin|" in cb for cb in buttons.values())
 
     # Back keeps selections.
-    await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", USER_ID, msg_id))
-    markup = fake_bale.last_markup(USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", GROUP_ID, msg_id))
+    markup = fake_bale.last_markup(GROUP_ID)
     assert markup is not None
     checked = [
         btn["text"]
@@ -165,8 +165,8 @@ async def test_full_happy_path_two_tags(
     assert len(checked) == 2
 
     # Continue again and confirm.
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
 
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
@@ -182,7 +182,7 @@ async def test_full_happy_path_two_tags(
         assert await outbox.pending_count() == 1
 
     # Clicking the old keyboard after completion → expired toast, no crash.
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
     answers = fake_bale.calls_for("answerCallbackQuery")
     assert any("منقضی" in str(a.get("text", "")) for a in answers)
 
@@ -192,8 +192,8 @@ async def test_decline_republishes_without_tags(
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|no|{submission.short_id}|", USER_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|no|{submission.short_id}|", GROUP_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.DECLINED
     assert submission.published_message_id is not None
@@ -208,8 +208,8 @@ async def test_cancel_removes_everything(
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|cx|{submission.short_id}|", USER_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|cx|{submission.short_id}|", GROUP_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.CANCELLED
     assert submission.published_message_id is None
@@ -220,7 +220,7 @@ async def test_foreign_user_click_rejected(
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, USER_ID)
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
     foreign = Update.model_validate(
         {
             "update_id": next(_update_seq),
@@ -229,7 +229,7 @@ async def test_foreign_user_click_rejected(
                 "from": {"id": 999888, "is_bot": False, "first_name": "غریبه"},
                 "message": {
                     "message_id": msg_id,
-                    "chat": {"id": USER_ID, "type": "private"},
+                    "chat": {"id": GROUP_ID, "type": "group"},
                     "text": "wizard",
                 },
                 "data": f"1|yes|{submission.short_id}|",
@@ -249,17 +249,17 @@ async def test_restart_mid_wizard_state_survives(
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
 
     # Simulate a process restart: a brand-new dispatcher and context caches.
     fresh_dispatcher = Dispatcher(ctx)
-    await fresh_dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    await fresh_dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, GROUP_ID)
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
-    await fresh_dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
-    await fresh_dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
-    await fresh_dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(tag_callbacks[0], GROUP_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
 

@@ -1,7 +1,7 @@
 """The tagging wizard: decision → tag count → tag selection → preview → done.
 
 All keyboard updates go through ``safe_edit`` (text + keyboard together).
-State lives in Redis/Postgres, never in process memory; the back button
+State lives in Postgres (conversation_states), never in process memory; the back button
 pops the history stack and never discards selections.
 """
 
@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bale.errors import BaleAPIError, Forbidden, NetworkError
+from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.keyboards import button, grid, keyboard, parse_callback, url_button
 from app.bale.models import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from app.core.context import BotContext
@@ -228,34 +228,77 @@ async def open_wizard(
     submission: Submission,
     user: User,
     group: Group | None,
+    origin: Message | None = None,
 ) -> None:
-    """Open the decision step in the user's private chat, falling back to
-    an in-group single-message wizard when the user never started the bot."""
-    text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
+    """Open the decision step.
+
+    For content that arrived in a group, the wizard is posted in that group
+    as a reply (Bale often cannot DM a user who never pressed Start). Private
+    content stays in the private chat. Every send is wrapped so a 404 cannot
+    swallow the whole update.
+    """
     users_repo = UserRepository(session)
+    origin_is_group = origin is not None and not origin.is_private_message
+    origin_chat = origin.chat.id if origin is not None else user.bale_user_id
+    reply_to = origin.message_id if origin is not None else None
+
+    async def try_send(
+        chat_id: int,
+        body: str,
+        markup: InlineKeyboardMarkup | None,
+        *,
+        is_group: bool,
+        reply: int | None,
+    ) -> Message | None:
+        try:
+            return await ctx.api.send_message(
+                chat_id, body, markup, reply_to_message_id=reply, is_group=is_group
+            )
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("wizard_send_failed", chat_id=chat_id, error=str(exc))
+        if markup is not None:
+            try:
+                return await ctx.api.send_message(
+                    chat_id, body, None, reply_to_message_id=reply, is_group=is_group
+                )
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("wizard_send_plain_failed", chat_id=chat_id, error=str(exc))
+        if reply is not None:
+            try:
+                return await ctx.api.send_message(chat_id, body, None, is_group=is_group)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("wizard_send_noreply_failed", chat_id=chat_id, error=str(exc))
+        return None
+
     wizard_chat_id: int | None = None
     wizard_message_id: int | None = None
-    in_group = False
 
-    try:
-        sent = await ctx.api.send_message(user.bale_user_id, text, markup)
-        wizard_chat_id, wizard_message_id = user.bale_user_id, sent.message_id
-        await users_repo.set_private_chat(user.id, True)
-    except Forbidden:
-        await users_repo.set_private_chat(user.id, False)
-        in_group = True
-    except (BaleAPIError, NetworkError) as exc:
-        logger.warning("wizard_private_open_failed", error=str(exc))
-        in_group = True
-
-    if in_group and group is not None:
+    if origin_is_group:
         group_text, group_markup = render_decision(
             submission, user, group, ctx.bot_username, in_group=True
         )
-        sent = await ctx.api.send_message(
-            group.bale_chat_id, group_text, group_markup, is_group=True
+        sent = await try_send(origin_chat, group_text, group_markup, is_group=True, reply=reply_to)
+        if sent is not None:
+            wizard_chat_id, wizard_message_id = origin_chat, sent.message_id
+
+    if wizard_chat_id is None:
+        text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
+        sent = await try_send(user.bale_user_id, text, markup, is_group=False, reply=None)
+        if sent is not None:
+            wizard_chat_id, wizard_message_id = user.bale_user_id, sent.message_id
+            await users_repo.set_private_chat(user.id, True)
+        else:
+            await users_repo.set_private_chat(user.id, False)
+
+    if wizard_chat_id is None and group is not None:
+        group_text, group_markup = render_decision(
+            submission, user, group, ctx.bot_username, in_group=True
         )
-        wizard_chat_id, wizard_message_id = group.bale_chat_id, sent.message_id
+        sent = await try_send(
+            group.bale_chat_id, group_text, group_markup, is_group=True, reply=reply_to
+        )
+        if sent is not None:
+            wizard_chat_id, wizard_message_id = group.bale_chat_id, sent.message_id
 
     if wizard_chat_id is None or wizard_message_id is None:
         logger.error("wizard_open_failed_completely", short_id=submission.short_id)

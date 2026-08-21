@@ -1,17 +1,15 @@
-"""Real-Postgres integration: migrations up/down/up + all report queries.
+"""Postgres integration: skipped unless POSTGRES_TEST_URL is set.
 
-Requires Docker (testcontainers); skipped automatically when unavailable.
+Docker is not used. Point this at local Postgres (localhost:5432) when you
+want the migration round-trip extra check.
 """
 
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 
 import pytest
-
-pytest.importorskip("testcontainers.postgres")
-
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -22,50 +20,25 @@ from app.db.repositories.users import UserRepository
 from app.domain.reports import ReportService
 from app.i18n.fa import SEED_TAGS
 
-
-def _docker_available() -> bool:
-    import shutil
-    import subprocess
-
-    if shutil.which("docker") is None:
-        return False
-    try:
-        return (
-            subprocess.run(
-                ["docker", "info"], capture_output=True, timeout=20, check=False
-            ).returncode
-            == 0
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
+_PG_URL = os.environ.get("POSTGRES_TEST_URL", "").strip()
 
 pytestmark = pytest.mark.skipif(
-    not _docker_available(), reason="Docker is not available for testcontainers"
+    not _PG_URL, reason="POSTGRES_TEST_URL is not set (local Postgres only)"
 )
 
 
 @pytest.fixture(scope="module")
-def pg_url() -> Iterator[str]:
-    from testcontainers.postgres import PostgresContainer
-
-    with PostgresContainer("postgres:17-alpine") as container:
-        url = container.get_connection_url().replace("psycopg2", "asyncpg")
-        yield url
-
-
-@pytest.fixture(scope="module")
-def migrated(pg_url: str) -> str:
+def migrated() -> str:
     from alembic.config import Config
 
     from alembic import command
 
-    os.environ["DATABASE_URL"] = pg_url
+    os.environ["DATABASE_URL"] = _PG_URL
     config = Config("alembic.ini")
     command.upgrade(config, "head")
     command.downgrade(config, "base")
     command.upgrade(config, "head")
-    return pg_url
+    return _PG_URL
 
 
 @pytest.fixture
@@ -114,7 +87,7 @@ async def test_migrations_and_reports(pg_session_factory: async_sessionmaker) ->
 
         top_users = await service.top_users(limit=5)
         assert top_users[0].items == 1
-        assert top_users[0].display_name == "علی احمدی"  # generated column
+        assert top_users[0].display_name == "علی احمدی"
 
         matrix = await service.type_matrix()
         assert matrix[0].text_count == 1

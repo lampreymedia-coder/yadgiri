@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.bale.capabilities import Capabilities
 from app.bale.methods import BaleAPI
 from app.config import Settings
-from app.core.fsm import FallbackStateStore, PostgresStateStore, RedisStateStore
+from app.core.fsm import PostgresStateStore
 from app.core.locks import ConversationLocks
 from app.core.ratelimit import InboundSpamGuard
 from app.db.session import Database
@@ -26,7 +26,6 @@ class BotContext:
     spam_guard: InboundSpamGuard = field(init=False)
     bot_username: str = ""
     bot_user_id: int = 0
-    redis: Any | None = None
     error_throttle: dict[str, float] = field(default_factory=dict)
     archive_chat_id: int | None = None
     admin_notify_chat_id: int | None = None
@@ -40,9 +39,8 @@ class BotContext:
             self.admin_notify_chat_id = self.settings.admin_chat_id
         self.runtime_admin_ids.update(self.settings.admin_user_ids)
 
-    def state_store(self, session: AsyncSession) -> FallbackStateStore:
-        redis_store = RedisStateStore(self.redis) if self.redis is not None else None
-        return FallbackStateStore(redis_store, PostgresStateStore(session))
+    def state_store(self, session: AsyncSession) -> PostgresStateStore:
+        return PostgresStateStore(session)
 
     def is_runtime_admin(self, bale_user_id: int) -> bool:
         return bale_user_id in self.runtime_admin_ids or self.settings.is_admin_user(bale_user_id)

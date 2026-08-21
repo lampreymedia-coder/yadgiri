@@ -1,98 +1,158 @@
-# Runbook — عیب‌یابی
+# Runbook — نصب روی ویندوز و عیب‌یابی
 
-۱۵ خطای محتمل، نشانه‌ها و راه‌حل هر کدام. دستورها روی سرور اجرا می‌شوند مگر
-گفته شود «در بله».
+همه‌چیز روی **یک رایانه ویندوز** اجرا می‌شود. Docker، WSL، Caddy، Redis و
+دیتابیس ابری استفاده نمی‌شود.
 
-## 1. ربات هیچ پیامی را نمی‌بیند
-**نشانه:** لاگ `polling_started` هست ولی هیچ آپدیتی نمی‌آید.
-**راه‌حل:** اگر قبلاً وب‌هوک ثبت شده، polling آپدیت نمی‌گیرد:
-`docker compose run --rm app python scripts/set_webhook.py --delete`
+## نصب اول (گام‌به‌گام)
 
-## 2. وب‌هوک آپدیت نمی‌گیرد
-**نشانه:** `RUN_MODE=webhook` و سکوت کامل.
-**راه‌حل:** `set_webhook.py --info` را بزنید و URL را چک کنید. دامنه باید روی
-پورت ۴۴۳ یا ۸۸ با گواهی معتبر جواب بدهد. `curl https://your.domain/healthz`
-از بیرون تست کنید. Caddy را ببینید: `docker compose logs caddy`.
+1. Python 3.12 را از python.org نصب کنید. تیک **Add python.exe to PATH** را بزنید.
+2. PostgreSQL 16 یا 17 را نصب کنید. پورت **5432**. کاربر `postgres` و رمزی که
+   خودتان انتخاب می‌کنید. دیتابیس بسازید:
 
-## 3. پیام‌های گروه حذف نمی‌شوند
-**نشانه:** محتوا آرشیو می‌شود ولی پیام اصلی در گروه می‌ماند؛ لاگ `delete_forbidden`.
-**راه‌حل:** ربات را در آن گروه ادمین با دسترسی «حذف پیام» کنید. `/groups` در
-بله وضعیت را نشان می‌دهد. پیام‌های بالای ۴۸ ساعت اصلاً قابل حذف نیستند.
+   ```
+   CREATE DATABASE bale_archive;
+   CREATE EXTENSION IF NOT EXISTS pg_trgm;
+   ```
 
-## 4. خطای «archive copy failed» و هشدار به ادمین
-**نشانه:** لاگ `archive_copy_failed`؛ کاربر پیام «ارتباط با سرور…» می‌گیرد.
-**راه‌حل:** ربات از کانال آرشیو حذف شده یا `ARCHIVE_CHAT_ID` غلط است. ربات را
-به کانال برگردانید/ادمین کنید. هیچ پیامی حذف نشده — طراحی همین است.
+3. پوشه پروژه را باز کنید، فایل `.env.example` را کپی کنید به `.env`.
+4. در `.env` این دو را پر کنید:
+   - `BALE_BOT_TOKEN` = توکن ربات بله
+   - `DATABASE_URL=postgresql+asyncpg://postgres:رمز_شما@localhost:5432/bale_archive`
+5. PowerShell را **به‌عنوان Administrator** باز کنید:
 
-## 5. دیتابیس در دسترس نیست (حالت degraded)
-**نشانه:** لاگ `db_circuit_opened`؛ متریک `bot_degraded_mode=1`؛ آپدیت‌ها در
-پوشه‌ی `spool/` جمع می‌شوند.
-**راه‌حل:** اتصال DBaaS را چک کنید (فایروال، sslmode، پسورد). بعد از رفع، spool
-خودکار هر ۶۰ ثانیه پردازش می‌شود؛ لاگ `spool_replayed` را ببینید. هیچ داده‌ای
-گم نمی‌شود.
+   ```
+   Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+   .\scripts\install.ps1
+   .\scripts\run.ps1
+   ```
 
-## 6. Redis قطع است
-**نشانه:** لاگ `redis_unavailable_falling_back` یا `redis_save_failed_fallback_pg`.
-**راه‌حل:** کاری لازم نیست — حالت گفت‌وگو خودکار روی PostgreSQL می‌نشیند.
-برای رفع: `docker compose restart redis`.
+   اگر `polling_started` را دیدید ربات روشن است. یک‌بار در بله به ربات
+   `/start` بزنید.
 
-## 7. بله 429 می‌دهد
-**نشانه:** لاگ `bale_api_rate_limited` مکرر.
-**راه‌حل:** خودکار با `retry_after` مدیریت می‌شود. اگر مداوم است، در `.env`
-مقادیر `RATE_GLOBAL_RPS` و `RATE_PER_CHAT_PER_SEC` را پایین بیاورید و
-ری‌استارت کنید.
+## سرویس دائمی با NSSM
 
-## 8. کاربر می‌گوید «ویزارد برایم باز نشد»
-**نشانه:** پیام کاربر از گروه حذف شده ولی پی‌وی نیامده.
-**راه‌حل:** کاربر ربات را استارت نکرده؛ ویزارد داخل گروه باز شده (پیام با
-دکمه). از کاربر بخواهید یک بار ربات را استارت کند. `/onboard` را در گروه پین
-کنید.
+بدون NSSM، با بستن پنجره PowerShell ربات می‌میرد.
 
-## 9. کیبورد قدیمی کار نمی‌کند
-**نشانه:** کاربر روی دکمه‌ی دیروز می‌زند و «منقضی شده» می‌گیرد.
-**راه‌حل:** رفتار درست همین است. کاربر محتوای جدید بفرستد یا `/resume` بزند.
+1. NSSM را از https://nssm.cc/download بگیرید و `nssm.exe` را در PATH بگذارید
+   (یا مسیر کامل را به اسکریپت بدهید).
+2. PowerShell Administrator:
 
-## 10. فایل‌ها در Object Storage ذخیره نمی‌شوند
-**نشانه:** `/health` عدد «رسانه‌ی در انتظار» بالا؛ لاگ media_worker خطا دارد.
-**راه‌حل:** کلیدهای S3 و endpoint را چک کنید. فایل‌های ۲۰–۵۰MB ذخیره نمی‌شوند
-(محدودیت دانلود بله) و `skipped_too_large` می‌خورند — پیام آرشیو نسخه‌ی اصلی
-است. خطاهای موقت خودکار retry می‌شوند (حداکثر ۵ بار).
+   ```
+   .\scripts\install-service.ps1
+   ```
 
-## 11. مهاجرت دیتابیس شکست می‌خورد: pg_trgm
-**نشانه:** `permission denied to create extension "pg_trgm"`.
-**راه‌حل:** یک بار با کاربر ادمین DBaaS اجرا کنید:
-`CREATE EXTENSION pg_trgm;` سپس `docker compose run --rm migrate`.
+3. سرویس `BaleArchiveBot` باید در `services.msc` وضعیت Running داشته باشد.
+4. توقف / شروع:
 
-## 12. صف outbox بزرگ می‌شود
-**نشانه:** `/health` عدد «صف خروجی» رشد می‌کند.
-**راه‌حل:** یعنی ارسال به یک چت خاص مدام شکست می‌خورد (مثلاً ربات از گروه
-اخراج شده). لاگ `outbox_permanent_failure` را ببینید؛ رکوردهای failed را
-بررسی کنید: `SELECT kind, target_chat_id, last_error FROM outbox WHERE status='failed';`
+   ```
+   nssm stop BaleArchiveBot
+   nssm start BaleArchiveBot
+   ```
 
-## 13. دو نسخه‌ی ربات همزمان اجرا شده
-**نشانه:** پاسخ‌های دوتایی به کاربر یا خطای getUpdates conflict.
-**راه‌حل:** فقط یک نمونه از app باید بالا باشد: `docker compose ps` و نمونه‌ی
-اضافه را متوقف کنید. idempotency جلوی دوباره‌پردازش را می‌گیرد ولی polling
-موازی offset را خراب می‌کند.
+5. لاگ‌ها: `data\bot-stdout.log` و `data\bot-stderr.log`
 
-## 14. کانتینر مدام ری‌استارت می‌شود
-**نشانه:** `docker compose ps` وضعیت Restarting.
-**راه‌حل:** `docker compose logs app | head -50` — معمولاً env نامعتبر است
-(اعتبارسنجی startup پیام دقیق می‌دهد: کدام متغیر). `.env` را کامل کنید.
+`PYTHONUTF8=1` توسط اسکریپت سرویس ست می‌شود تا متن فارسی خراب نشود.
 
-## 15. ساعت گزارش‌ها اشتباه است
-**نشانه:** تاریخ/ساعت شمسی جابه‌جا.
-**راه‌حل:** دیتابیس باید UTC بماند؛ نمایش با `Asia/Tehran` انجام می‌شود.
-`TZ=Asia/Tehran` را در `.env` چک کنید و مطمئن شوید ستون‌ها timestamptz هستند
-(مهاجرت رسمی همین است).
+## Windows Defender
 
----
+پوشه `MEDIA_ROOT` (پیش‌فرض `data\media` داخل پروژه) را به **استثناهای
+Windows Defender** اضافه کنید:
 
-## گزارش تست بازیابی بکاپ
+Windows Security → Virus & threat protection → Exclusions → Add folder.
 
-> الزامی: بعد از اولین استقرار، یک بار `scripts/restore.sh` را روی دیتابیس
-> آزمایشی اجرا و نتیجه را اینجا ثبت کنید.
+بدون این کار فایل‌های دانلودی ممکن است قرنطینه شوند و ربات نتواند رسانه را
+ذخیره کند.
+
+## Windows Update
+
+ری‌استارت خودکار Windows Update را غیرفعال کنید یا به یک ساعت مشخص محدود
+کنید (مثلاً ۳ صبح). ری‌استارت بی‌خبر سرویس ربات را قطع می‌کند تا دفعه بعد
+که ویندوز بالا می‌آید NSSM دوباره آن را روشن کند — در این فاصله پیام‌ها
+معطل می‌مانند.
+
+Settings → Windows Update → Advanced options → Active hours
+یا Group Policy: Configure Automatic Updates.
+
+## بکاپ شبانه با Task Scheduler
+
+اسکریپت `scripts\backup.ps1` با `pg_dump.exe` از دیتابیس بکاپ می‌گیرد و
+۳۰ روز نگه می‌دارد (پوشه `BACKUP_DIR`، پیش‌فرض `data\backups`).
+
+1. Task Scheduler را باز کنید → Create Task.
+2. General: Run whether user is logged on or not، Run with highest privileges.
+3. Triggers: Daily، مثلاً 01:00.
+4. Actions: Start a program
+   - Program: `powershell.exe`
+   - Arguments: `-NoProfile -ExecutionPolicy Bypass -File "C:\path\to\bale-archive-bot\scripts\backup.ps1"`
+   - Start in: پوشه پروژه
+5. یک‌بار دستی Run کنید و وجود فایل `.dump` را در `data\backups` ببینید.
+
+بازیابی آزمایشی (الزامی بعد از استقرار اول):
+
+```
+.\scripts\restore.ps1 -DumpPath data\backups\backup-YYYYMMDD-HHMMSS.dump
+```
+
+وقتی پرسید، `RESTORE` را تایپ کنید.
 
 | تاریخ | فایل بکاپ | نتیجه | امضا |
 |-------|-----------|-------|------|
 | _هنوز اجرا نشده_ | — | — | — |
+
+## عیب‌یابی
+
+### 1. ربات هیچ پیامی را نمی‌بیند
+وب‌هوک قدیمی را پاک کنید: `python scripts\set_webhook.py --delete`
+سرویس را با `nssm restart BaleArchiveBot` ری‌استارت کنید.
+
+### 2. «آرشیو» نوشتم ولی تأییدی نیامد
+ربات باید **ادمین گروه** باشد. داخل همان گروه بنویسید `/archive` یا `آرشیو`.
+باید پیام «این گروه به‌عنوان آرشیو خصوصی ثبت شد» بیاید. اگر نیامد، یک‌بار
+در پی‌وی ربات `/start` بزنید.
+
+### 3. در گروه رصد پیام می‌دهم ولی سؤال هشتگ نمی‌آید
+ربات را ادمین کنید (دسترسی ارسال پیام). سؤال هشتگ **همان زیر پیام در گروه**
+ظاهر می‌شود؛ لازم نیست پی‌وی را استارت کرده باشید. محتوای فورواردی هم
+پذیرفته می‌شود.
+
+### 4. پیام‌های گروه حذف نمی‌شوند
+ربات را ادمین با دسترسی «حذف پیام» کنید. تا وقتی گروه آرشیو ثبت نشده باشد
+عمداً چیزی حذف نمی‌شود تا داده از دست نرود.
+
+### 5. دیتابیس در دسترس نیست
+PostgreSQL Service در `services.msc` باید Running باشد. پورت 5432. رمز
+`DATABASE_URL` را چک کنید. آپدیت‌ها موقتاً در `data\spool` ذخیره می‌شوند.
+
+### 6. بله 429 می‌دهد
+خودکار با `retry_after` صبر می‌کند. در `.env` مقدار `RATE_GLOBAL_RPS` را
+کاهش دهید و سرویس را ری‌استارت کنید.
+
+### 7. کیبورد قدیمی کار نمی‌کند
+منقضی شده. محتوای جدید بفرستید یا `/resume`.
+
+### 8. فایل‌ها ذخیره نمی‌شوند
+`MEDIA_ROOT` و استثنای Defender را چک کنید. فایل‌های خیلی بزرگ فقط در گروه
+آرشیو بله می‌مانند (محدودیت دانلود بله).
+
+### 9. مهاجرت دیتابیس: pg_trgm
+یک‌بار در pgAdmin: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` سپس
+`.\.venv\Scripts\python.exe -m alembic upgrade head`
+
+### 10. دو نسخه همزمان
+فقط یک سرویس NSSM و هیچ پنجره `run.ps1` اضافه. وگرنه getUpdates conflict.
+
+### 11. ساعت شمسی اشتباه
+بسته `tzdata` باید نصب باشد (`install.ps1` نصب می‌کند). `TZ=Asia/Tehran`.
+بدون tzdata روی ویندوز zoneinfo کار نمی‌کند.
+
+### 12. متن فارسی در لاگ به‌هم‌ریخته
+`PYTHONUTF8=1` را در سرویس NSSM چک کنید (`nssm edit BaleArchiveBot` →
+Environment).
+
+### 13. Windows فایل لاگ را قفل کرده
+ورکر رسانه بعد از هر فایل هندل را می‌بندد. اگر چرخش لاگ NSSM شکست خورد،
+آنتی‌ویروس را روی `data\` استثنا کنید.
+
+### 14. سرویس بعد از آپدیت ویندوز بالا نمی‌آید
+NSSM روی Automatic است؛ اگر نیامد `nssm start BaleArchiveBot`. Active hours
+را محدود کنید (بخش Windows Update بالا).

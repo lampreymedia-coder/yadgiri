@@ -1,82 +1,82 @@
 # Bale Archive Bot
 
-A production-grade archive bot for [Bale messenger](https://docs.bale.ai) groups.
-Every piece of content posted in a monitored group is archived first, then the
-sender is asked — in a private-chat wizard — whether it should be stored under
-one or more hashtags. Admins get precise, aggregated and per-entity reports.
+Archive bot for [Bale messenger](https://docs.bale.ai) groups, built to run on
+**one Windows machine**: local PostgreSQL, local disk for media, NSSM as the
+Windows service. No Docker, Redis, or cloud object storage required.
 
-## Install in 5 minutes
+Every piece of content posted in a monitored group is archived first. The
+sender is then asked — **in the same group, as a reply** — whether it should
+be stored under hashtags. Forwarded posts are accepted like any other
+content; there is no extra size or dimension filter.
 
-```bash
-git clone <repo> && cd bale-archive-bot
-cp .env.example .env      # fill: BALE_BOT_TOKEN, ARCHIVE_CHAT_ID, ADMIN_USER_IDS, DATABASE_URL
-docker compose up --build -d
-docker compose run --rm app python scripts/seed_tags.py
-```
-
-That's it. The `migrate` service applies Alembic migrations automatically,
-`app` starts in polling mode by default (`RUN_MODE=polling`), and `/healthz`
-answers on port 8000.
-
-For local development with a bundled PostgreSQL:
-
-```bash
-docker compose --profile dev up -d postgres
-DATABASE_URL=postgresql+asyncpg://bot:bot@localhost:5432/bale_archive
-```
-
-## Architecture at a glance
+## Install on Windows
 
 ```
-Update (polling / webhook)
+copy .env.example .env
+# fill BALE_BOT_TOKEN and DATABASE_URL
+.\scripts\install.ps1
+.\scripts\run.ps1
+```
+
+`DATABASE_URL` example (Postgres on this PC):
+
+```
+postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/bale_archive
+```
+
+Keep it running after logoff with NSSM: `.\scripts\install-service.ps1`
+
+See `docs/RUNBOOK.md` and `docs/DEPLOY_WINDOWS.md`.
+
+## Architecture
+
+```
+Update (polling)
    │ idempotency (processed_updates) → per-(chat,user) lock
    ▼
-Dispatcher ──► group intake ──► [1] copyMessage → archive channel
+Dispatcher ──► group intake ──► [1] copyMessage → archive group
    │                            [2] INSERT submissions (draft)
    │                            [3] deleteMessage (ONLY after 1+2)
-   │                            [4] wizard in private chat (fallback: in-group)
-   ├──► wizard callbacks (FSM + back-stack, state in Redis→Postgres)
-   ├──► admin commands (reports, tags, export, broadcast)
+   │                            [4] wizard in the same group (reply)
+   ├──► wizard callbacks (FSM, state in conversation_states)
+   ├──► admin commands
    ▼
-Workers: outbox retry · media download→S3 · TTL sweeper · weekly digest
+Workers: outbox · media → local MEDIA_ROOT · TTL sweeper · weekly digest
 ```
 
 Golden rule: **the original message is never deleted before both the archive
-copy and the database row exist.** If either fails, the message stays in the
-group, the user gets a short notice and the admin is alerted.
+copy and the database row exist.**
 
-Every stored item has three retention layers: the database row, the archived
-message in Bale (works even for 20–50MB files bots cannot download), and the
-file in Arvan object storage (when ≤ 20MB).
+Conversation state lives only in Postgres (`conversation_states`). Locks use
+`pg_advisory_xact_lock`. File storage goes through a `Storage` interface
+(`LocalStorage` now; `STORAGE_BACKEND=s3` later).
 
 ## Commands
 
 | Command | Who | What |
 |---------|-----|------|
-| `/start`, `/help`, `/my`, `/undo <code>`, `/resume` | everyone | onboarding, own history, undo, resume wizard |
-| `/panel`, `/stats`, `/top_users`, `/top_tags`, `/tag`, `/type`, `/user`, `/search`, `/get`, `/export` | admin | reports & retrieval |
-| `/tags`, `/addtag`, `/edittag`, `/disabletag`, `/reordertags` | admin | dynamic hashtag management (no code changes) |
-| `/groups`, `/health`, `/settings`, `/broadcast`, `/forget`, `/onboard` | admin | operations |
-
-Admin commands answer only for `ADMIN_USER_IDS` ∪ `users.is_admin`, and only
-in private chat or `ADMIN_CHAT_ID`. Everyone else sees a generic
-"invalid command" reply.
+| `/start`, `/help`, `/my`, `/undo`, `/resume` | everyone | onboarding, history, undo, resume |
+| `آرشیو` / `/archive` in a group | admin/owner | mark that group as the private archive |
+| `/panel`, `/stats`, reports, tags, export | admin | admin panel |
 
 ## Development
 
-```bash
-pip install -e ".[dev]"
-make check        # ruff + black --check + mypy --strict + pytest
-make probe        # scripts/api_probe.py against a test group (writes docs/BALE_API_NOTES.md)
+```
+python -m pip install -e ".[dev]"
+python -m ruff check app tests scripts
+python -m black --check app tests scripts
+python -m mypy app scripts
+python -m pytest -q
 ```
 
-Tests never touch the network (`tests/fakes/fake_bale.py`). Postgres-specific
-tests use testcontainers and skip automatically when Docker is unavailable.
+Or on Windows: `.\scripts\check.ps1`
+
+Tests never touch the network (`tests/fakes/fake_bale.py`).
 
 ## Documentation
 
-- `docs/DEPLOY_ARVAN.md` — zero-to-running on Arvan Cloud
-- `docs/ADMIN_GUIDE.md` — راهنمای فارسی ادمین
-- `docs/RUNBOOK.md` — troubleshooting: 15 likely failures and fixes
+- `docs/DEPLOY_WINDOWS.md` — first-time setup
+- `docs/ADMIN_GUIDE.md` — Persian admin guide
+- `docs/RUNBOOK.md` — NSSM, backup, Defender, Windows Update
 - `docs/BALE_API_NOTES.md` — probed API behaviour
-- `docs/DECISIONS.md` — architecture decisions and rationale
+- `docs/DECISIONS.md` — architecture decisions

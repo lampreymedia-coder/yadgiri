@@ -17,6 +17,7 @@ from app.core.albums import AlbumBuffer
 from app.core.context import BotContext
 from app.core.fsm import WizardState
 from app.core.idempotency import claim_update
+from app.domain.classify import normalize_fa
 from app.handlers import admin, group_intake, user_commands, wizard
 from app.handlers.errors import handle_update_error
 from app.i18n import fa
@@ -25,14 +26,29 @@ from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Whole-message Persian aliases so non-technical users need not type /archive.
+_PERSIAN_COMMANDS = {
+    "ارشیو": "archive",
+    "ارشیوم": "archive",
+    "بایگانی": "archive",
+    "بایگانیخصوصی": "archive",
+}
+
 
 def parse_command(text: str) -> tuple[str, list[str]] | None:
-    """Parse '/cmd arg1 arg2' (with optional @botname suffix)."""
-    if not text.startswith("/"):
+    """Parse '/cmd arg1 arg2' or a Persian alias such as «آرشیو»."""
+    stripped = (text or "").strip()
+    if not stripped:
         return None
-    parts = text.split()
-    command = parts[0][1:].split("@")[0].lower()
-    return command, parts[1:]
+    if stripped.startswith("/"):
+        parts = stripped.split()
+        command = parts[0][1:].split("@")[0].lower()
+        return command, parts[1:]
+    first = normalize_fa(stripped.split()[0]).replace(" ", "")
+    mapped = _PERSIAN_COMMANDS.get(first)
+    if mapped is not None:
+        return mapped, stripped.split()[1:]
+    return None
 
 
 class Dispatcher:
@@ -78,7 +94,6 @@ class Dispatcher:
                 logger.warning("degraded_notice_failed", error=str(send_error))
 
     async def _dispatch_inner(self, update: Update) -> None:
-        # Idempotency: claim the update_id first.
         async with self.ctx.db.session() as session:
             if not await claim_update(session, update.update_id):
                 return
@@ -86,7 +101,6 @@ class Dispatcher:
         if update.message is not None:
             await self._on_message(update.message)
         elif update.edited_message is not None:
-            # Edits after gating are informational only.
             logger.info(
                 "edited_message_ignored",
                 chat_id=update.edited_message.chat.id,
@@ -94,8 +108,6 @@ class Dispatcher:
             )
         elif update.callback_query is not None:
             await self._on_callback(update.callback_query)
-
-    # ─── Messages ───
 
     async def _on_message(self, message: Message) -> None:
         if message.new_chat_members or message.left_chat_member:
@@ -106,8 +118,7 @@ class Dispatcher:
 
         user_id = message.from_user.id
         lock = self.ctx.locks.get(message.chat.id, user_id)
-        if lock.locked() and not (message.text or "").startswith("/"):
-            # A previous action for this conversation is still running.
+        if lock.locked() and parse_command(message.text or "") is None:
             try:
                 await self.ctx.api.send_message(message.chat.id, fa.ERR_BUSY)
             except (BaleAPIError, NetworkError) as exc:
@@ -117,7 +128,7 @@ class Dispatcher:
         async with lock:
             if message.is_private_message:
                 await self._on_private_message(message)
-            elif message.is_group_message:
+            else:
                 await self._on_group_message(message)
 
     async def _on_private_message(self, message: Message) -> None:
@@ -127,7 +138,6 @@ class Dispatcher:
             await self._on_command(message, command[0], command[1])
             return
 
-        # Wizard/admin text input?
         assert message.from_user is not None
         async with self.ctx.db.session() as session:
             store = self.ctx.state_store(session)
@@ -143,7 +153,6 @@ class Dispatcher:
                 await admin.handle_admin_input(self.ctx, session, message, conversation)
                 return
 
-        # Otherwise: private-first content intake.
         await group_intake.process_private_content(self.ctx, message)
 
     async def _on_group_message(self, message: Message) -> None:
@@ -155,8 +164,6 @@ class Dispatcher:
         if group_intake._should_ignore(self.ctx, message):
             return
         await self.albums.add(message)
-
-    # ─── Commands ───
 
     async def _on_command(self, message: Message, command: str, args: list[str]) -> None:
         assert message.from_user is not None
@@ -177,11 +184,9 @@ class Dispatcher:
             await user_commands.handle_resume(self.ctx, message)
             return
 
-        # Everything else is admin-only, restricted to private chat or the
-        # admin chat; non-admins get the generic invalid-command reply.
         async with self.ctx.db.session() as session:
             authorized = await admin.is_admin(self.ctx, session, message.from_user.id)
-            if command in {"onboard", "archive"} and message.is_group_message:
+            if command in {"onboard", "archive"} and not message.is_private_message:
                 if not authorized:
                     authorized = await admin.promote_first_owner(
                         self.ctx, session, message.from_user
@@ -255,8 +260,6 @@ class Dispatcher:
             await admin.handle_forget(ctx, session, chat_id, args, actor)
         else:
             await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
-
-    # ─── Callbacks ───
 
     async def _on_callback(self, cq: CallbackQuery) -> None:
         try:

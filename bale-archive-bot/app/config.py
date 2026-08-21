@@ -9,6 +9,7 @@ from __future__ import annotations
 import secrets
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated
 
 from pydantic import Field, field_validator, model_validator
@@ -32,10 +33,9 @@ class ExpiredPolicy(StrEnum):
     KEEP_DRAFT = "keep_draft"
 
 
-class StateBackend(StrEnum):
-    AUTO = "auto"
-    REDIS = "redis"
-    POSTGRES = "postgres"
+class StorageBackend(StrEnum):
+    LOCAL = "local"
+    S3 = "s3"
 
 
 class Settings(BaseSettings):
@@ -77,25 +77,24 @@ class Settings(BaseSettings):
     ignore_stickers: bool = Field(default=True, alias="IGNORE_STICKERS")
     formatting_enabled: bool = Field(default=False, alias="FORMATTING_ENABLED")
 
-    # ─── Database ───
+    # ─── Database (local Postgres on this Windows machine) ───
     database_url: str = Field(alias="DATABASE_URL")
     db_pool_size: int = Field(default=10, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
 
-    # ─── Redis ───
-    redis_url: str = Field(default="", alias="REDIS_URL")
-    state_backend: StateBackend = Field(default=StateBackend.AUTO, alias="STATE_BACKEND")
+    # Conversation state always lives in conversation_states (Postgres).
+    # The name is kept so existing .env files stay valid.
+    state_backend: str = Field(default="postgres", alias="STATE_BACKEND")
 
-    # ─── Object storage (Arvan) ───
-    s3_endpoint_url: str = Field(
-        default="https://s3.ir-thr-at1.arvanstorage.ir", alias="S3_ENDPOINT_URL"
-    )
+    # ─── Local media (switch STORAGE_BACKEND=s3 later if needed) ───
+    storage_backend: StorageBackend = Field(default=StorageBackend.LOCAL, alias="STORAGE_BACKEND")
+    media_root: str = Field(default="data/media", alias="MEDIA_ROOT")
+    media_download_enabled: bool = Field(default=True, alias="MEDIA_DOWNLOAD_ENABLED")
+    s3_endpoint_url: str = Field(default="", alias="S3_ENDPOINT_URL")
     s3_access_key: str = Field(default="", alias="S3_ACCESS_KEY")
     s3_secret_key: str = Field(default="", alias="S3_SECRET_KEY")
     s3_bucket_media: str = Field(default="bale-archive-media", alias="S3_BUCKET_MEDIA")
-    s3_bucket_backup: str = Field(default="bale-archive-backup", alias="S3_BUCKET_BACKUP")
     s3_max_download_mb: int = Field(default=20, alias="S3_MAX_DOWNLOAD_MB")
-    media_download_enabled: bool = Field(default=True, alias="MEDIA_DOWNLOAD_ENABLED")
 
     # ─── Limits ───
     rate_global_rps: float = Field(default=20.0, alias="RATE_GLOBAL_RPS")
@@ -112,9 +111,10 @@ class Settings(BaseSettings):
     sentry_dsn: str = Field(default="", alias="SENTRY_DSN")
     tz: str = Field(default="Asia/Tehran", alias="TZ")
     metrics_enabled: bool = Field(default=True, alias="METRICS_ENABLED")
+    backup_dir: str = Field(default="data/backups", alias="BACKUP_DIR")
 
     # ─── Internal (not user-facing) ───
-    spool_dir: str = Field(default="spool", alias="SPOOL_DIR")
+    spool_dir: str = Field(default="data/spool", alias="SPOOL_DIR")
 
     @field_validator("admin_user_ids", "allowed_group_ids", mode="before")
     @classmethod
@@ -129,6 +129,11 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("state_backend", mode="before")
+    @classmethod
+    def _force_postgres_state(cls, value: object) -> str:
+        return "postgres"
 
     @field_validator("bale_bot_token")
     @classmethod
@@ -145,22 +150,32 @@ class Settings(BaseSettings):
                 msg = "WEBHOOK_BASE_URL is required when RUN_MODE=webhook"
                 raise ValueError(msg)
             if not self.webhook_secret_path:
-                # Generate once per process; operators should pin it in .env
-                # so the webhook URL survives restarts.
                 object.__setattr__(self, "webhook_secret_path", secrets.token_urlsafe(24))
         return self
 
     @property
     def webhook_path(self) -> str:
-        return f"/webhook/{self.webhook_secret_path}"
+        return "/webhook/" + self.webhook_secret_path
 
     @property
     def webhook_url(self) -> str:
-        return f"{self.webhook_base_url.rstrip('/')}{self.webhook_path}"
+        return self.webhook_base_url.rstrip("/") + self.webhook_path
 
     @property
     def max_download_bytes(self) -> int:
         return self.s3_max_download_mb * 1024 * 1024
+
+    @property
+    def media_root_path(self) -> Path:
+        return Path(self.media_root)
+
+    @property
+    def spool_dir_path(self) -> Path:
+        return Path(self.spool_dir)
+
+    @property
+    def backup_dir_path(self) -> Path:
+        return Path(self.backup_dir)
 
     def is_admin_user(self, bale_user_id: int) -> bool:
         return bale_user_id in self.admin_user_ids

@@ -150,6 +150,13 @@ def _forward_source(message: Message) -> tuple[bool, str | None]:
     if message.forward_from_chat is not None:
         chat = message.forward_from_chat
         return True, f"chat:{chat.id}:{chat.title or chat.username or ''}"
+    if message.forward_sender_name:
+        return True, f"name:{message.forward_sender_name}"
+    if message.forward_date is not None:
+        return True, f"date:{message.forward_date}"
+    extra = message.model_extra or {}
+    if extra.get("forward_from") or extra.get("forward_from_chat") or extra.get("forward_date"):
+        return True, "forwarded"
     return False, None
 
 
@@ -294,4 +301,17 @@ def classify(message: Message) -> ClassifiedContent:
         if urls and _link_dominant(text, urls):
             return result(ContentType.LINK, None, [], text)
         return result(ContentType.TEXT, None, [], text)
+    if message.caption:
+        return result(ContentType.TEXT, None, [], message.caption)
+    extra = message.model_extra or {}
+    for extra_key, extra_type in (
+        ("photo", ContentType.IMAGE),
+        ("video", ContentType.VIDEO),
+        ("document", ContentType.DOCUMENT),
+        ("audio", ContentType.AUDIO),
+        ("voice", ContentType.VOICE),
+        ("animation", ContentType.ANIMATION),
+    ):
+        if extra.get(extra_key):
+            return result(extra_type, None, [])
     return result(ContentType.OTHER)

@@ -614,6 +614,7 @@ async def persist_archive_chat(ctx: BotContext, session: AsyncSession, chat_id: 
     groups = GroupRepository(session)
     group = await groups.upsert(chat_id, None, "group")
     await groups.set_active(group.id, True)
+    group.settings = {**group.settings, "role": "archive", "role_asked": True}
     audit = AuditRepository(session)
     await audit.record("archive_chat_set", None, "group", str(chat_id), {})
 
@@ -711,6 +712,11 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
         else:
             await persist_archive_chat(ctx, session, archive_id)
             await ctx.api.send_message(chat_id, fa.ARCHIVE_SET_DONE)
+            if archive_id != chat_id:
+                try:
+                    await ctx.api.send_message(archive_id, fa.ARCHIVE_SET_DONE, is_group=True)
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.info("archive_group_confirm_failed", error=str(exc))
     elif data.action == "srg":
         try:
             group_chat_id = int(data.arg)
@@ -720,7 +726,15 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
             groups = GroupRepository(session)
             group = await groups.upsert(group_chat_id, None, "group")
             await groups.set_active(group.id, True)
+            group.settings = {**group.settings, "role": "research", "role_asked": True}
             await ctx.api.send_message(chat_id, fa.RESEARCH_GROUP_READY)
+            if group_chat_id != chat_id:
+                try:
+                    await ctx.api.send_message(
+                        group_chat_id, fa.RESEARCH_GROUP_READY, is_group=True
+                    )
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.info("research_group_confirm_failed", error=str(exc))
 
     if ctx.caps.has("answerCallbackQuery"):
         try:

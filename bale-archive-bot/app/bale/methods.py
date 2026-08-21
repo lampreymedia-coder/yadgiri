@@ -73,9 +73,16 @@ class BaleAPI:
         }
         if reply_markup is not None:
             params["reply_markup"] = reply_markup.to_payload()
-        result = await self.client.request(
-            "sendMessage", params, chat_id=chat_id, is_group=is_group
-        )
+        try:
+            result = await self.client.request(
+                "sendMessage", params, chat_id=chat_id, is_group=is_group
+            )
+        except NotFound:
+            # Some Bale deployments reject numeric group ids; retry as string.
+            params["chat_id"] = str(chat_id)
+            result = await self.client.request(
+                "sendMessage", params, chat_id=chat_id, is_group=is_group
+            )
         return Message.model_validate(result)
 
     async def _send_media(

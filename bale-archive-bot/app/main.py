@@ -1,8 +1,7 @@
 """Application entrypoint: polling or webhook mode.
 
 Polling (Bale has no long-polling): a short-interval adaptive loop with a
-manually computed offset. Webhook: FastAPI on a secret random path, ports
-443/88 are terminated by Caddy in front.
+manually computed offset. On Windows the process is kept alive by NSSM.
 """
 
 from __future__ import annotations
@@ -64,20 +63,6 @@ class Application:
         self._inflight: set[asyncio.Task[None]] = set()
 
     async def startup(self) -> None:
-        redis_client: Any | None = None
-        if self.settings.redis_url and self.settings.state_backend != "postgres":
-            try:
-                import redis.asyncio as aioredis
-
-                redis_client = aioredis.from_url(
-                    self.settings.redis_url, socket_timeout=3, socket_connect_timeout=3
-                )
-                await redis_client.ping()
-                logger.info("redis_connected")
-            except (ConnectionError, OSError, TimeoutError) as exc:
-                logger.warning("redis_unavailable_falling_back", error=str(exc))
-                redis_client = None
-
         from app.bale.capabilities import Capabilities
 
         caps = Capabilities()
@@ -86,9 +71,7 @@ class Application:
         except (BaleAPIError, NetworkError) as exc:
             logger.warning("capability_probe_failed", error=str(exc))
 
-        self.ctx = BotContext(
-            settings=self.settings, api=self.api, db=self.db, caps=caps, redis=redis_client
-        )
+        self.ctx = BotContext(settings=self.settings, api=self.api, db=self.db, caps=caps)
         await self._prepare_store()
         try:
             me = await self.api.get_me()

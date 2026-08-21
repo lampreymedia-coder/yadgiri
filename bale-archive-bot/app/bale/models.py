@@ -138,6 +138,8 @@ class Message(_BaleModel):
     forward_from: User | None = None
     forward_from_chat: Chat | None = None
     forward_from_message_id: int | None = None
+    forward_date: int | None = None
+    forward_sender_name: str | None = None
     new_chat_members: list[User] | None = None
     left_chat_member: User | None = None
     # Undocumented in Bale docs; kept optional and verified by api_probe.
@@ -145,11 +147,13 @@ class Message(_BaleModel):
 
     @property
     def is_group_message(self) -> bool:
-        return self.chat.type in ("group", "supergroup")
+        # Bale chat types vary; anything that is not a 1:1 private chat is
+        # treated as a group so intake never silently drops messages.
+        return (self.chat.type or "").lower() not in ("private", "pv")
 
     @property
     def is_private_message(self) -> bool:
-        return self.chat.type == "private"
+        return (self.chat.type or "").lower() in ("private", "pv")
 
     def raw(self) -> dict[str, Any]:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)

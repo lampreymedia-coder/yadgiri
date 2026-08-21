@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -96,4 +97,24 @@ async def test_none_params_stripped() -> None:
     await client.request("sendMessage", {"chat_id": 1, "text": "hi", "reply_markup": None})
     sent = server.calls_for("sendMessage")[0]
     assert "reply_markup" not in sent
+    await client.close()
+
+
+async def test_send_payload_matches_bale_libraries() -> None:
+    """Bale rejects nested reply_markup / numeric chat_id with a 404."""
+    server = FakeBaleServer()
+    client = await make_client(server)
+    await client.request(
+        "sendMessage",
+        {
+            "chat_id": 99,
+            "text": "hi",
+            "reply_markup": {"inline_keyboard": [[{"text": "بله", "callback_data": "1|yes|ab|"}]]},
+        },
+    )
+    sent = server.calls_for("sendMessage")[0]
+    assert sent["chat_id"] == "99"
+    assert isinstance(sent["reply_markup"], str)
+    decoded = json.loads(sent["reply_markup"])
+    assert decoded["inline_keyboard"][0][0]["text"] == "بله"
     await client.close()

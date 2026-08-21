@@ -97,7 +97,13 @@ class FakeBaleServer:
             params: dict[str, Any] = json.loads(request.content) if request.content else {}
         except ValueError:
             params = {}
-        self.calls.append((method, params))
+        self.calls.append((method, dict(params)))
+        markup = params.get("reply_markup")
+        if isinstance(markup, str):
+            try:
+                params["reply_markup"] = json.loads(markup)
+            except ValueError:
+                pass
 
         injected = self._maybe_fail(method)
         if injected is not None:

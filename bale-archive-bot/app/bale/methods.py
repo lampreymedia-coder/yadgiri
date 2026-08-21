@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.bale.client import BaleClient
 from app.bale.errors import BaleAPIError, NotFound
 from app.bale.models import (
@@ -48,7 +50,13 @@ class BaleAPI:
         result = await self.client.request(
             "getUpdates", {"offset": offset, "limit": max(1, min(limit, 100))}
         )
-        return [Update.model_validate(item) for item in result or []]
+        updates: list[Update] = []
+        for item in result or []:
+            try:
+                updates.append(Update.model_validate(item))
+            except (ValidationError, ValueError, TypeError):
+                logger.warning("update_parse_failed", raw=item)
+        return updates
 
     async def set_webhook(self, url: str) -> bool:
         return bool(await self.client.request("setWebhook", {"url": url}))
@@ -78,10 +86,13 @@ class BaleAPI:
                 "sendMessage", params, chat_id=chat_id, is_group=is_group
             )
         except NotFound:
-            # Some Bale deployments reject numeric group ids; retry as string.
-            params["chat_id"] = str(chat_id)
+            # JSON body rejected: retry as form-urlencoded (also accepted by Bale).
             result = await self.client.request(
-                "sendMessage", params, chat_id=chat_id, is_group=is_group
+                "sendMessage",
+                params,
+                chat_id=chat_id,
+                is_group=is_group,
+                use_form=True,
             )
         return Message.model_validate(result)
 

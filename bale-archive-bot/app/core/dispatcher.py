@@ -94,6 +94,29 @@ class Dispatcher:
                 logger.warning("degraded_notice_failed", error=str(send_error))
 
     async def _dispatch_inner(self, update: Update) -> None:
+        if update.message is not None:
+            message = update.message
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                message_id=message.message_id,
+                from_id=message.from_user.id if message.from_user else None,
+                text_preview=(message.text or message.caption or "")[:80],
+                added_members=len(message.added_members()),
+            )
+        elif update.callback_query is not None:
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                data=update.callback_query.data,
+            )
+        else:
+            logger.info("update_received", update_id=update.update_id, kind=update.kind)
+
         async with self.ctx.db.session() as session:
             if not await claim_update(session, update.update_id):
                 return
@@ -110,10 +133,15 @@ class Dispatcher:
             await self._on_callback(update.callback_query)
 
     async def _on_message(self, message: Message) -> None:
-        if message.new_chat_members or message.left_chat_member:
+        if message.added_members() or message.left_chat_member or message.group_chat_created:
             await group_intake.register_group_events(self.ctx, message)
             return
-        if message.from_user is None or message.from_user.is_bot:
+        if message.from_user is not None and message.from_user.is_bot:
+            return
+
+        if message.from_user is None:
+            if not message.is_private_message:
+                await group_intake.process_group_batch(self.ctx, [message])
             return
 
         user_id = message.from_user.id
@@ -168,8 +196,11 @@ class Dispatcher:
     async def _on_command(self, message: Message, command: str, args: list[str]) -> None:
         assert message.from_user is not None
 
-        if command == "start" and message.is_private_message:
-            await user_commands.handle_start(self.ctx, message)
+        if command == "start":
+            if message.is_private_message:
+                await user_commands.handle_start(self.ctx, message)
+            else:
+                await group_intake.handle_group_hello(self.ctx, message)
             return
         if command == "help":
             await user_commands.handle_help(self.ctx, message)
@@ -302,7 +333,7 @@ class Dispatcher:
                 logger.warning("spool_file_invalid", file=str(path))
                 path.unlink(missing_ok=True)
                 continue
-            await self._dispatch_inner(update)
+            await self.dispatch(update)
             path.unlink(missing_ok=True)
             processed += 1
         if processed:

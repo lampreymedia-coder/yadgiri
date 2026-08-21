@@ -282,10 +282,15 @@ async def open_wizard(
             wizard_chat_id, wizard_message_id = origin_chat, sent.message_id
 
     if wizard_chat_id is None:
+        private_chat = (
+            origin.chat.id
+            if origin is not None and origin.is_private_message
+            else user.bale_user_id
+        )
         text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
-        sent = await try_send(user.bale_user_id, text, markup, is_group=False, reply=None)
+        sent = await try_send(private_chat, text, markup, is_group=False, reply=None)
         if sent is not None:
-            wizard_chat_id, wizard_message_id = user.bale_user_id, sent.message_id
+            wizard_chat_id, wizard_message_id = private_chat, sent.message_id
             await users_repo.set_private_chat(user.id, True)
         else:
             await users_repo.set_private_chat(user.id, False)

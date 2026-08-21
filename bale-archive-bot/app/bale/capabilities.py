@@ -18,7 +18,6 @@ logger = get_logger(__name__)
 # whether the method itself is recognised, i.e. not a 404).
 _PROBEABLE_METHODS: tuple[str, ...] = (
     "getMe",
-    "getUpdates",
     "getWebhookInfo",
     "sendMessage",
     "editMessageText",
@@ -60,8 +59,6 @@ async def probe_capabilities(api: BaleAPI) -> Capabilities:
         try:
             if method == "getMe":
                 await api.get_me()
-            elif method == "getUpdates":
-                await api.get_updates(offset=-1, limit=1)
             elif method == "getWebhookInfo":
                 await api.get_webhook_info()
             else:

@@ -12,6 +12,7 @@ Every request goes through :meth:`BaleClient.request` which:
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 import time
 from typing import Any, Protocol
@@ -81,6 +82,28 @@ class BaleClient:
     async def close(self) -> None:
         await self._http.aclose()
 
+    @staticmethod
+    def _normalize_payload(params: dict[str, Any] | None) -> dict[str, Any]:
+        """Shape a payload the way the official Bale libraries do.
+
+        python-bale-bot always sends ``chat_id`` as a string and
+        ``reply_markup`` as a JSON *string* (double-encoded). Sending a nested
+        object or a numeric chat_id is what produced ``404 no such group or
+        user`` against real groups even when the bot had just received a
+        message from that same chat.
+        """
+        payload: dict[str, Any] = {}
+        for key, value in (params or {}).items():
+            if value is None:
+                continue
+            if key in {"chat_id", "from_chat_id"}:
+                payload[key] = str(value)
+            elif key == "reply_markup" and isinstance(value, dict):
+                payload[key] = json.dumps(value, ensure_ascii=False)
+            else:
+                payload[key] = value
+        return payload
+
     async def request(
         self,
         method: str,
@@ -89,9 +112,10 @@ class BaleClient:
         chat_id: int | None = None,
         is_group: bool = False,
         max_attempts: int = _MAX_ATTEMPTS,
+        use_form: bool = False,
     ) -> Any:
         """Call a Bale API method and return the ``result`` payload."""
-        payload = {k: v for k, v in (params or {}).items() if v is not None}
+        payload = self._normalize_payload(params)
         last_error: Exception | None = None
 
         for attempt in range(1, max_attempts + 1):
@@ -102,6 +126,12 @@ class BaleClient:
                     response = await self._http.post(
                         self.method_url(method), data=payload, files=files
                     )
+                elif use_form:
+                    form = {
+                        key: value if isinstance(value, str) else json.dumps(value)
+                        for key, value in payload.items()
+                    }
+                    response = await self._http.post(self.method_url(method), data=form)
                 else:
                     response = await self._http.post(self.method_url(method), json=payload)
                 body = response.json()
@@ -158,6 +188,9 @@ class BaleClient:
                 method=method,
                 error_code=error_code,
                 description=description,
+                chat_id=payload.get("chat_id"),
+                param_keys=sorted(payload.keys()),
+                form=use_form,
             )
             raise error
 

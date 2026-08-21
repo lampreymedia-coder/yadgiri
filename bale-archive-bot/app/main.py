@@ -177,6 +177,22 @@ class Application:
         await self.db.dispose()
         logger.info("shutdown_complete")
 
+    async def _notify_owner_ready(self) -> None:
+        """Tell the owner the process is live — also proves private sendMessage works."""
+        assert self.ctx is not None
+        from app.i18n import fa
+
+        owner_id = next(iter(self.ctx.runtime_admin_ids), None)
+        if owner_id is None:
+            owner_id = self.ctx.admin_notify_chat_id
+        if owner_id is None:
+            return
+        try:
+            await self.api.send_message(owner_id, fa.BOT_READY_PING)
+            logger.info("owner_ready_ping_sent", chat_id=owner_id)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("owner_ready_ping_failed", chat_id=owner_id, error=str(exc))
+
     def _track(self, coro: Any) -> asyncio.Task[None]:
         task: asyncio.Task[None] = asyncio.create_task(coro)
         self._inflight.add(task)
@@ -203,6 +219,16 @@ class Application:
             else:
                 raise
 
+        try:
+            info = await self.api.get_webhook_info()
+            if info.url:
+                logger.warning("webhook_was_set_clearing", url=info.url)
+                await self.api.set_webhook("")
+                logger.info("webhook_cleared_for_polling")
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("webhook_clear_failed", error=str(exc))
+
+        await self._notify_owner_ready()
         logger.info("polling_started", offset=offset)
         while not self.stop_event.is_set():
             try:

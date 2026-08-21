@@ -106,7 +106,7 @@ async def probe_methods(client: httpx.AsyncClient) -> dict[str, dict[str, Any]]:
     chat = int(CHAT_ID) if CHAT_ID else 0
     harmless: dict[str, dict[str, Any]] = {
         "getMe": {},
-        "getUpdates": {"offset": -1, "limit": 1},
+        "getUpdates": {"limit": 1},
         "getWebhookInfo": {},
         "sendMessage": {"chat_id": chat, "text": "probe"},
         "getChat": {"chat_id": chat},

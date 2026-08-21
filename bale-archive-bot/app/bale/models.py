@@ -141,9 +141,18 @@ class Message(_BaleModel):
     forward_date: int | None = None
     forward_sender_name: str | None = None
     new_chat_members: list[User] | None = None
+    new_chat_member: User | None = None  # singular form some Bale payloads use
     left_chat_member: User | None = None
+    group_chat_created: bool | None = None
     # Undocumented in Bale docs; kept optional and verified by api_probe.
     media_group_id: str | None = None
+
+    def added_members(self) -> list[User]:
+        """Join events: Bale may send an array, a single user, or both."""
+        members = list(self.new_chat_members or [])
+        if self.new_chat_member is not None:
+            members.append(self.new_chat_member)
+        return members
 
     @property
     def is_group_message(self) -> bool:

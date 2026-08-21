@@ -123,6 +123,68 @@ async def test_persian_archive_word_registers_chat(
     assert "ثبت شد" in texts
 
 
+async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
+    _clear_bootstrap(ctx)
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900010,
+                "message": {
+                    "message_id": 4,
+                    "date": 1,
+                    "chat": {"id": -100200300, "type": "group", "title": "رصد"},
+                    "from": {
+                        "id": OWNER_ID,
+                        "is_bot": False,
+                        "first_name": "مینا",
+                    },
+                    "text": "/start",
+                },
+            }
+        )
+    )
+    texts = "\n".join(fake_bale.sent_texts(-100200300))
+    assert "این گروه چیست" in texts
+    markup = fake_bale.last_markup(-100200300)
+    assert markup is not None
+    labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
+    assert any("رصد" in label for label in labels)
+    assert any("آرشیو" in label for label in labels)
+
+
+async def test_bot_added_singular_member_asks_role(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    _clear_bootstrap(ctx)
+    ctx.bot_user_id = fake_bale.bot_id
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900011,
+                "message": {
+                    "message_id": 5,
+                    "date": 1,
+                    "chat": {"id": -100200301, "type": "group", "title": "تیم"},
+                    "from": {
+                        "id": OWNER_ID,
+                        "is_bot": False,
+                        "first_name": "مینا",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    texts = "\n".join(fake_bale.sent_texts(-100200301))
+    assert "این گروه چیست" in texts
+
+
 async def test_group_content_opens_wizard_in_group(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:

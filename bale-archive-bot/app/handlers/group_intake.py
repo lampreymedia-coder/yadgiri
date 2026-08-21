@@ -49,38 +49,80 @@ def role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     )
 
 
-async def ask_group_role(ctx: BotContext, message: Message, group: Group) -> None:
-    """Ask in the group itself whether this chat is research or archive."""
+async def ask_group_role(ctx: BotContext, message: Message, group: Group) -> bool:
+    """Ask in the group itself whether this chat is research or archive.
+
+    Returns True when a prompt was posted (or attempted).
+    """
     if role_already_asked(group) or group_role(group) is not None:
-        return
+        return False
     set_group_role(group, ROLE_RESEARCH)
     title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
     text = fa.bot_added_ask_role(title)
     markup = role_keyboard(message.chat.id)
     try:
-        await ctx.api.send_message(message.chat.id, text, markup, is_group=True)
+        await ctx.api.send_message(
+            message.chat.id,
+            text,
+            markup,
+            reply_to_message_id=message.message_id,
+            is_group=True,
+        )
+        return True
     except (BaleAPIError, NetworkError) as exc:
         logger.warning("bot_added_group_notice_failed", chat_id=message.chat.id, error=str(exc))
         group.settings = {**group.settings, "role_asked": False}
+        return False
+
+
+async def handle_group_hello(ctx: BotContext, message: Message) -> None:
+    """`/start` (or equivalent) typed in a group: introduce the bot and ask the role."""
+    async with ctx.db.session() as session:
+        groups = GroupRepository(session)
+        group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
+        await groups.set_active(group.id, True)
+        if message.from_user is not None:
+            from app.handlers.admin import promote_first_owner
+
+            await promote_first_owner(ctx, session, message.from_user)
+        asked = await ask_group_role(ctx, message, group)
+    if asked:
+        return
+    try:
+        await ctx.api.send_message(
+            message.chat.id,
+            fa.GROUP_HELLO,
+            reply_to_message_id=message.message_id,
+            is_group=True,
+        )
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("group_hello_failed", chat_id=message.chat.id, error=str(exc))
 
 
 async def register_group_events(ctx: BotContext, message: Message) -> None:
-    """Track bot membership: new_chat_members is the documented join signal."""
-    if not message.new_chat_members:
+    """Track bot membership: new_chat_members / new_chat_member / group_chat_created."""
+    members = message.added_members()
+    if not members and not message.group_chat_created and not message.left_chat_member:
         return
     async with ctx.db.session() as session:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
-        for member in message.new_chat_members:
-            if member.id != ctx.bot_user_id:
-                continue
-            logger.info("bot_added_to_group", chat_id=message.chat.id)
-            await groups.set_active(group.id, True)
-            if message.from_user is not None:
-                from app.handlers.admin import promote_first_owner
+        bot_joined = message.group_chat_created or any(
+            member.id == ctx.bot_user_id for member in members
+        )
+        if message.left_chat_member is not None and message.left_chat_member.id == ctx.bot_user_id:
+            await groups.set_active(group.id, False)
+            logger.info("bot_removed_from_group", chat_id=message.chat.id)
+            return
+        if not bot_joined:
+            return
+        logger.info("bot_added_to_group", chat_id=message.chat.id)
+        await groups.set_active(group.id, True)
+        if message.from_user is not None:
+            from app.handlers.admin import promote_first_owner
 
-                await promote_first_owner(ctx, session, message.from_user)
-            await ask_group_role(ctx, message, group)
+            await promote_first_owner(ctx, session, message.from_user)
+        await ask_group_role(ctx, message, group)
 
 
 def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:
@@ -91,7 +133,7 @@ def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:
 def _should_ignore(ctx: BotContext, message: Message) -> bool:
     if message.from_user is None or message.from_user.is_bot:
         return True
-    if message.new_chat_members or message.left_chat_member:
+    if message.new_chat_members or message.new_chat_member or message.left_chat_member:
         return True
     text = message.text or ""
     if text.startswith("/"):
@@ -108,8 +150,6 @@ def _should_ignore(ctx: BotContext, message: Message) -> bool:
 async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
     """Process one buffered batch (single message or album) from a group."""
     primary = messages[0]
-    if primary.from_user is None:
-        return
     if ctx.archive_chat_id is not None and primary.chat.id == ctx.archive_chat_id:
         return
     if ctx.settings.ingest_mode is IngestMode.PRIVATE_FIRST:
@@ -118,21 +158,26 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
         return
 
     async with ctx.db.session() as session:
-        users = UserRepository(session)
         groups = GroupRepository(session)
+        group = await groups.upsert(primary.chat.id, primary.chat.title, primary.chat.type)
+        await groups.set_active(group.id, True)
+
+        if group_role(group) != ROLE_ARCHIVE and not role_already_asked(group):
+            await ask_group_role(ctx, primary, group)
+
+        if primary.from_user is None:
+            return
+
+        users = UserRepository(session)
         user = await users.upsert_from_bale(
             primary.from_user.id,
             primary.from_user.username,
             primary.from_user.first_name,
             primary.from_user.last_name,
         )
-        group = await groups.upsert(primary.chat.id, primary.chat.title, primary.chat.type)
-        await groups.set_active(group.id, True)
 
         if group_role(group) == ROLE_ARCHIVE:
             return
-        if not role_already_asked(group):
-            await ask_group_role(ctx, primary, group)
 
         if user.is_blocked:
             return

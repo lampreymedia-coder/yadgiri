@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Group
@@ -19,14 +23,28 @@ class GroupRepository:
         return result.scalar_one_or_none()
 
     async def upsert(self, bale_chat_id: int, title: str | None, chat_type: str) -> Group:
+        values = {
+            "bale_chat_id": bale_chat_id,
+            "title": title,
+            "chat_type": chat_type,
+            "is_active": True,
+            "bot_can_delete": False,
+            "settings": {},
+            "joined_at": datetime.now(UTC),
+        }
+        dialect = self._session.get_bind().dialect.name
+        insert = pg_insert if dialect == "postgresql" else sqlite_insert
+        stmt = insert(Group).values(**values)
+        # Concurrent group messages share one chat_id; ignore the losing insert.
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["bale_chat_id"],
+            set_={"title": title} if title else {"chat_type": chat_type},
+        )
+        await self._session.execute(stmt)
         group = await self.get_by_bale_id(bale_chat_id)
         if group is None:
-            group = Group(bale_chat_id=bale_chat_id, title=title, chat_type=chat_type)
-            self._session.add(group)
-            await self._session.flush()
-            return group
-        if title:
-            group.title = title
+            msg = f"group upsert failed for {bale_chat_id}"
+            raise RuntimeError(msg)
         return group
 
     async def list_active(self) -> list[Group]:

@@ -80,7 +80,11 @@ class BaleAPI:
 
     async def set_my_commands(self, commands: list[dict[str, str]]) -> bool:
         try:
-            return bool(await self.client.request("setMyCommands", {"commands": commands}))
+            return bool(
+                await self.client.request(
+                    "setMyCommands", {"commands": commands}, max_attempts=1
+                )
+            )
         except (BaleAPIError, NotFound):
             logger.info("set_my_commands_unsupported")
             return False

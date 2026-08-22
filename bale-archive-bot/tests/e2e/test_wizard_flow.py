@@ -210,9 +210,7 @@ async def test_decision_has_only_yes_and_cancel(
 ) -> None:
     await intake_text(dispatcher)
     labels = list(wizard_buttons(fake_bale, USER_ID))
-    assert any("هشتگ" in label for label in labels)
-    assert any("انصراف" in label for label in labels)
-    assert not any(label.startswith("خیر") for label in labels)
+    assert labels == ["بله، انتخاب هشتگ", "❌ انصراف"]
 
 
 async def test_cancel_removes_everything(

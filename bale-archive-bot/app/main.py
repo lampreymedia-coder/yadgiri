@@ -423,14 +423,13 @@ class Application:
                         logger.info("webhook_registered", url=settings.webhook_url)
                     except (BaleAPIError, NetworkError) as exc:
                         logger.error("webhook_registration_failed", error=str(exc))
+                    poll_task = asyncio.create_task(app_instance.run_safety_polling())
+                    await app_instance._notify_owner_ready()
                 else:
-                    try:
-                        await app_instance.api.delete_webhook()
-                        logger.warning("webhook_disabled_tunnel_down")
-                    except (BaleAPIError, NetworkError) as exc:
-                        logger.warning("webhook_clear_failed", error=str(exc))
-                poll_task = asyncio.create_task(app_instance.run_safety_polling())
-                await app_instance._notify_owner_ready()
+                    # Dead tunnel: do not stay on webhook+safety polling.
+                    # Real polling deletes the webhook and owns getUpdates.
+                    logger.warning("forcing_polling_dead_tunnel")
+                    poll_task = asyncio.create_task(app_instance.run_polling())
             try:
                 yield
             finally:

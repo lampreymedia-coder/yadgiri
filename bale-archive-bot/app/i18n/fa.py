@@ -80,15 +80,34 @@ def content_type_name(content_type: str) -> str:
 # ─── گام ۱: تصمیم ───
 
 
-def decision_prompt(name: str, content_type: str, group_title: str, dt: datetime) -> str:
+def decision_prompt(
+    name: str,
+    content_type: str,
+    group_title: str,
+    dt: datetime,
+    short_id: str = "",
+    excerpt: str = "",
+) -> str:
+    excerpt_line = f"متن: «{excerpt}»\n" if excerpt else ""
+    code_line = f"کد: {short_id}\n" if short_id else ""
     return (
         f"سلام {name}\n"
         "\n"
-        f"یک {content_type_name(content_type)} از شما در گروه «{group_title}» ثبت شد.\n"
+        f"گروه رصد: «{group_title}»\n"
+        f"نوع: {content_type_name(content_type)}\n"
         f"{jalali_date(dt)}  {jalali_time(dt)}\n"
+        f"{code_line}"
+        f"{excerpt_line}"
         "\n"
+        "همان پیام را بالاتر برایتان فرستادم تا با پیام دیگر قاطی نشود.\n"
         "این محتوا باید با هشتگ در آرشیو ذخیره شود؟"
     )
+
+
+def decision_subject_fallback(group_title: str, content_type: str, excerpt: str) -> str:
+    excerpt_line = f"\n«{excerpt}»" if excerpt else ""
+    title = group_title or "گروه رصد"
+    return f"پیام از گروه «{title}» — {content_type_name(content_type)}{excerpt_line}"
 
 
 BTN_SAVE_YES = "بله، انتخاب هشتگ"
@@ -120,9 +139,14 @@ BTN_BACK = "⬅️ بازگشت"
 # ─── گام ۳: انتخاب هشتگ ───
 
 
-def tag_select_prompt(selected: int, target: int | None) -> str:
+def tag_select_prompt(
+    selected: int, target: int | None, group_title: str = "", short_id: str = ""
+) -> str:
     del target
+    header = f"گروه رصد: «{group_title}»\n" if group_title else ""
+    code = f"کد: {short_id}\n" if short_id else ""
     return (
+        f"{header}{code}"
         "هشتگ‌ها را انتخاب کنید. می‌توانید یک یا چند مورد را بزنید.\n"
         "دوباره زدن، انتخاب را برمی‌دارد.\n"
         "\n"

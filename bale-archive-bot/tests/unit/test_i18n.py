@@ -49,6 +49,21 @@ def test_caption_header_format() -> None:
     assert "#یادگیری" in header
 
 
+def test_decision_prompt_names_group_and_excerpt() -> None:
+    text = fa.decision_prompt(
+        "علی",
+        "text",
+        "رصد دوم",
+        datetime(2026, 8, 22, 12, 0, tzinfo=UTC),
+        short_id="ab12cd",
+        excerpt="متن گروه دوم",
+    )
+    assert "رصد دوم" in text
+    assert "ab12cd" in text
+    assert "متن گروه دوم" in text
+    assert "بالاتر" in text
+
+
 def test_receive_backlog_mentions_pending_count() -> None:
     text = fa.receive_backlog(89)
     assert "۸۹" in text

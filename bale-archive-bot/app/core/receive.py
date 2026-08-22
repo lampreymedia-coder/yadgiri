@@ -26,6 +26,11 @@ def safety_polling_needed(
     return last_webhook_age_seconds >= stale_after_seconds
 
 
+def should_register_webhook(public_ok: bool) -> bool:
+    """Never point Bale at a tunnel that cannot reach this process."""
+    return public_ok
+
+
 def webhook_needs_reregister(current_url: str | None, expected_url: str) -> bool:
     """True when Bale has no webhook (or a different host) than we expect."""
     if not expected_url:

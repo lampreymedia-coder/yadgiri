@@ -66,9 +66,23 @@ async def probe_capabilities(api: BaleAPI) -> Capabilities:
                 # the method is routable. chat_id=0 never exists.
                 await api.client.request(method, {"chat_id": 0}, max_attempts=1)
             caps.mark(method, True)
-        except NotFound:
-            caps.mark(method, False)
-            logger.warning("capability_missing", method=method)
+        except NotFound as exc:
+            detail = str(exc).lower()
+            # Bale often answers 404 for a missing *resource* (chat_id=0),
+            # not a missing method. Only treat a true unknown-method as absent.
+            resource_404 = any(
+                token in detail
+                for token in (
+                    "message not found",
+                    "no such group",
+                    "no such user",
+                    "chat not found",
+                    "cannot be blank",
+                )
+            )
+            caps.mark(method, resource_404)
+            if not resource_404:
+                logger.warning("capability_missing", method=method)
         except BadRequest:
             caps.mark(method, True)
         except (BaleAPIError, NetworkError) as exc:

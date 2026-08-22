@@ -15,6 +15,7 @@ import time
 from collections.abc import AsyncIterator
 from typing import Any
 
+import httpx
 import uvicorn
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,7 +32,7 @@ from app.config import RunMode, Settings, get_settings
 from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
 from app.core.ratelimit import OutboundRateLimiter
-from app.core.receive import webhook_needs_reregister
+from app.core.receive import should_register_webhook, webhook_needs_reregister
 from app.db.session import Database
 from app.observability import metrics as app_metrics
 from app.observability.health import health_payload
@@ -291,8 +292,7 @@ class Application:
                 for update in updates:
                     if self.stop_event.is_set():
                         break
-                    task = self._track(self.dispatcher.dispatch(update))
-                    await task
+                    self._track(self.dispatcher.dispatch(update))
                 await self._sleep(self.settings.polling_busy_sleep)
             else:
                 empty_cycles += 1
@@ -343,15 +343,27 @@ class Application:
                 for update in updates:
                     if self.stop_event.is_set():
                         break
-                    task = self._track(self.dispatcher.dispatch(update))
-                    await task
+                    self._track(self.dispatcher.dispatch(update))
                 await self._sleep(self.settings.polling_busy_sleep)
             else:
                 await self._sleep(self.settings.polling_idle_sleep)
         logger.info("safety_polling_stopped", offset=offset)
 
+    async def _public_health_ok(self) -> bool:
+        """True only when the public tunnel can reach this process."""
+        base = self.settings.webhook_base_url.strip()
+        if not base:
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=4.0, follow_redirects=True) as client:
+                response = await client.get(base.rstrip("/") + "/healthz")
+            return response.status_code == 200
+        except (httpx.HTTPError, OSError) as exc:
+            logger.info("public_health_failed", error=str(exc))
+            return False
+
     async def heal_webhook(self) -> None:
-        """Re-register the webhook if Bale dropped it; report a stranded queue."""
+        """Keep Bale pointed only at a reachable tunnel; otherwise use polling."""
         assert self.ctx is not None
         try:
             info = await self.api.get_webhook_info()
@@ -363,6 +375,15 @@ class Application:
         if pending:
             logger.warning("webhook_backlog", pending=pending, url_set=bool(info.url))
             await self._notify_receive_backlog(pending)
+        public_ok = await self._public_health_ok()
+        if not should_register_webhook(public_ok):
+            if info.url:
+                try:
+                    await self.api.delete_webhook()
+                    logger.warning("webhook_cleared_tunnel_down", pending=pending)
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.warning("webhook_clear_failed", error=str(exc))
+            return
         expected = self.settings.webhook_url
         if webhook_needs_reregister(info.url, expected):
             try:
@@ -399,11 +420,19 @@ class Application:
             await app_instance.startup()
             poll_task: asyncio.Task[None] | None = None
             if settings.run_mode is RunMode.WEBHOOK:
-                try:
-                    await app_instance.api.set_webhook(settings.webhook_url)
-                    logger.info("webhook_registered", url=settings.webhook_url)
-                except (BaleAPIError, NetworkError) as exc:
-                    logger.error("webhook_registration_failed", error=str(exc))
+                public_ok = await app_instance._public_health_ok()
+                if should_register_webhook(public_ok):
+                    try:
+                        await app_instance.api.set_webhook(settings.webhook_url)
+                        logger.info("webhook_registered", url=settings.webhook_url)
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.error("webhook_registration_failed", error=str(exc))
+                else:
+                    try:
+                        await app_instance.api.delete_webhook()
+                        logger.warning("webhook_disabled_tunnel_down")
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.warning("webhook_clear_failed", error=str(exc))
                 poll_task = asyncio.create_task(app_instance.run_safety_polling())
                 await app_instance._notify_owner_ready()
             try:

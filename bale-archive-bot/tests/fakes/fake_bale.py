@@ -187,6 +187,9 @@ class FakeBaleServer:
                 "text": message.text,
             }
         if method == "copyMessage":
+            chat_id = int(params["chat_id"])
+            if chat_id in self.forbidden_private_chats:
+                return self._error(403, "bot was blocked by the user")
             from_key = (int(params["from_chat_id"]), int(params["message_id"]))
             source = self.messages.get(from_key)
             copied = self._new_message(
@@ -197,7 +200,10 @@ class FakeBaleServer:
             )
             return {"message_id": copied.message_id}
         if method == "forwardMessage":
-            forwarded = self._new_message(int(params["chat_id"]))
+            chat_id = int(params["chat_id"])
+            if chat_id in self.forbidden_private_chats:
+                return self._error(403, "bot was blocked by the user")
+            forwarded = self._new_message(chat_id)
             return {
                 "message_id": forwarded.message_id,
                 "chat": {"id": int(params["chat_id"]), "type": "group"},

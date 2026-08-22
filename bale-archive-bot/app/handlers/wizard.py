@@ -91,6 +91,27 @@ def total_size(submission: Submission) -> int:
     return sum(m.file_size_bytes or 0 for m in submission.media_files)
 
 
+def _group_title(group: Group | None) -> str:
+    return (group.title if group else None) or ""
+
+
+def _wizard_excerpt(submission: Submission) -> str:
+    excerpt = (submission.text_content or submission.caption or "").strip()
+    if len(excerpt) > 200:
+        return excerpt[:200] + "…"
+    return excerpt
+
+
+def _persist_wizard_payload(submission: Submission, conversation: Conversation) -> None:
+    """Keep per-submission selections even when another wizard is also open."""
+    meta = dict(submission.meta or {})
+    meta["selected"] = [int(item) for item in conversation.payload.get("selected", [])]
+    meta["note"] = conversation.payload.get("note")
+    meta["page"] = conversation.payload.get("page", 1)
+    meta["wizard_history"] = list(conversation.history)
+    submission.meta = meta
+
+
 # ─── Rendering ───
 
 
@@ -102,6 +123,8 @@ def render_decision(
         content_type=submission.content_type.value,
         group_title=(group.title if group else None) or "",
         dt=datetime.now(UTC),
+        short_id=submission.short_id,
+        excerpt=_wizard_excerpt(submission),
     )
     rows = [
         [button(fa.BTN_SAVE_YES, ACT_DECISION_YES, submission.short_id)],
@@ -147,8 +170,9 @@ def render_tags(
     target: int | None,
     sid: str,
     page: int = 1,
+    group_title: str = "",
 ) -> tuple[str, InlineKeyboardMarkup]:
-    text = fa.tag_select_prompt(len(selected_ids), target)
+    text = fa.tag_select_prompt(len(selected_ids), target, group_title, sid)
     total_pages = max(1, (len(tags) + _TAGS_PER_PAGE - 1) // _TAGS_PER_PAGE)
     page = max(1, min(page, total_pages))
     page_tags = tags[(page - 1) * _TAGS_PER_PAGE : page * _TAGS_PER_PAGE]
@@ -223,6 +247,49 @@ def render_preview(
 # ─── Opening the wizard ───
 
 
+async def _send_subject_copy(
+    ctx: BotContext,
+    submission: Submission,
+    user: User,
+    group: Group | None,
+    origin: Message | None,
+) -> int | None:
+    """Copy the original group message into private chat so two wizards cannot mix."""
+    dest = user.bale_user_id
+    from_chat: int | None = None
+    message_id: int | None = None
+    if origin is not None and not origin.is_private_message:
+        from_chat = origin.chat.id
+        message_id = origin.message_id
+    elif group is not None and submission.original_message_id:
+        from_chat = group.bale_chat_id
+        message_id = submission.original_message_id
+    if from_chat is not None and message_id is not None:
+        try:
+            copied_id = await ctx.api.copy_message(dest, from_chat, message_id)
+            submission.meta = {**submission.meta, "subject_message_id": copied_id}
+            return copied_id
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("subject_copy_failed", error=str(exc))
+        try:
+            forwarded = await ctx.api.forward_message(dest, from_chat, message_id)
+            submission.meta = {**submission.meta, "subject_message_id": forwarded.message_id}
+            return forwarded.message_id
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("subject_forward_failed", error=str(exc))
+    excerpt = _wizard_excerpt(submission)
+    fallback = fa.decision_subject_fallback(
+        _group_title(group), submission.content_type.value, excerpt
+    )
+    try:
+        sent = await ctx.api.send_message(dest, fallback)
+        submission.meta = {**submission.meta, "subject_message_id": sent.message_id}
+        return sent.message_id
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("subject_fallback_failed", error=str(exc))
+    return None
+
+
 async def _delete_group_hint(ctx: BotContext, submission: Submission) -> None:
     meta = submission.meta if isinstance(submission.meta, dict) else {}
     chat_id = meta.get("group_hint_chat_id")
@@ -272,8 +339,9 @@ async def open_wizard(
                 logger.warning("wizard_send_plain_failed", chat_id=chat_id, error=str(exc))
         return None
 
+    subject_id = await _send_subject_copy(ctx, submission, user, group, origin)
     text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
-    sent = await try_send(private_chat, text, markup, is_group=False)
+    sent = await try_send(private_chat, text, markup, is_group=False, reply=subject_id)
     if sent is not None:
         await users_repo.set_private_chat(user.id, True)
         submission.wizard_chat_id = private_chat
@@ -305,6 +373,7 @@ async def open_wizard(
     conversation = Conversation(chat_id=private_chat, user_id=user.bale_user_id)
     conversation.transition(WizardState.AWAITING_DECISION)
     conversation.payload = {"sid": submission.short_id, "selected": [], "target": None}
+    _persist_wizard_payload(submission, conversation)
     await ctx.state_store(session).save(conversation, ctx.settings.submission_ttl_minutes)
 
 
@@ -348,12 +417,19 @@ async def handle_wizard_callback(ctx: BotContext, session: AsyncSession, cq: Cal
         await _answer(ctx, cq, fa.ERR_NOT_YOURS)
         return
 
+    # Acknowledge the tap immediately so Bale does not expire the query
+    # while we copy/edit. Toasts for validation still use a dedicated answer.
+    if data.action != ACT_TAGS_CONTINUE:
+        await _answer(ctx, cq)
+
     chat_id = owner.bale_user_id
     await advisory_xact_lock(session, chat_id, owner.bale_user_id)
 
     store = ctx.state_store(session)
-    conversation = await store.load(chat_id, owner.bale_user_id)
-    if conversation is None:
+    stored = await store.load(chat_id, owner.bale_user_id)
+    if stored is not None and stored.payload.get("sid") == submission.short_id:
+        conversation = stored
+    else:
         conversation = _rebuild_conversation(submission, chat_id, owner.bale_user_id)
 
     group = await session.get(Group, submission.group_id) if submission.group_id else None
@@ -373,8 +449,10 @@ async def handle_wizard_callback(ctx: BotContext, session: AsyncSession, cq: Cal
         conversation,
     )
     if handled:
+        _persist_wizard_payload(submission, conversation)
         if conversation.state is WizardState.IDLE:
-            await store.clear(chat_id, owner.bale_user_id)
+            if stored is not None and stored.payload.get("sid") == submission.short_id:
+                await store.clear(chat_id, owner.bale_user_id)
         else:
             await store.save(conversation, ctx.settings.submission_ttl_minutes)
 
@@ -390,11 +468,19 @@ def _rebuild_conversation(submission: Submission, chat_id: int, user_id: int) ->
     }
     conversation = Conversation(chat_id=chat_id, user_id=user_id)
     conversation.state = status_to_state.get(submission.status, WizardState.AWAITING_DECISION)
+    meta = submission.meta if isinstance(submission.meta, dict) else {}
+    selected = [t.id for t in submission.tags]
+    if not selected:
+        raw_selected = meta.get("selected") or []
+        selected = [int(item) for item in raw_selected if str(item).lstrip("-").isdigit()]
+    history = [str(item) for item in (meta.get("wizard_history") or [])]
+    conversation.history = history
     conversation.payload = {
         "sid": submission.short_id,
-        "selected": [t.id for t in submission.tags],
-        "target": submission.meta.get("target_count"),
-        "note": submission.meta.get("note"),
+        "selected": selected,
+        "target": meta.get("target_count"),
+        "note": meta.get("note"),
+        "page": meta.get("page", 1),
     }
     return conversation
 
@@ -444,7 +530,9 @@ async def _dispatch_action(
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
         conversation.transition(WizardState.AWAITING_TAGS)
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, None, submission.short_id)
+        text, markup = render_tags(
+            active, selected, None, submission.short_id, group_title=_group_title(group)
+        )
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -478,7 +566,9 @@ async def _dispatch_action(
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
         conversation.transition(WizardState.AWAITING_TAGS)
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, None, submission.short_id)
+        text, markup = render_tags(
+            active, selected, None, submission.short_id, group_title=_group_title(group)
+        )
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -492,7 +582,14 @@ async def _dispatch_action(
             selected.append(tag_id)
         conversation.payload["selected"] = selected
         page = int(conversation.payload.get("page", 1))
-        text, markup = render_tags(active, selected, None, submission.short_id, page)
+        text, markup = render_tags(
+            active,
+            selected,
+            None,
+            submission.short_id,
+            page,
+            group_title=_group_title(group),
+        )
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -501,7 +598,14 @@ async def _dispatch_action(
         page = int(arg) if arg else 1
         conversation.payload["page"] = page
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, None, submission.short_id, page)
+        text, markup = render_tags(
+            active,
+            selected,
+            None,
+            submission.short_id,
+            page,
+            group_title=_group_title(group),
+        )
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -523,7 +627,9 @@ async def _dispatch_action(
     if action == ACT_EDIT_TAGS:
         conversation.transition(WizardState.AWAITING_TAGS)
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, None, submission.short_id)
+        text, markup = render_tags(
+            active, selected, None, submission.short_id, group_title=_group_title(group)
+        )
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -605,7 +711,9 @@ async def _render_state(
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
         conversation.state = WizardState.AWAITING_TAGS
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, None, submission.short_id)
+        text, markup = render_tags(
+            active, selected, None, submission.short_id, group_title=_group_title(group)
+        )
     else:  # AWAITING_CONFIRM / AWAITING_NOTE render the preview
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_CONFIRM)
         conversation.state = WizardState.AWAITING_CONFIRM

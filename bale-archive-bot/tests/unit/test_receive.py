@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from app.core.receive import safety_polling_needed, webhook_needs_reregister
+from app.core.receive import (
+    safety_polling_needed,
+    should_register_webhook,
+    webhook_needs_reregister,
+)
 
 
 def test_polling_needed_when_public_tunnel_is_down() -> None:
@@ -21,6 +25,11 @@ def test_polling_needed_when_pending_unknown_and_webhook_stale() -> None:
     assert (
         safety_polling_needed(public_ok=True, pending=None, last_webhook_age_seconds=30) is True
     )
+
+
+def test_dead_tunnel_must_not_keep_webhook() -> None:
+    assert should_register_webhook(False) is False
+    assert should_register_webhook(True) is True
 
 
 def test_webhook_reregister_when_missing_or_host_changed() -> None:

@@ -102,7 +102,9 @@ async def test_gateway_keeps_original_and_opens_private_wizard(
 ) -> None:
     await intake_text(dispatcher)
     methods = [name for name, _ in fake_bale.calls]
-    assert "copyMessage" not in methods
+    copies = fake_bale.calls_for("copyMessage")
+    assert copies
+    assert all(int(item["chat_id"]) == USER_ID for item in copies)
     assert "deleteMessage" not in methods
     assert fake_bale.last_markup(USER_ID) is not None
     assert fake_bale.last_markup(GROUP_ID) is None
@@ -209,7 +211,9 @@ async def test_decline_leaves_original_in_group(
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.DECLINED
     assert submission.published_message_id is None
-    assert fake_bale.calls_for("copyMessage") == []
+    copies = fake_bale.calls_for("copyMessage")
+    assert copies
+    assert all(int(item["chat_id"]) == USER_ID for item in copies)
 
 
 async def test_cancel_removes_everything(
@@ -309,6 +313,46 @@ async def test_album_buffer_groups_media(
     submission = await get_submission(ctx)
     assert submission.content_type.value == "album"
     assert len(submission.media_files) == 2
+
+
+async def test_two_research_groups_keep_separate_subjects(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    first = load_update("text")
+    second = load_update("text")
+    second["message"]["chat"] = {"id": -100200399, "type": "group", "title": "رصد دوم"}
+    second["message"]["message_id"] = 77
+    second["message"]["text"] = "پیام گروه دوم برای بایگانی جدا"
+    await dispatcher.dispatch(Update.model_validate(first))
+    await dispatcher.dispatch(Update.model_validate(second))
+    from_chats = {int(item["from_chat_id"]) for item in fake_bale.calls_for("copyMessage")}
+    assert GROUP_ID in from_chats
+    assert -100200399 in from_chats
+    async with ctx.db.session() as session:
+        rows = list((await session.execute(__import__("sqlalchemy").select(Submission))).scalars())
+    assert len(rows) == 2
+    private_texts = "\n".join(fake_bale.sent_texts(USER_ID))
+    assert "گروه رصد" in private_texts
+    assert "رصد دوم" in private_texts
+    first_mid = first["message"]["message_id"]
+    first_sub = next(item for item in rows if item.original_message_id == first_mid)
+    second_sub = next(item for item in rows if item.original_message_id == 77)
+    first_msg = wizard_message_id(fake_bale, USER_ID)
+    # The latest keyboard belongs to the second intake; drive the first by sid.
+    await dispatcher.dispatch(
+        callback_update(f"1|yes|{first_sub.short_id}|", USER_ID, first_msg)
+    )
+    first_reloaded = await get_submission_by_sid(ctx, first_sub.short_id)
+    second_reloaded = await get_submission_by_sid(ctx, second_sub.short_id)
+    assert first_reloaded.status is SubmissionStatus.AWAITING_TAGS
+    assert second_reloaded.status is SubmissionStatus.AWAITING_DECISION
+
+
+async def get_submission_by_sid(ctx: BotContext, short_id: str) -> Submission:
+    async with ctx.db.session() as session:
+        found = await SubmissionRepository(session).get_by_short_id(short_id)
+        assert found is not None
+        return found
 
 
 async def test_voice_opens_private_wizard_immediately(

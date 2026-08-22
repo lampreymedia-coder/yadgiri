@@ -164,10 +164,6 @@ class Application:
         self.scheduler.add_job(
             self.dispatcher.process_spool, IntervalTrigger(seconds=60), max_instances=1
         )
-        if self.settings.run_mode is RunMode.WEBHOOK:
-            self.scheduler.add_job(
-                self.heal_webhook, IntervalTrigger(seconds=20), max_instances=1
-            )
 
     async def shutdown(self) -> None:
         """Graceful: stop intake, drain in-flight work (≤30s), close pools."""

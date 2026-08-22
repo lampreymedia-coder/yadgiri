@@ -128,7 +128,6 @@ def render_decision(
     )
     rows = [
         [button(fa.BTN_SAVE_YES, ACT_DECISION_YES, submission.short_id)],
-        [button(fa.BTN_SAVE_NO, ACT_DECISION_NO, submission.short_id)],
         [button(fa.BTN_CANCEL, ACT_CANCEL, submission.short_id)],
     ]
     if in_group and bot_username:

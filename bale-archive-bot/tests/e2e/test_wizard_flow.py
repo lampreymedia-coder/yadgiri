@@ -108,6 +108,10 @@ async def test_gateway_keeps_original_and_opens_private_wizard(
     assert "deleteMessage" not in methods
     assert fake_bale.last_markup(USER_ID) is not None
     assert fake_bale.last_markup(GROUP_ID) is None
+    decision = wizard_buttons(fake_bale, USER_ID)
+    assert any("|yes|" in cb for cb in decision.values())
+    assert any("|cx|" in cb for cb in decision.values())
+    assert not any("|no|" in cb for cb in decision.values())
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.AWAITING_DECISION
     assert submission.wizard_chat_id == USER_ID
@@ -201,19 +205,14 @@ async def test_full_happy_path_two_tags(
     assert any("منقضی" in str(a.get("text", "")) for a in answers)
 
 
-async def test_decline_leaves_original_in_group(
+async def test_decision_has_only_yes_and_cancel(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     await intake_text(dispatcher)
-    submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, USER_ID)
-    await dispatcher.dispatch(callback_update(f"1|no|{submission.short_id}|", USER_ID, msg_id))
-    submission = await get_submission(ctx)
-    assert submission.status is SubmissionStatus.DECLINED
-    assert submission.published_message_id is None
-    copies = fake_bale.calls_for("copyMessage")
-    assert copies
-    assert all(int(item["chat_id"]) == USER_ID for item in copies)
+    labels = list(wizard_buttons(fake_bale, USER_ID))
+    assert any("هشتگ" in label for label in labels)
+    assert any("انصراف" in label for label in labels)
+    assert not any(label.startswith("خیر") for label in labels)
 
 
 async def test_cancel_removes_everything(

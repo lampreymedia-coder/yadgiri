@@ -62,6 +62,7 @@ def test_decision_prompt_names_group_and_excerpt() -> None:
     assert "ab12cd" in text
     assert "متن گروه دوم" in text
     assert "بالاتر" in text
+    assert "انصراف" in text
 
 
 def test_receive_backlog_mentions_pending_count() -> None:

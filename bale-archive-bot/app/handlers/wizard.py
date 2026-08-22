@@ -20,6 +20,7 @@ from app.core.locks import advisory_xact_lock
 from app.db.models import Group, Submission, SubmissionStatus, Tag, User
 from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
+from app.domain.group_roles import try_delete_message
 from app.domain.submission import SubmissionService
 from app.i18n import fa
 from app.observability.logging import get_logger
@@ -105,11 +106,11 @@ def render_decision(
     rows = [
         [button(fa.BTN_SAVE_YES, ACT_DECISION_YES, submission.short_id)],
         [button(fa.BTN_SAVE_NO, ACT_DECISION_NO, submission.short_id)],
-        [button(fa.BTN_CANCEL_DELETE, ACT_CANCEL, submission.short_id)],
+        [button(fa.BTN_CANCEL, ACT_CANCEL, submission.short_id)],
     ]
     if in_group and bot_username:
         text = f"{text}\n\n{fa.group_fallback_hint(bot_username)}"
-        rows.append([url_button(fa.BTN_OPEN_PRIVATE, f"https://ble.ir/{bot_username}")])
+        rows = [[url_button(fa.BTN_OPEN_PRIVATE, f"https://ble.ir/{bot_username}")]]
     return text, keyboard(rows)
 
 
@@ -222,6 +223,15 @@ def render_preview(
 # ─── Opening the wizard ───
 
 
+async def _delete_group_hint(ctx: BotContext, submission: Submission) -> None:
+    meta = submission.meta if isinstance(submission.meta, dict) else {}
+    chat_id = meta.get("group_hint_chat_id")
+    message_id = meta.get("group_hint_message_id")
+    if isinstance(chat_id, int) and isinstance(message_id, int):
+        await try_delete_message(ctx.api, chat_id, message_id)
+    submission.meta = {**meta, "group_hint_chat_id": None, "group_hint_message_id": None}
+
+
 async def open_wizard(
     ctx: BotContext,
     session: AsyncSession,
@@ -230,17 +240,14 @@ async def open_wizard(
     group: Group | None,
     origin: Message | None = None,
 ) -> None:
-    """Open the decision step.
+    """Open the hashtag decision step in a private chat with the sender.
 
-    For content that arrived in a group, the wizard is posted in that group
-    as a reply (Bale often cannot DM a user who never pressed Start). Private
-    content stays in the private chat. Every send is wrapped so a 404 cannot
-    swallow the whole update.
+    If the user has never started the bot, a short URL hint is posted in the
+    group and deleted as soon as the private conversation continues.
     """
     users_repo = UserRepository(session)
     origin_is_group = origin is not None and not origin.is_private_message
-    origin_chat = origin.chat.id if origin is not None else user.bale_user_id
-    reply_to = origin.message_id if origin is not None else None
+    private_chat = user.bale_user_id
 
     async def try_send(
         chat_id: int,
@@ -248,7 +255,7 @@ async def open_wizard(
         markup: InlineKeyboardMarkup | None,
         *,
         is_group: bool,
-        reply: int | None,
+        reply: int | None = None,
     ) -> Message | None:
         try:
             return await ctx.api.send_message(
@@ -263,56 +270,39 @@ async def open_wizard(
                 )
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("wizard_send_plain_failed", chat_id=chat_id, error=str(exc))
-        if reply is not None:
-            try:
-                return await ctx.api.send_message(chat_id, body, None, is_group=is_group)
-            except (BaleAPIError, NetworkError) as exc:
-                logger.warning("wizard_send_noreply_failed", chat_id=chat_id, error=str(exc))
         return None
 
-    wizard_chat_id: int | None = None
-    wizard_message_id: int | None = None
+    text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
+    sent = await try_send(private_chat, text, markup, is_group=False)
+    if sent is not None:
+        await users_repo.set_private_chat(user.id, True)
+        submission.wizard_chat_id = private_chat
+        submission.wizard_message_id = sent.message_id
+        await _delete_group_hint(ctx, submission)
+    else:
+        await users_repo.set_private_chat(user.id, False)
+        submission.wizard_chat_id = private_chat
+        submission.wizard_message_id = None
+        if origin_is_group and origin is not None and ctx.bot_username:
+            hint = fa.group_fallback_hint(ctx.bot_username)
+            hint_markup = keyboard(
+                [[url_button(fa.BTN_OPEN_PRIVATE, f"https://ble.ir/{ctx.bot_username}")]]
+            )
+            hint_msg = await try_send(
+                origin.chat.id,
+                hint,
+                hint_markup,
+                is_group=True,
+                reply=origin.message_id,
+            )
+            if hint_msg is not None:
+                submission.meta = {
+                    **submission.meta,
+                    "group_hint_chat_id": origin.chat.id,
+                    "group_hint_message_id": hint_msg.message_id,
+                }
 
-    if origin_is_group:
-        group_text, group_markup = render_decision(
-            submission, user, group, ctx.bot_username, in_group=True
-        )
-        sent = await try_send(origin_chat, group_text, group_markup, is_group=True, reply=reply_to)
-        if sent is not None:
-            wizard_chat_id, wizard_message_id = origin_chat, sent.message_id
-
-    if wizard_chat_id is None:
-        private_chat = (
-            origin.chat.id
-            if origin is not None and origin.is_private_message
-            else user.bale_user_id
-        )
-        text, markup = render_decision(submission, user, group, ctx.bot_username, in_group=False)
-        sent = await try_send(private_chat, text, markup, is_group=False, reply=None)
-        if sent is not None:
-            wizard_chat_id, wizard_message_id = private_chat, sent.message_id
-            await users_repo.set_private_chat(user.id, True)
-        else:
-            await users_repo.set_private_chat(user.id, False)
-
-    if wizard_chat_id is None and group is not None:
-        group_text, group_markup = render_decision(
-            submission, user, group, ctx.bot_username, in_group=True
-        )
-        sent = await try_send(
-            group.bale_chat_id, group_text, group_markup, is_group=True, reply=reply_to
-        )
-        if sent is not None:
-            wizard_chat_id, wizard_message_id = group.bale_chat_id, sent.message_id
-
-    if wizard_chat_id is None or wizard_message_id is None:
-        logger.error("wizard_open_failed_completely", short_id=submission.short_id)
-        return
-
-    submission.wizard_chat_id = wizard_chat_id
-    submission.wizard_message_id = wizard_message_id
-
-    conversation = Conversation(chat_id=wizard_chat_id, user_id=user.bale_user_id)
+    conversation = Conversation(chat_id=private_chat, user_id=user.bale_user_id)
     conversation.transition(WizardState.AWAITING_DECISION)
     conversation.payload = {"sid": submission.short_id, "selected": [], "target": None}
     await ctx.state_store(session).save(conversation, ctx.settings.submission_ttl_minutes)
@@ -358,7 +348,7 @@ async def handle_wizard_callback(ctx: BotContext, session: AsyncSession, cq: Cal
         await _answer(ctx, cq, fa.ERR_NOT_YOURS)
         return
 
-    chat_id = submission.wizard_chat_id or cq.from_user.id
+    chat_id = owner.bale_user_id
     await advisory_xact_lock(session, chat_id, owner.bale_user_id)
 
     store = ctx.state_store(session)
@@ -467,6 +457,7 @@ async def _dispatch_action(
             )
         else:
             await service.submissions.set_status(submission, SubmissionStatus.DECLINED)
+        await _delete_group_hint(ctx, submission)
         await _edit_wizard(ctx, submission, fa.DECLINED_MESSAGE, None)
         conversation.state = WizardState.IDLE
         await _answer(ctx, cq)
@@ -474,6 +465,7 @@ async def _dispatch_action(
 
     if action == ACT_CANCEL:
         await service.cancel_completely(submission)
+        await _delete_group_hint(ctx, submission)
         await _edit_wizard(ctx, submission, fa.CANCELLED_MESSAGE, None)
         conversation.state = WizardState.IDLE
         await _answer(ctx, cq)
@@ -583,20 +575,14 @@ async def _dispatch_action(
         sender = owner.display_name or owner.username or fa.fa_digits(owner.bale_user_id)
         refreshed = await service.submissions.get_by_short_id(submission.short_id)
         assert refreshed is not None
-        if group is not None:
-            await service.publish_completed(refreshed, group, sender)
-        else:
-            await service.submissions.set_status(refreshed, SubmissionStatus.COMPLETED)
-        hashtags = " ".join(t.hashtag for t in refreshed.tags)
-        success = fa.success_message(
-            refreshed.short_id,
-            hashtags,
-            (group.title if group else None) or "",
-            ctx.settings.undo_window_minutes,
-        )
+        missing = await service.complete_into_tag_archives(refreshed, sender)
+        await _delete_group_hint(ctx, refreshed)
         submission.wizard_chat_id = refreshed.wizard_chat_id = submission.wizard_chat_id
-        await _edit_wizard(ctx, submission, success, None)
-        await service.notify_admin_completed(refreshed, owner, group, media_details(refreshed))
+        submission.wizard_message_id = refreshed.wizard_message_id = submission.wizard_message_id
+        await _edit_wizard(ctx, submission, fa.USER_SAVED, None)
+        await service.notify_admin_completed(
+            refreshed, owner, group, media_details(refreshed), missing_archives=missing
+        )
         conversation.state = WizardState.IDLE
         await _answer(ctx, cq)
         return True

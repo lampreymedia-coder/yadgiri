@@ -197,15 +197,6 @@ class Dispatcher:
             await self._on_command(message, command[0], command[1])
             return
         if group_intake._should_ignore(self.ctx, message):
-            try:
-                await self.ctx.api.send_message(
-                    message.chat.id,
-                    fa.GROUP_GOT_IT,
-                    reply_to_message_id=message.message_id,
-                    is_group=True,
-                )
-            except (BaleAPIError, NetworkError) as exc:
-                logger.warning("group_ignore_notice_failed", error=str(exc))
             return
         await self.albums.add(message)
 
@@ -244,9 +235,12 @@ class Dispatcher:
                     else:
                         await admin.handle_set_archive(self.ctx, session, message)
                 elif command == "archive":
-                    await self.ctx.api.send_message(
-                        message.chat.id, fa.ARCHIVE_SET_NEED_PRIVATE, is_group=True
-                    )
+                    try:
+                        await self.ctx.api.send_message(
+                            message.from_user.id, fa.ARCHIVE_SET_NEED_PRIVATE
+                        )
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.info("archive_need_private_dm_failed", error=str(exc))
                 return
             if not authorized or not admin.admin_chat_allowed(self.ctx, message):
                 if message.is_private_message:

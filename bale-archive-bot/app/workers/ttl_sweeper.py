@@ -61,7 +61,7 @@ async def run_expiry_once(ctx: BotContext) -> int:
 
             policy = ctx.settings.expired_policy
             try:
-                if policy is ExpiredPolicy.REPUBLISH and group is not None:
+                if policy is ExpiredPolicy.REPUBLISH:
                     await service.republish_without_tags(
                         submission, group, sender, SubmissionStatus.EXPIRED
                     )
@@ -73,7 +73,7 @@ async def run_expiry_once(ctx: BotContext) -> int:
                         fallback = await tags.create(slug, title, hashtag)
                     await service.submissions.set_tags(submission, [fallback.id])
                     if group is not None:
-                        await service.publish_completed(submission, group, sender)
+                        await service.complete_into_tag_archives(submission, sender)
                     else:
                         await service.submissions.set_status(submission, SubmissionStatus.COMPLETED)
                 else:  # keep_draft (or republish without a known group)

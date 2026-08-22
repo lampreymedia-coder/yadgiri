@@ -88,73 +88,90 @@ def dispatcher(ctx: BotContext) -> Dispatcher:
     return Dispatcher(ctx)
 
 
-async def test_gateway_archive_before_delete(
+async def bind_archives(ctx: BotContext) -> None:
+    from app.handlers.admin import persist_archive_chat
+    from app.i18n.fa import SEED_TAGS
+
+    async with ctx.db.session() as session:
+        for slug, _title, _hashtag in SEED_TAGS:
+            await persist_archive_chat(ctx, session, ARCHIVE_ID, slug=slug)
+
+
+async def test_gateway_keeps_original_and_opens_private_wizard(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     await intake_text(dispatcher)
     methods = [name for name, _ in fake_bale.calls]
-    assert "copyMessage" in methods
-    assert "deleteMessage" in methods
-    assert methods.index("copyMessage") < methods.index("deleteMessage")
-    # Archive copy went to the archive channel.
-    copy_call = fake_bale.calls_for("copyMessage")[0]
-    assert int(copy_call["chat_id"]) == ARCHIVE_ID
-    # Wizard opened in the user's private chat.
-    assert fake_bale.last_markup(GROUP_ID) is not None
+    assert "copyMessage" not in methods
+    assert "deleteMessage" not in methods
+    assert fake_bale.last_markup(USER_ID) is not None
+    assert fake_bale.last_markup(GROUP_ID) is None
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.AWAITING_DECISION
-    assert submission.archive_message_id is not None
+    assert submission.wizard_chat_id == USER_ID
+    assert submission.archive_message_id is None
 
 
-async def test_archive_failure_blocks_delete(
+async def test_copy_failure_on_confirm_still_saves_sql(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
+    await bind_archives(ctx)
     fake_bale.fail_with("copyMessage", 400, "archive unavailable", times=99)
     await intake_text(dispatcher)
-    assert fake_bale.calls_for("deleteMessage") == []
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    tag_cb = next(cb for cb in buttons.values() if "|tg|" in cb)
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    submission = await get_submission(ctx)
+    assert submission.status is SubmissionStatus.COMPLETED
     async with ctx.db.session() as session:
-        result = await session.execute(__import__("sqlalchemy").select(Submission))
-        assert result.scalars().first() is None
         outbox = OutboxRepository(session)
-        assert await outbox.pending_count() == 1  # admin alert queued
+        assert await outbox.pending_count() >= 1
 
 
 async def test_full_happy_path_two_tags(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
+    await bind_archives(ctx)
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    msg_id = wizard_message_id(fake_bale, USER_ID)
 
     # Step 1: yes
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
     assert any("|cnt|" in cb for cb in buttons.values())
 
     # Step 2: two tags
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|2", GROUP_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|2", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
     assert len(tag_callbacks) == 3
 
     # Step 3: toggle two tags; a third toggle must be rejected via toast.
-    await dispatcher.dispatch(callback_update(tag_callbacks[0], GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(tag_callbacks[1], GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[1], USER_ID, msg_id))
     calls_before = len(fake_bale.calls_for("editMessageText"))
-    await dispatcher.dispatch(callback_update(tag_callbacks[2], GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_callbacks[2], USER_ID, msg_id))
     assert len(fake_bale.calls_for("editMessageText")) == calls_before  # unchanged
     answers = fake_bale.calls_for("answerCallbackQuery")
     assert any(a.get("text") and "دو" in str(a["text"]) for a in answers)
 
     # Step 4: continue → preview
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
     assert any("|fin|" in cb for cb in buttons.values())
 
     # Back keeps selections.
-    await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", GROUP_ID, msg_id))
-    markup = fake_bale.last_markup(GROUP_ID)
+    await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", USER_ID, msg_id))
+    markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     checked = [
         btn["text"]
@@ -165,42 +182,38 @@ async def test_full_happy_path_two_tags(
     assert len(checked) == 2
 
     # Continue again and confirm.
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
 
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
     assert len(submission.tags) == 2
-    assert submission.published_message_id is not None
-    published = fake_bale.messages[(GROUP_ID, submission.published_message_id)]
-    assert published.text is not None
-    assert "📌" in published.text
-    assert published.text.count("#") == 2
-    # Admin notification queued in the outbox.
+    assert submission.published_message_id is None
+    copies = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
+    assert len(copies) == 2
+    assert any("موفقیت" in t for t in fake_bale.sent_texts(USER_ID))
+    assert not any("مجموع امروز" in t for t in fake_bale.sent_texts(USER_ID))
     async with ctx.db.session() as session:
         outbox = OutboxRepository(session)
-        assert await outbox.pending_count() == 1
+        assert await outbox.pending_count() >= 1
 
     # Clicking the old keyboard after completion → expired toast, no crash.
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
     answers = fake_bale.calls_for("answerCallbackQuery")
     assert any("منقضی" in str(a.get("text", "")) for a in answers)
 
 
-async def test_decline_republishes_without_tags(
+async def test_decline_leaves_original_in_group(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    await dispatcher.dispatch(callback_update(f"1|no|{submission.short_id}|", GROUP_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|no|{submission.short_id}|", USER_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.DECLINED
-    assert submission.published_message_id is not None
-    republished = fake_bale.messages[(GROUP_ID, submission.published_message_id)]
-    assert republished.text is not None
-    assert republished.text.startswith("📎")
-    assert "#" not in republished.text
+    assert submission.published_message_id is None
+    assert fake_bale.calls_for("copyMessage") == []
 
 
 async def test_cancel_removes_everything(
@@ -208,8 +221,8 @@ async def test_cancel_removes_everything(
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    await dispatcher.dispatch(callback_update(f"1|cx|{submission.short_id}|", GROUP_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|cx|{submission.short_id}|", USER_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.CANCELLED
     assert submission.published_message_id is None
@@ -220,7 +233,7 @@ async def test_foreign_user_click_rejected(
 ) -> None:
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
+    msg_id = wizard_message_id(fake_bale, USER_ID)
     foreign = Update.model_validate(
         {
             "update_id": next(_update_seq),
@@ -229,7 +242,7 @@ async def test_foreign_user_click_rejected(
                 "from": {"id": 999888, "is_bot": False, "first_name": "غریبه"},
                 "message": {
                     "message_id": msg_id,
-                    "chat": {"id": GROUP_ID, "type": "group"},
+                    "chat": {"id": USER_ID, "type": "private"},
                     "text": "wizard",
                 },
                 "data": f"1|yes|{submission.short_id}|",
@@ -249,17 +262,17 @@ async def test_restart_mid_wizard_state_survives(
     await intake_text(dispatcher)
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
 
     # Simulate a process restart: a brand-new dispatcher and context caches.
     fresh_dispatcher = Dispatcher(ctx)
-    await fresh_dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, GROUP_ID)
+    await fresh_dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
-    await fresh_dispatcher.dispatch(callback_update(tag_callbacks[0], GROUP_ID, msg_id))
-    await fresh_dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
-    await fresh_dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await fresh_dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
 
@@ -275,18 +288,19 @@ async def test_duplicate_update_processed_once(
         assert len(list(result.scalars().all())) == 1
 
 
-async def test_private_chat_forbidden_falls_back_to_group(
+async def test_private_chat_forbidden_posts_url_hint(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     fake_bale.forbidden_private_chats.add(USER_ID)
     await intake_text(dispatcher)
-    # Wizard keyboard appeared inside the group instead.
     markup = fake_bale.last_markup(GROUP_ID)
     assert markup is not None
     flat = [btn for row in markup["inline_keyboard"] for btn in row]
-    assert any(btn.get("url") for btn in flat)  # link to the bot's private chat
+    assert any(btn.get("url") for btn in flat)
+    assert not any("|yes|" in (btn.get("callback_data") or "") for btn in flat)
     submission = await get_submission(ctx)
-    assert submission.wizard_chat_id == GROUP_ID
+    assert submission.wizard_chat_id == USER_ID
+    assert submission.wizard_message_id is None
 
 
 async def test_album_buffer_groups_media(

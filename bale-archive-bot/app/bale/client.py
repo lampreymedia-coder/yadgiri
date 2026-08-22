@@ -181,12 +181,7 @@ class BaleClient:
         """Call a Bale API method and return the ``result`` payload."""
         payload = self._normalize_payload(params)
         last_error: Exception | None = None
-        use_get = (
-            files is None
-            and not use_form
-            and not force_post
-            and method in _GET_QUERY_METHODS
-        )
+        use_get = files is None and not use_form and not force_post and method in _GET_QUERY_METHODS
 
         for attempt in range(1, max_attempts + 1):
             await self._limiter.acquire(chat_id, is_group)

@@ -1,8 +1,9 @@
-"""Submission lifecycle: the Archive → Persist → Delete → Wizard → Repost flow.
+"""Submission lifecycle: persist in SQL, then copy into per-hashtag archives.
 
-Golden rule: the original group message is NEVER deleted before both the
-archive copy and the database row exist. Failing to delete is always better
-than losing data.
+The original message in the research group is never deleted and never
+republished. Bot prompts live in a private chat with the sender. Confirmed
+items are copied into each selected hashtag's private archive group. SQL is
+the source of truth even when an archive chat is not bound yet.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bale.errors import BaleAPIError, Forbidden, NetworkError
+from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.methods import BaleAPI
 from app.bale.models import Message
 from app.config import Settings
@@ -23,6 +24,7 @@ from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.submissions import SubmissionRepository
 from app.db.repositories.users import UserRepository
 from app.domain.classify import ClassifiedContent
+from app.domain.group_roles import resolve_archive_chat_id, try_delete_message
 from app.i18n import fa
 from app.observability import metrics
 from app.observability.logging import get_logger
@@ -53,6 +55,7 @@ class SubmissionService:
         settings: Settings,
         archive_chat_id: int | None = None,
         admin_chat_id: int | None = None,
+        extra_admin_ids: set[int] | None = None,
     ) -> None:
         self._session = session
         self._api = api
@@ -61,6 +64,7 @@ class SubmissionService:
             archive_chat_id if archive_chat_id is not None else settings.archive_chat_id
         )
         self._admin_chat_id = admin_chat_id if admin_chat_id is not None else settings.admin_chat_id
+        self._extra_admin_ids = set(extra_admin_ids or ())
         self.submissions = SubmissionRepository(session)
         self.users = UserRepository(session)
         self.groups = GroupRepository(session)
@@ -76,54 +80,12 @@ class SubmissionService:
         group: Group | None,
         raw_update: dict[str, Any] | None,
     ) -> IntakeResult:
-        """Archive + persist + (maybe) delete. Never deletes before steps 2 & 3."""
+        """Persist a draft. The original group message is left in place."""
         primary = messages[0]
         content_type = classified.content_type
         if len(messages) > 1:
             content_type = ContentType.ALBUM
 
-        # Step 2: copy every message to the private archive channel first.
-        # If no archive chat is configured yet, skip copy+delete (bootstrap
-        # mode): the original stays in the group so nothing can be lost.
-        archive_ids: list[int] = []
-        archived = True
-        failure_reason: str | None = None
-        if self._archive_chat_id is None:
-            archived = True
-            failure_reason = None
-        else:
-            for message in messages:
-                try:
-                    new_id = await self._api.copy_message(
-                        chat_id=self._archive_chat_id,
-                        from_chat_id=message.chat.id,
-                        message_id=message.message_id,
-                    )
-                    archive_ids.append(new_id)
-                except (BaleAPIError, NetworkError) as exc:
-                    archived = False
-                    failure_reason = f"archive copy failed: {exc}"
-                    logger.error(
-                        "archive_copy_failed",
-                        chat_id=message.chat.id,
-                        message_id=message.message_id,
-                        error=str(exc),
-                    )
-                    break
-
-        if not archived:
-            # Do NOT delete; do NOT proceed. Alert the admin via outbox.
-            await self._alert_admin_intake_failure(failure_reason or "archive unavailable")
-            return IntakeResult(
-                submission=None,
-                deleted_original=False,
-                archived=False,
-                failure_reason=failure_reason,
-            )
-
-        # Step 3: persist the draft (failure here also blocks deletion, by
-        # construction: an exception aborts the transaction and the caller's
-        # error handler leaves the group message untouched).
         submission = await self.submissions.create_draft(
             user_id=user.id,
             group_id=group.id if group else None,
@@ -139,12 +101,10 @@ class SubmissionService:
             raw_update=raw_update,
             ttl_minutes=self._settings.submission_ttl_minutes,
         )
-        submission.archive_chat_id = self._archive_chat_id
-        submission.archive_message_id = archive_ids[0] if archive_ids else None
         submission.meta = {
             **submission.meta,
-            "archive_message_ids": archive_ids,
             "origin_chat_id": primary.chat.id,
+            "origin_message_ids": [message.message_id for message in messages],
         }
         for position, (_message, media_list) in enumerate(
             zip(messages, _split_media(messages, classified), strict=False)
@@ -163,41 +123,145 @@ class SubmissionService:
                     height=info.height,
                 )
 
-        # Step 4: delete originals — only now, after archive + DB succeeded.
-        deleted = True
-        if self._archive_chat_id is None:
-            deleted = False
-        elif group is not None:
-            for message in messages:
-                try:
-                    await self._api.delete_message(message.chat.id, message.message_id)
-                except Forbidden:
-                    deleted = False
-                    await self.groups.set_can_delete(group.id, False)
-                    logger.warning("delete_forbidden", chat_id=message.chat.id)
-                    break
-                except (BaleAPIError, NetworkError) as exc:
-                    deleted = False
-                    logger.warning("delete_failed", chat_id=message.chat.id, error=str(exc))
-                    break
-            if deleted:
-                await self.groups.set_can_delete(group.id, True)
-
         await self.submissions.set_status(submission, SubmissionStatus.AWAITING_DECISION)
-        return IntakeResult(submission=submission, deleted_original=deleted, archived=True)
+        return IntakeResult(submission=submission, deleted_original=False, archived=True)
 
     async def _alert_admin_intake_failure(self, reason: str) -> None:
-        if self._admin_chat_id is not None:
-            await self.outbox.enqueue(
-                "admin_notify",
-                self._admin_chat_id,
-                {"text": fa.admin_intake_failure_alert(reason)},
-            )
+        await self._notify_admins(fa.admin_intake_failure_alert(reason))
 
-    # ─── Publication ───
+    async def _admin_destinations(self) -> set[int]:
+        destinations: set[int] = set(self._extra_admin_ids)
+        if self._admin_chat_id is not None:
+            destinations.add(self._admin_chat_id)
+        for admin in await self.users.list_admins():
+            destinations.add(admin.bale_user_id)
+        return destinations
+
+    async def _notify_admins(self, text: str) -> None:
+        for dest in await self._admin_destinations():
+            await self.outbox.enqueue("admin_notify", dest, {"text": text})
+
+    # ─── Archive copies (on confirm) ───
+
+    def _archive_footer(self, submission: Submission, sender_name: str) -> str:
+        hashtags = " ".join(tag.hashtag for tag in submission.tags) or "—"
+        return fa.archive_footer(
+            sender_name, hashtags, submission.content_type.value, submission.short_id
+        )
+
+    def _origin_message_ids(self, submission: Submission) -> list[int]:
+        stored = submission.meta.get("origin_message_ids")
+        if isinstance(stored, list) and stored:
+            return [int(item) for item in stored]
+        if submission.original_message_id is not None:
+            return [submission.original_message_id]
+        return []
+
+    async def complete_into_tag_archives(
+        self, submission: Submission, sender_name: str
+    ) -> list[str]:
+        """Copy origin content into each selected tag's archive group.
+
+        Returns hashtags that had no archive group (SQL is still saved).
+        """
+        origin_chat = submission.meta.get("origin_chat_id")
+        origin_ids = self._origin_message_ids(submission)
+        footer = self._archive_footer(submission, sender_name)
+        copies: dict[str, list[int]] = {}
+        missing: list[str] = []
+
+        for tag in submission.tags:
+            dest = await resolve_archive_chat_id(self._session, tag.slug)
+            if dest is None:
+                missing.append(tag.hashtag)
+                continue
+            copied_ids = await self._copy_origin_to_archive(
+                dest, origin_chat, origin_ids, footer, submission, sender_name
+            )
+            if copied_ids:
+                copies[tag.slug] = copied_ids
+
+        submission.meta = {
+            **submission.meta,
+            "tag_archive_copies": copies,
+            "missing_archives": missing,
+        }
+        if copies:
+            first_slug = next(iter(copies))
+            first_ids = copies[first_slug]
+            submission.archive_chat_id = await resolve_archive_chat_id(self._session, first_slug)
+            submission.archive_message_id = first_ids[0] if first_ids else None
+        await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
+        metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
+        return missing
+
+    async def _copy_origin_to_archive(
+        self,
+        dest_chat_id: int,
+        origin_chat: Any,
+        origin_ids: list[int],
+        footer: str,
+        submission: Submission,
+        sender_name: str,
+    ) -> list[int]:
+        copied: list[int] = []
+        if isinstance(origin_chat, int) and origin_ids:
+            for message_id in origin_ids:
+                try:
+                    new_id = await self._api.copy_message(
+                        chat_id=dest_chat_id,
+                        from_chat_id=origin_chat,
+                        message_id=message_id,
+                        is_group=True,
+                    )
+                    copied.append(new_id)
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.warning(
+                        "tag_archive_copy_failed",
+                        dest=dest_chat_id,
+                        origin=origin_chat,
+                        message_id=message_id,
+                        error=str(exc),
+                    )
+        if not copied:
+            fallback_id = await self._send_archive_fallback(dest_chat_id, submission, sender_name)
+            if fallback_id is not None:
+                copied.append(fallback_id)
+        if copied:
+            try:
+                await self._api.send_message(
+                    dest_chat_id,
+                    footer,
+                    reply_to_message_id=copied[0],
+                    is_group=True,
+                )
+            except (BaleAPIError, NetworkError) as exc:
+                logger.info("archive_footer_failed", dest=dest_chat_id, error=str(exc))
+        return copied
+
+    async def _send_archive_fallback(
+        self, dest_chat_id: int, submission: Submission, sender_name: str
+    ) -> int | None:
+        caption, overflow = self._published_text(submission, sender_name)
+        try:
+            sent = await self._api.send_message(dest_chat_id, caption, is_group=True)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("archive_fallback_send_failed", dest=dest_chat_id, error=str(exc))
+            return None
+        if overflow:
+            try:
+                await self._api.send_message(
+                    dest_chat_id,
+                    overflow,
+                    reply_to_message_id=sent.message_id,
+                    is_group=True,
+                )
+            except (BaleAPIError, NetworkError) as exc:
+                logger.info("archive_fallback_overflow_failed", error=str(exc))
+        return sent.message_id
 
     def _published_text(self, submission: Submission, sender_name: str) -> tuple[str, str | None]:
-        """Return (caption_or_text, overflow_reply_text)."""
+        """Return (caption_or_text, overflow_reply_text) for fallback sends."""
         hashtags = " ".join(tag.hashtag for tag in submission.tags)
         header = fa.published_header(sender_name, hashtags)
         body = submission.text_content or submission.caption or ""
@@ -211,136 +275,31 @@ class SubmissionService:
         combined = f"{header}\n\n{body}" if body else header
         if len(combined) <= limit:
             return combined, None
-        # Over the limit: media goes out with the short header only and the
-        # full text follows as a separate reply message.
         return header, combined[:TEXT_LIMIT]
 
     async def publish_completed(
         self, submission: Submission, group: Group, sender_name: str
     ) -> None:
-        """Publish the tagged content back into the group (status=completed)."""
-        caption, overflow = self._published_text(submission, sender_name)
-        published_id: int
-        if submission.content_type in (
-            ContentType.TEXT,
-            ContentType.LINK,
-            ContentType.CONTACT,
-            ContentType.LOCATION,
-        ):
-            sent = await self._api.send_message(group.bale_chat_id, caption, is_group=True)
-            published_id = sent.message_id
-        else:
-            source_chat = submission.archive_chat_id or self._archive_chat_id
-            source_msg = submission.archive_message_id
-            if source_chat is None or source_msg is None:
-                origin = submission.meta.get("origin_chat_id")
-                if origin is not None and submission.original_message_id is not None:
-                    sent = await self._api.send_message(
-                        group.bale_chat_id,
-                        caption,
-                        reply_to_message_id=submission.original_message_id,
-                        is_group=True,
-                    )
-                    published_id = sent.message_id
-                    if overflow:
-                        await self._api.send_message(
-                            group.bale_chat_id,
-                            overflow,
-                            reply_to_message_id=published_id,
-                            is_group=True,
-                        )
-                    submission.published_message_id = published_id
-                    await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
-                    metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
-                    return
-                sent = await self._api.send_message(group.bale_chat_id, caption, is_group=True)
-                published_id = sent.message_id
-            else:
-                published_id = await self._api.copy_message(
-                    chat_id=group.bale_chat_id,
-                    from_chat_id=source_chat,
-                    message_id=source_msg,
-                    caption=caption,
-                    is_group=True,
-                )
-                for extra_id in list(submission.meta.get("archive_message_ids", []))[1:]:
-                    await self._api.copy_message(
-                        chat_id=group.bale_chat_id,
-                        from_chat_id=source_chat,
-                        message_id=int(extra_id),
-                        is_group=True,
-                    )
-        if overflow:
-            await self._api.send_message(
-                group.bale_chat_id,
-                overflow,
-                reply_to_message_id=published_id,
-                is_group=True,
-            )
-        submission.published_message_id = published_id
-        await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
-        metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
+        """Complete into per-tag archive groups. ``group`` is the source research chat."""
+        del group
+        await self.complete_into_tag_archives(submission, sender_name)
 
     async def republish_without_tags(
         self, submission: Submission, group: Group, sender_name: str, status: SubmissionStatus
     ) -> None:
-        """Repost the original content with the 📎 prefix (declined/expired)."""
-        header = fa.republished_header(sender_name)
-        if submission.content_type in (
-            ContentType.TEXT,
-            ContentType.LINK,
-            ContentType.CONTACT,
-            ContentType.LOCATION,
-        ):
-            body = submission.text_content or ""
-            text = f"{header}\n\n{body}" if body else header
-            sent = await self._api.send_message(
-                group.bale_chat_id, text[:TEXT_LIMIT], is_group=True
-            )
-            submission.published_message_id = sent.message_id
-        else:
-            source_chat = submission.archive_chat_id or self._archive_chat_id
-            source_msg = submission.archive_message_id
-            if source_chat is None or source_msg is None:
-                origin = submission.meta.get("origin_chat_id")
-                if origin is not None:
-                    sent = await self._api.send_message(group.bale_chat_id, header, is_group=True)
-                    submission.published_message_id = sent.message_id
-                    await self.submissions.set_status(submission, status)
-                    metrics.submissions_total.labels(status=status.value).inc()
-                    return
-                sent = await self._api.send_message(group.bale_chat_id, header, is_group=True)
-                submission.published_message_id = sent.message_id
-                await self.submissions.set_status(submission, status)
-                metrics.submissions_total.labels(status=status.value).inc()
-                return
-            caption_body = submission.caption or ""
-            caption = f"{header}\n\n{caption_body}" if caption_body else header
-            new_id = await self._api.copy_message(
-                chat_id=group.bale_chat_id,
-                from_chat_id=source_chat,
-                message_id=source_msg,
-                caption=caption[:CAPTION_LIMIT],
-                is_group=True,
-            )
-            submission.published_message_id = new_id
-            for extra_id in list(submission.meta.get("archive_message_ids", []))[1:]:
-                await self._api.copy_message(
-                    chat_id=group.bale_chat_id,
-                    from_chat_id=source_chat,
-                    message_id=int(extra_id),
-                    is_group=True,
-                )
+        """Leave the original in the research group; do not duplicate it."""
+        del group, sender_name
         await self.submissions.set_status(submission, status)
         metrics.submissions_total.labels(status=status.value).inc()
 
     async def cancel_completely(self, submission: Submission) -> None:
-        """User chose full cancellation: nothing is reposted."""
+        """User cancelled tagging. The original group message stays."""
         await self.submissions.set_status(submission, SubmissionStatus.CANCELLED)
         metrics.submissions_total.labels(status=SubmissionStatus.CANCELLED.value).inc()
 
     async def undo(self, submission: Submission, group: Group | None) -> bool:
         """Undo a completed submission inside the undo window."""
+        del group
         if submission.status is not SubmissionStatus.COMPLETED:
             return False
         if submission.completed_at is None:
@@ -351,11 +310,14 @@ class SubmissionService:
         age_minutes = (datetime.now(UTC) - completed_at).total_seconds() / 60.0
         if age_minutes > self._settings.undo_window_minutes:
             return False
-        if group is not None and submission.published_message_id is not None:
-            try:
-                await self._api.delete_message(group.bale_chat_id, submission.published_message_id)
-            except (BaleAPIError, NetworkError) as exc:
-                logger.warning("undo_delete_failed", error=str(exc))
+        copies = submission.meta.get("tag_archive_copies") or {}
+        if isinstance(copies, dict):
+            for slug, ids in copies.items():
+                dest = await resolve_archive_chat_id(self._session, str(slug))
+                if dest is None:
+                    continue
+                for message_id in ids or []:
+                    await try_delete_message(self._api, dest, int(message_id))
         await self.submissions.set_status(submission, SubmissionStatus.CANCELLED)
         metrics.submissions_total.labels(status="undone").inc()
         return True
@@ -363,10 +325,13 @@ class SubmissionService:
     # ─── Admin notification ───
 
     async def notify_admin_completed(
-        self, submission: Submission, user: User, group: Group | None, details: str
+        self,
+        submission: Submission,
+        user: User,
+        group: Group | None,
+        details: str,
+        missing_archives: list[str] | None = None,
     ) -> None:
-        if self._admin_chat_id is None:
-            return
         hashtags = " ".join(tag.hashtag for tag in submission.tags)
         today_total = await self.submissions.count_completed_today()
         text = fa.admin_new_submission(
@@ -379,8 +344,9 @@ class SubmissionService:
             short_id=submission.short_id,
             dt=datetime.now(UTC),
             today_total=today_total,
+            missing_archives=missing_archives or [],
         )
-        await self.outbox.enqueue("admin_notify", self._admin_chat_id, {"text": text})
+        await self._notify_admins(text)
 
 
 def _split_media(messages: list[Message], classified: ClassifiedContent) -> list[list[Any]]:

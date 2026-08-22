@@ -16,12 +16,13 @@ from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher, parse_command
 from app.db.models import Submission, SubmissionStatus
 from app.db.repositories.outbox import OutboxRepository
-from app.domain.submission import CAPTION_LIMIT, SubmissionService
+from app.domain.submission import SubmissionService
 from app.workers.outbox import run_outbox_once
 from app.workers.ttl_sweeper import run_expiry_once, run_reminders_once
 from tests.e2e.test_wizard_flow import (
-    GROUP_ID,
+    ARCHIVE_ID,
     USER_ID,
+    bind_archives,
     callback_update,
     get_submission,
     load_update,
@@ -68,16 +69,17 @@ async def test_max_length_text_4096(dispatcher: Dispatcher, ctx: BotContext) -> 
 async def test_caption_over_1024_splits_into_reply(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
+    await bind_archives(ctx)
     update = load_update("image")
     update["message"]["caption"] = "ب" * 1500
     await dispatcher.dispatch(Update.model_validate(update))
     await asyncio.sleep(0.2)  # album window
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
-    markup = fake_bale.last_markup(GROUP_ID)
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
+    markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     tag_cb = next(
         btn["callback_data"]
@@ -85,18 +87,19 @@ async def test_caption_over_1024_splits_into_reply(
         for btn in row
         if "|tg|" in btn.get("callback_data", "")
     )
-    await dispatcher.dispatch(callback_update(tag_cb, GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
 
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.COMPLETED
-    # The media was copied with a short caption and the long text was sent
-    # as a separate reply.
-    copy_calls = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == GROUP_ID]
+    copy_calls = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
     assert copy_calls
-    assert len(str(copy_calls[-1].get("caption", ""))) <= CAPTION_LIMIT
-    reply_calls = [c for c in fake_bale.calls_for("sendMessage") if c.get("reply_to_message_id")]
+    reply_calls = [
+        c
+        for c in fake_bale.calls_for("sendMessage")
+        if int(c.get("chat_id", 0)) == ARCHIVE_ID and c.get("reply_to_message_id")
+    ]
     assert reply_calls
 
 
@@ -104,13 +107,14 @@ async def test_undo_within_window(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     # Complete a submission quickly via the service layer.
+    await bind_archives(ctx)
     await dispatcher.dispatch(Update.model_validate(load_update("text")))
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", GROUP_ID, msg_id))
-    markup = fake_bale.last_markup(GROUP_ID)
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
+    markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     tag_cb = next(
         btn["callback_data"]
@@ -118,9 +122,9 @@ async def test_undo_within_window(
         for btn in row
         if "|tg|" in btn.get("callback_data", "")
     )
-    await dispatcher.dispatch(callback_update(tag_cb, GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", GROUP_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", GROUP_ID, msg_id))
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
 
     undo_update = load_update("text")
     undo_update["message"]["chat"] = {"id": USER_ID, "type": "private"}
@@ -174,7 +178,7 @@ async def test_spam_limit_enforced(ctx: BotContext, fake_bale: FakeBaleServer) -
     async with ctx.db.session() as session:
         submissions = list((await session.execute(select(Submission))).scalars().all())
         assert len(submissions) == 2
-    assert any("سقف" in t for t in fake_bale.sent_texts(GROUP_ID))
+    assert any("سقف" in t for t in fake_bale.sent_texts(USER_ID))
 
 
 async def test_expiry_republishes(
@@ -193,7 +197,7 @@ async def test_expiry_republishes(
         reloaded = await service.submissions.get_by_short_id(sid)
         assert reloaded is not None
         assert reloaded.status is SubmissionStatus.EXPIRED
-        assert reloaded.published_message_id is not None
+        assert reloaded.published_message_id is None
 
 
 async def test_reminder_sent_once(
@@ -241,9 +245,9 @@ async def test_double_click_second_ignored_while_locked(
     await dispatcher.dispatch(Update.model_validate(load_update("text")))
     submission = await get_submission(ctx)
     sid = submission.short_id
-    msg_id = wizard_message_id(fake_bale, GROUP_ID)
-    first = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
-    second = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", GROUP_ID, msg_id))
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    first = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    second = dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
     await asyncio.gather(first, second)
     submission = await get_submission(ctx)
     # Exactly one forward transition happened.

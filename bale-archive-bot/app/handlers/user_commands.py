@@ -7,7 +7,7 @@ from app.bale.models import InlineKeyboardMarkup, Message
 from app.core.context import BotContext
 from app.db.models import Group
 from app.db.repositories.users import UserRepository
-from app.handlers.wizard import resume_wizard
+from app.handlers.wizard import _delete_group_hint, open_wizard, resume_wizard
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -45,6 +45,17 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
         from app.handlers.admin import promote_first_owner
 
         promoted = await promote_first_owner(ctx, session, message.from_user)
+        pending = await ctx.submission_service(session).submissions.latest_in_progress_for_user(
+            user.id
+        )
+        if pending is not None:
+            group = await session.get(Group, pending.group_id) if pending.group_id else None
+            await _delete_group_hint(ctx, pending)
+            if await resume_wizard(ctx, session, message):
+                return
+            await open_wizard(ctx, session, pending, user, group, origin=message)
+            return
+
         if promoted or (ctx.is_runtime_admin(message.from_user.id) and ctx.archive_chat_id is None):
             text = fa.start_owner_setup(name)
         else:

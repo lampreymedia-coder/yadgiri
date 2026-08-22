@@ -60,3 +60,12 @@ class GroupRepository:
         await self._session.execute(
             update(Group).where(Group.id == group_id).values(is_active=is_active)
         )
+
+    async def archive_chat_id_for_slug(self, slug: str) -> int | None:
+        """Find the private archive group bound to a hashtag slug."""
+        result = await self._session.execute(select(Group).where(Group.is_active.is_(True)))
+        for group in result.scalars().all():
+            settings = group.settings if isinstance(group.settings, dict) else {}
+            if settings.get("role") == "archive" and settings.get("tag_slug") == slug:
+                return group.bale_chat_id
+        return None

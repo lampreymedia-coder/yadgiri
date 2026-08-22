@@ -54,4 +54,5 @@ class BotContext:
             self.settings,
             archive_chat_id=self.archive_chat_id,
             admin_chat_id=self.admin_notify_chat_id,
+            extra_admin_ids=set(self.runtime_admin_ids),
         )

@@ -37,15 +37,15 @@ def test_text_bar_rtl_safe_blocks() -> None:
     assert 3 <= len(half) <= 5
 
 
-def test_success_message_contains_undo_command() -> None:
+def test_success_message_is_short_confirmation() -> None:
     text = fa.success_message("k7f2qa", "#یادگیری", "گروه رصد", 10)
-    assert "/undo k7f2qa" in text
-    assert "۱۰" in text
+    assert "موفقیت" in text
+    assert "/undo" not in text
 
 
 def test_caption_header_format() -> None:
     header = fa.published_header("علی احمدی", "#یادگیری #محتوایی")
-    assert header.startswith("📌 علی احمدی")
+    assert "علی احمدی" in header
     assert "#یادگیری" in header
 
 

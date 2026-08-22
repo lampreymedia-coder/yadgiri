@@ -54,17 +54,21 @@ naturally paces work anyway) and still dispatches every update as a concurrent
 duplicate pair, so the zero-duplicates guarantee is fully exercised. The p95 <
 2s target for production is meant for PostgreSQL.
 
-## D-09: Group-origin wizard is posted in the group
-Bale returns 404 when DMing a user who never pressed Start. Opening the
-wizard for group content posts the decision keyboard in that group as a
-reply. Private-origin content still uses the private chat. Every send is
-caught so a 404 cannot swallow the update.
+## D-09: Hashtag wizard is private; group stays uncluttered
+Content in a research group is left in place. The bot asks the sender in a
+private chat which hashtag(s) to store under. If the user has never pressed
+Start, a short URL hint is posted in the group and deleted as soon as the
+private conversation continues. Research vs archive is also asked privately
+of the admin who added the bot, then any leftover bot prompt in the group is
+deleted (`deleteMessage`).
 
-## D-10: Republish uses copyMessage from the archive, not forward
-The spec's open question ("bot-authored repost vs forward") is resolved toward
-`copyMessage` with a `📌/📎 {sender}` header line: forwards would show the
-*bot* as forwarder anyway (the original message is already deleted), and the
-header preserves attribution in plain text.
+## D-10: Confirmed items are copied into per-hashtag archive groups
+Each active hashtag can be bound to its own private archive group
+(`/archive` then pick the hashtag). On confirm, the original is
+`copyMessage`d into every selected tag's archive chat and a compact footer
+is sent as a reply. SQL is the source of truth: a missing archive group does
+not block the save; admins are notified instead. The research group is never
+republished into.
 
 ## D-11: Edited messages are logged and ignored
 `edited_message` arrives after the gateway has already archived/deleted the

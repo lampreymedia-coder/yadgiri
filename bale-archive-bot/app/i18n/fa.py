@@ -82,25 +82,25 @@ def content_type_name(content_type: str) -> str:
 
 def decision_prompt(name: str, content_type: str, group_title: str, dt: datetime) -> str:
     return (
-        f"سلام {name} 👋\n"
+        f"سلام {name}\n"
         "\n"
-        f"یک {content_type_name(content_type)} از شما در گروه «{group_title}» دریافت شد.\n"
-        f"🕐 {jalali_date(dt)} — {jalali_time(dt)}\n"
+        f"یک {content_type_name(content_type)} از شما در گروه «{group_title}» ثبت شد.\n"
+        f"{jalali_date(dt)}  {jalali_time(dt)}\n"
         "\n"
-        "آیا این محتوا نیاز به هشتگ‌گذاری و ذخیره‌سازی در آرشیو دارد؟"
+        "این محتوا باید با هشتگ در آرشیو ذخیره شود؟"
     )
 
 
-BTN_SAVE_YES = "✅ بله، ذخیره شود"
-BTN_SAVE_NO = "❌ خیر، فقط در گروه منتشر شود"
-BTN_CANCEL_DELETE = "🗑 انصراف و حذف کامل"
+BTN_SAVE_YES = "بله، انتخاب هشتگ"
+BTN_SAVE_NO = "خیر، فقط در گروه بماند"
+BTN_CANCEL_DELETE = "انصراف"
 
 # ─── گام ۲: تعداد هشتگ ───
 
 TAG_COUNT_PROMPT = (
-    "📊 می‌خواهید این محتوا زیر چند هشتگ ذخیره شود؟\n"
+    "این محتوا در چند هشتگ ذخیره شود؟\n"
     "\n"
-    "می‌توانید یک یا چند هشتگ را انتخاب کنید."
+    "می‌توانید یک، دو یا هر سه هشتگ را انتخاب کنید. محتوا همزمان در چند هشتگ قابل بایگانی است."
 )
 
 _COUNT_EMOJI = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣"}
@@ -127,7 +127,11 @@ def tag_select_prompt(selected: int, target: int | None) -> str:
         chosen = f"انتخاب‌شده: {fa_digits(selected)}"
     else:
         chosen = f"انتخاب‌شده: {fa_digits(selected)} از {fa_digits(target)}"
-    return f"🏷 هشتگ‌های مورد نظر را انتخاب کنید.\n\n{chosen}"
+    return (
+        "در کدام هشتگ قرار بگیرد؟\n"
+        "برای انتخاب چندتایی، هشتگ‌ها را یکی‌یکی بزنید. دوباره زدن، انتخاب را برمی‌دارد.\n"
+        f"\n{chosen}"
+    )
 
 
 TAG_UNCHECKED = "⬜️"
@@ -164,18 +168,18 @@ def preview_prompt(
 ) -> str:
     username_part = f" (@{username})" if username else ""
     return (
-        "📋 پیش‌نمایش اطلاعاتی که ثبت می‌شود\n"
+        "پیش‌نمایش ثبت\n"
         "\n"
-        f"👤 فرستنده: {sender_name}{username_part}\n"
-        f"👥 گروه: {group_title}\n"
-        f"📁 نوع محتوا: {content_type_name(content_type)} {details}\n"
-        f"📦 حجم: {size_text}\n"
-        f"🏷 هشتگ‌ها: {hashtags}\n"
-        f"📝 متن/توضیح: «{excerpt}»\n"
-        f"🕐 زمان: {jalali_date(dt)} — {jalali_time(dt)}\n"
-        f"🔖 کد رهگیری: {short_id}\n"
+        f"فرستنده: {sender_name}{username_part}\n"
+        f"گروه: {group_title}\n"
+        f"نوع: {content_type_name(content_type)} {details}\n"
+        f"حجم: {size_text}\n"
+        f"هشتگ‌ها: {hashtags}\n"
+        f"متن: «{excerpt}»\n"
+        f"زمان: {jalali_date(dt)}  {jalali_time(dt)}\n"
+        f"کد: {short_id}\n"
         "\n"
-        "آیا اطلاعات بالا درست است؟"
+        "از صحت این اطلاعات مطمئن هستید؟ می‌توانید هشتگ‌ها را اصلاح کنید یا به مرحله قبل برگردید."
     )
 
 
@@ -190,29 +194,28 @@ NOTE_PROMPT = "📝 توضیح خود را در یک پیام بفرستید. ب
 # ─── گام ۵: موفقیت ───
 
 
+USER_SAVED = "اطلاعات شما با موفقیت ذخیره شد."
+
+
 def success_message(short_id: str, hashtags: str, group_title: str, undo_minutes: int) -> str:
-    return (
-        "✅ اطلاعات شما با موفقیت ذخیره شد.\n"
-        "\n"
-        f"🔖 کد رهگیری: {short_id}\n"
-        f"🏷 هشتگ‌ها: {hashtags}\n"
-        f"📍 محل ذخیره: آرشیو گروه «{group_title}»\n"
-        "\n"
-        "محتوای شما در گروه منتشر شد.\n"
-        f"تا {fa_digits(undo_minutes)} دقیقه می‌توانید با دستور /undo {short_id} ثبت را لغو کنید."
-    )
+    del short_id, hashtags, group_title, undo_minutes
+    return USER_SAVED
 
 
 def published_header(sender_name: str, hashtags: str) -> str:
-    return f"📌 {sender_name}\n{hashtags}"
+    return f"{sender_name}\n{hashtags}"
+
+
+def archive_footer(sender_name: str, hashtags: str, content_type: str, short_id: str) -> str:
+    return f"{hashtags}\n{sender_name}  ·  {content_type_name(content_type)}\n{short_id}"
 
 
 def republished_header(sender_name: str) -> str:
-    return f"📎 {sender_name}"
+    return sender_name
 
 
-DECLINED_MESSAGE = "باشه ✅ محتوای شما بدون هشتگ در گروه منتشر شد."
-CANCELLED_MESSAGE = "🗑 ثبت لغو شد و محتوا حذف شد."
+DECLINED_MESSAGE = "ثبت شد. پیام شما در گروه می‌ماند و در آرشیو ذخیره نشد."
+CANCELLED_MESSAGE = "ثبت لغو شد. پیام شما در گروه باقی است."
 
 # ─── اعلان به ادمین ───
 
@@ -227,18 +230,24 @@ def admin_new_submission(
     short_id: str,
     dt: datetime,
     today_total: int,
+    missing_archives: list[str] | None = None,
 ) -> str:
+    missing = missing_archives or []
+    missing_line = ""
+    if missing:
+        missing_line = "\nگروه آرشیو ناقص: " + " ".join(missing)
     return (
-        "🆕 داده‌ی جدید ثبت شد\n"
+        "داده جدید ذخیره شد\n"
         "\n"
-        f"👤 کاربر: {name} ({fa_digits(bale_user_id)})\n"
-        f"👥 گروه: {group_title}\n"
-        f"📁 نوع: {content_type_name(content_type)} {details}\n"
-        f"🏷 هشتگ: {hashtags}\n"
-        f"🔖 کد: {short_id}\n"
-        f"🕐 {jalali_date(dt)} — {jalali_time(dt)}\n"
+        f"کاربر: {name} ({fa_digits(bale_user_id)})\n"
+        f"گروه رصد: {group_title}\n"
+        f"نوع: {content_type_name(content_type)} {details}\n"
+        f"هشتگ: {hashtags}\n"
+        f"کد: {short_id}\n"
+        f"{jalali_date(dt)}  {jalali_time(dt)}"
+        f"{missing_line}\n"
         "\n"
-        f"📊 مجموع امروز: {fa_digits(today_total)} مورد"
+        f"مجموع امروز: {fa_digits(today_total)} مورد"
     )
 
 
@@ -269,12 +278,7 @@ def admin_spam_alert(name: str, bale_user_id: int, count: int) -> str:
 
 
 def admin_error_alert(error_kind: str) -> str:
-    return (
-        "🚨 خطای مدیریت‌نشده در ربات\n"
-        "\n"
-        f"نوع خطا: {error_kind}\n"
-        "جزئیات در لاگ سیستم ثبت شده است."
-    )
+    return f"🚨 خطای مدیریت‌نشده در ربات\n\nنوع خطا: {error_kind}\nجزئیات در لاگ سیستم ثبت شده است."
 
 
 # ─── پیام‌های خطا و وضعیت ───
@@ -305,7 +309,7 @@ def reminder_message(content_type: str) -> str:
 
 
 def expired_republished_message(short_id: str) -> str:
-    return "⌛️ مهلت هشتگ‌گذاری تمام شد.\n" f"محتوای {short_id} بدون هشتگ در گروه منتشر شد."
+    return f"مهلت هشتگ‌گذاری تمام شد. پیام {short_id} در گروه ماند و در آرشیو ذخیره نشد."
 
 
 def duplicate_warning(name: str, days_ago: int, short_id: str) -> str:
@@ -324,20 +328,23 @@ BTN_OPEN_PRIVATE = "💬 گفت‌وگوی خصوصی با ربات"
 
 
 def group_fallback_hint(bot_username: str) -> str:
-    return (
-        "برای تجربه‌ی بهتر، یک بار ربات را استارت کنید تا گفت‌وگو در پیام خصوصی انجام شود:\n"
-        f"@{bot_username}"
-    )
+    return f"برای انتخاب هشتگ، گفتگوی خصوصی ربات را باز کنید:\nhttps://ble.ir/{bot_username}"
+
+
+def group_role_private_hint(bot_username: str) -> str:
+    if bot_username:
+        return f"نقش این گروه را در گفتگوی خصوصی مشخص کنید:\nhttps://ble.ir/{bot_username}"
+    return "یک بار در گفتگوی خصوصی ربات /start را بزنید، بعد نقش گروه را مشخص کنید."
 
 
 def onboard_message(bot_username: str) -> str:
     return (
-        "📢 راهنمای آرشیو گروه\n"
+        "راهنمای آرشیو\n"
         "────────────────\n"
-        "هر محتوایی که در این گروه بفرستید، ربات از شما می‌پرسد که آیا باید "
-        "با هشتگ در آرشیو ذخیره شود یا نه.\n"
+        "محتوای گروه رصد می‌ماند. اگر نیاز به هشتگ و ذخیره باشد، "
+        "ربات فقط از فرستنده در پیام خصوصی می‌پرسد.\n"
         "\n"
-        f"برای شروع، یک بار ربات @{bot_username} را استارت کنید."
+        f"یک بار ربات @{bot_username} را استارت کنید."
     )
 
 
@@ -346,90 +353,103 @@ def onboard_message(bot_username: str) -> str:
 
 def start_message(name: str) -> str:
     return (
-        f"سلام {name} 👋\n"
+        f"سلام {name}\n"
         "\n"
-        "من ربات آرشیو گروه هستم. هر محتوایی که در گروه بفرستید، از شما می‌پرسم "
-        "که آیا باید با هشتگ ذخیره شود یا نه.\n"
+        "من ربات آرشیو هستم. وقتی در گروه رصد محتوا بفرستید، "
+        "اینجا از شما می‌پرسم در کدام هشتگ ذخیره شود.\n"
         "\n"
-        "دستورهای شما:\n"
-        "/my — آخرین ثبت‌های شما\n"
-        "/undo کد — لغو ثبت تا چند دقیقه پس از ثبت\n"
-        "/resume — بازسازی گفت‌وگوی نیمه‌کاره\n"
+        "/my — ثبت‌های شما\n"
+        "/undo کد — لغو ثبت\n"
+        "/resume — ادامه گفتگوی نیمه‌کاره\n"
         "/help — راهنما"
     )
 
 
 def start_owner_setup(name: str) -> str:
     return (
-        f"سلام {name} 👋\n"
+        f"سلام {name}\n"
         "\n"
-        "ربات آرشیو شما روشن است و شما مدیر آن هستید.\n"
+        "ربات روشن است و شما مدیر آن هستید.\n"
         "\n"
-        "الان فقط این ۲ کار ساده را انجام دهید:\n"
+        "برای راه‌اندازی:\n"
         "\n"
-        "۱) ربات را به گروه‌های رصدتان اضافه کنید و ادمین کنید "
-        "(حتماً دسترسی «حذف پیام» را بدهید).\n"
+        "۱) ربات را به گروه‌های رصد اضافه کنید و ادمین کنید. "
+        "دسترسی «حذف پیام» لازم است تا پیام‌های ربات از گروه پاک شود.\n"
         "\n"
-        "۲) یک گروه خصوصی فقط برای بایگانی بسازید که فقط خودتان و ربات در آن باشید، "
-        "ربات را ادمین کنید، بعد داخل همان گروه بنویسید:\n"
-        "/archive\n"
+        "۲) برای هر هشتگ یک گروه خصوصی آرشیو بسازید (فقط شما و ربات). "
+        "ربات را ادمین کنید، داخل همان گروه /archive بزنید و هشتگ را انتخاب کنید.\n"
+        "هشتگ‌های فعلی: یادگیری · شبکه و منبع · محتوایی\n"
         "\n"
-        "اگر ربات را به گروهی اضافه کنید، از شما می‌پرسم آن گروه رصد است یا آرشیو.\n"
+        "۳) پرسش هشتگ فقط در پیام خصوصی فرستنده است؛ گروه شلوغ نمی‌شود.\n"
         "\n"
-        "بعد از این دو قدم، همه‌چیز خودکار کار می‌کند.\n"
         "منوی مدیریت: /panel"
     )
 
 
+START_RESUME = "ادامه دسته‌بندی همان پیام:"
+
+
 def bot_added_ask_role(group_title: str) -> str:
-    return f"ربات به گروه «{group_title}» اضافه شد.\n" "\n" "این گروه چیست؟"
+    return (
+        f"ربات به گروه «{group_title}» اضافه شد.\n"
+        "\n"
+        "نقش این گروه چیست؟\n"
+        "\n"
+        "رصد: اعضا محتوا می‌فرستند و هشتگ در پیام خصوصی انتخاب می‌شود.\n"
+        "آرشیو: فقط محل نگهداری یک هشتگ است. برای هر هشتگ یک گروه جدا بسازید."
+    )
 
 
-GROUP_HELLO = (
-    "سلام، من ربات آرشیو هستم و همین الان در این گروه جواب می‌دهم.\n"
-    "\n"
-    "این گروه چیست؟ اگر دکمه‌ها را نمی‌بینید، یک بار دیگر /start را بفرستید."
-)
+GROUP_HELLO = "ربات در این گروه فعال است. نقش گروه را در پیام خصوصی مشخص کنید."
 
-GROUP_GOT_IT = "این پیام را برای بایگانی لازم ندارم. متن، عکس، فایل یا لینک بفرستید."
+GROUP_GOT_IT = "این پیام برای بایگانی مناسب نیست. متن، عکس، فایل، صوت یا کلیپ بفرستید."
 
-BOT_READY_PING = (
-    "ربات روشن است و منتظر پیام شماست.\n"
-    "همین‌جا هر متنی بفرستید تا جواب بگیرید، یا ربات را با دکمه زیر به گروه اضافه کنید."
-)
+BOT_READY_PING = "ربات روشن است.\nهمین‌جا پیام بفرستید، یا ربات را به گروه اضافه کنید."
 
-BTN_ADD_TO_GROUP = "➕ افزودن ربات به گروه"
+BTN_ADD_TO_GROUP = "افزودن ربات به گروه"
 
 
-BTN_GROUP_IS_RESEARCH = "📁 گروه رصد (آرشیو محتوا)"
-BTN_GROUP_IS_ARCHIVE = "🔒 گروه آرشیو خصوصی"
+BTN_GROUP_IS_RESEARCH = "گروه رصد"
+BTN_GROUP_IS_ARCHIVE = "گروه آرشیو هشتگ"
 
-ARCHIVE_SET_DONE = (
-    "✅ این گروه به‌عنوان آرشیو خصوصی ثبت شد.\n"
-    "از این لحظه هر محتوا قبل از حذف، اول اینجا کپی می‌شود."
-)
+
+def archive_tag_prompt(group_title: str) -> str:
+    return f"گروه «{group_title}» آرشیو کدام هشتگ باشد؟\n\nبرای هر هشتگ باید یک گروه جدا ساخته شود."
+
+
+def archive_set_done(group_title: str, hashtag: str) -> str:
+    return f"گروه «{group_title}» به‌عنوان آرشیو {hashtag} ثبت شد."
+
+
+def research_set_done(group_title: str) -> str:
+    return (
+        f"گروه «{group_title}» به‌عنوان گروه رصد ثبت شد.\n"
+        "از این به بعد پرسش هشتگ فقط در پیام خصوصی فرستنده است."
+    )
+
+
+ARCHIVE_SET_DONE = "این گروه به‌عنوان آرشیو خصوصی ثبت شد."
 ARCHIVE_SET_NEED_PRIVATE = (
     "اول در پیام خصوصی ربات /start را بزنید تا مدیر شوید، بعد دوباره /archive را بفرستید."
 )
 RESEARCH_GROUP_READY = (
-    "✅ این گروه به‌عنوان گروه رصد ثبت شد.\n"
-    "از حالا هر محتوایی که اینجا فرستاده شود، از فرستنده پرسیده می‌شود که بایگانی شود یا نه."
+    "این گروه به‌عنوان گروه رصد ثبت شد.\nپرسش هشتگ از فرستنده در پیام خصوصی انجام می‌شود."
 )
 ALREADY_OWNER = "شما از قبل مدیر ربات هستید."
 
 
 HELP_MESSAGE = (
-    "📖 راهنمای ربات آرشیو\n"
+    "راهنمای ربات آرشیو\n"
     "────────────────\n"
-    "۱. محتوای خود را در گروه بفرستید.\n"
-    "۲. ربات در پیام خصوصی از شما می‌پرسد که ذخیره شود یا نه.\n"
-    "۳. اگر بله، هشتگ‌ها را انتخاب و تایید کنید.\n"
-    "۴. محتوا با هشتگ در گروه منتشر و در آرشیو ذخیره می‌شود.\n"
+    "۱. محتوا را در گروه رصد بفرستید؛ همان‌جا می‌ماند.\n"
+    "۲. ربات در پیام خصوصی می‌پرسد در کدام هشتگ ذخیره شود.\n"
+    "۳. می‌توانید یک یا چند هشتگ را با هم انتخاب کنید.\n"
+    "۴. با دکمه بازگشت، مرحله قبل را اصلاح کنید.\n"
+    "۵. پس از تأیید، داده در دیتابیس و گروه آرشیو همان هشتگ ذخیره می‌شود.\n"
     "\n"
-    "دستورها:\n"
-    "/my — آخرین ثبت‌های شما\n"
+    "/my — آخرین ثبت‌ها\n"
     "/undo کد — لغو ثبت\n"
-    "/resume — ادامه‌ی گفت‌وگوی نیمه‌کاره\n"
+    "/resume — ادامه گفتگوی نیمه‌کاره\n"
 )
 
 MY_EMPTY = "هنوز هیچ ثبتی ندارید."
@@ -582,15 +602,7 @@ ADDTAG_PROMPT_DESC = "توضیح کوتاه هشتگ را بفرستید (یا �
 
 
 def addtag_preview(title_fa: str, hashtag: str, slug: str) -> str:
-    return (
-        "🏷 پیش‌نمایش هشتگ جدید\n"
-        "\n"
-        f"عنوان: {title_fa}\n"
-        f"هشتگ: {hashtag}\n"
-        f"شناسه: {slug}\n"
-        "\n"
-        "ثبت شود؟"
-    )
+    return f"🏷 پیش‌نمایش هشتگ جدید\n\nعنوان: {title_fa}\nهشتگ: {hashtag}\nشناسه: {slug}\n\nثبت شود؟"
 
 
 BTN_YES = "✅ بله"
@@ -612,10 +624,26 @@ TAG_EDIT_DONE = "✅ هشتگ ویرایش شد."
 GROUPS_HEADER = "👥 گروه‌های ثبت‌شده:"
 
 
-def group_line(title: str | None, bale_chat_id: int, is_active: bool, can_delete: bool) -> str:
+def group_line(
+    title: str | None,
+    bale_chat_id: int,
+    is_active: bool,
+    can_delete: bool,
+    role: str | None = None,
+    tag: str | None = None,
+) -> str:
     status = "فعال" if is_active else "غیرفعال"
-    delete_perm = "✅ حذف دارد" if can_delete else "⚠️ حذف ندارد"
-    return f"• {title or 'بدون عنوان'} ({fa_digits(bale_chat_id)}) — {status} — {delete_perm}"
+    delete_perm = "حذف دارد" if can_delete else "حذف ندارد"
+    if role == "archive":
+        role_part = f" — آرشیو {tag or ''}".rstrip()
+    elif role == "research":
+        role_part = " — رصد"
+    else:
+        role_part = ""
+    return (
+        f"• {title or 'بدون عنوان'} ({fa_digits(bale_chat_id)}) — "
+        f"{status} — {delete_perm}{role_part}"
+    )
 
 
 SETTINGS_HEADER = "⚙️ تنظیمات زمان اجرا:"

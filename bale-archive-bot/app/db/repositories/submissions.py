@@ -152,6 +152,19 @@ class SubmissionRepository:
         )
         return int(result or 0)
 
+    async def latest_in_progress_for_user(self, user_id: int) -> Submission | None:
+        result = await self._session.execute(
+            select(Submission)
+            .options(selectinload(Submission.tags), selectinload(Submission.media_files))
+            .where(
+                Submission.user_id == user_id,
+                Submission.status.in_(IN_PROGRESS_STATUSES),
+            )
+            .order_by(Submission.created_at.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
+
     async def list_recent_by_user(self, user_id: int, limit: int = 10) -> list[Submission]:
         result = await self._session.execute(
             select(Submission)

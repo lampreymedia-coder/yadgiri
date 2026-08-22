@@ -55,7 +55,7 @@ async def test_first_private_start_promotes_owner(
         assert int(owner) == OWNER_ID
 
 
-async def test_group_archive_command_registers_chat(
+async def test_group_archive_command_asks_hashtag_privately(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     _clear_bootstrap(ctx)
@@ -82,13 +82,46 @@ async def test_group_archive_command_registers_chat(
             }
         )
     )
-    assert ctx.archive_chat_id == ARCHIVE_GROUP
     assert OWNER_ID in ctx.runtime_admin_ids
-    texts = "\n".join(fake_bale.sent_texts(ARCHIVE_GROUP))
-    assert "آرشیو خصوصی" in texts or "ثبت شد" in texts
+    texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert "هشتگ" in texts
+    assert fake_bale.last_markup(ARCHIVE_GROUP) is None
+    markup = fake_bale.last_markup(OWNER_ID)
+    assert markup is not None
+    stg = next(
+        btn["callback_data"]
+        for row in markup["inline_keyboard"]
+        for btn in row
+        if "|stg|" in btn.get("callback_data", "")
+    )
+    msg_id = next(
+        m.message_id
+        for m in fake_bale.messages.values()
+        if m.chat_id == OWNER_ID and m.reply_markup and not m.deleted
+    )
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 9000021,
+                "callback_query": {
+                    "id": "cb-stg",
+                    "from": {"id": OWNER_ID, "is_bot": False, "first_name": "مینا"},
+                    "message": {
+                        "message_id": msg_id,
+                        "chat": {"id": OWNER_ID, "type": "private"},
+                        "text": "pick",
+                    },
+                    "data": stg,
+                },
+            }
+        )
+    )
+    assert ctx.archive_chat_id == ARCHIVE_GROUP
     async with ctx.db.session() as session:
         stored = await AppSettingsRepository(session).get("archive_chat_id")
         assert int(stored) == ARCHIVE_GROUP
+    assert "ثبت شد" in "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert not any("ثبت شد" in t for t in fake_bale.sent_texts(ARCHIVE_GROUP))
 
 
 async def test_persian_archive_word_registers_chat(
@@ -118,9 +151,10 @@ async def test_persian_archive_word_registers_chat(
             }
         )
     )
-    assert ctx.archive_chat_id == ARCHIVE_GROUP
-    texts = "\n".join(fake_bale.sent_texts(ARCHIVE_GROUP))
-    assert "ثبت شد" in texts
+    assert OWNER_ID in ctx.runtime_admin_ids
+    texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert "هشتگ" in texts
+    assert fake_bale.last_markup(ARCHIVE_GROUP) is None
 
 
 async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
@@ -144,13 +178,14 @@ async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer)
             }
         )
     )
-    texts = "\n".join(fake_bale.sent_texts(-100200300))
-    assert "این گروه چیست" in texts
-    markup = fake_bale.last_markup(-100200300)
+    texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert "نقش این گروه" in texts
+    markup = fake_bale.last_markup(OWNER_ID)
     assert markup is not None
     labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
     assert any("رصد" in label for label in labels)
     assert any("آرشیو" in label for label in labels)
+    assert fake_bale.last_markup(-100200300) is None
 
 
 async def test_group_start_without_chat_type_still_asks_role(
@@ -176,8 +211,9 @@ async def test_group_start_without_chat_type_still_asks_role(
             }
         )
     )
-    texts = "\n".join(fake_bale.sent_texts(-100200302))
-    assert "این گروه چیست" in texts
+    texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert "نقش این گروه" in texts
+    assert fake_bale.last_markup(-100200302) is None
 
 
 async def test_bot_added_singular_member_asks_role(
@@ -208,11 +244,12 @@ async def test_bot_added_singular_member_asks_role(
             }
         )
     )
-    texts = "\n".join(fake_bale.sent_texts(-100200301))
-    assert "این گروه چیست" in texts
+    texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
+    assert "نقش این گروه" in texts
+    assert fake_bale.last_markup(-100200301) is None
 
 
-async def test_group_content_opens_wizard_in_group(
+async def test_group_content_opens_wizard_in_private(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     import asyncio
@@ -237,7 +274,8 @@ async def test_group_content_opens_wizard_in_group(
         )
     )
     await asyncio.sleep(0.2)
-    markup = fake_bale.last_markup(-100200300)
+    markup = fake_bale.last_markup(12345)
     assert markup is not None
     data = [btn.get("callback_data", "") for row in markup["inline_keyboard"] for btn in row]
     assert any("|yes|" in item for item in data)
+    assert fake_bale.last_markup(-100200300) is None

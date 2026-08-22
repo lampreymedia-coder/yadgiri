@@ -1,14 +1,16 @@
-"""Group gateway intake and private-first intake.
+"""Group gateway intake: persist, then open the hashtag wizard in private chat.
 
-Group flow: archive → persist → delete → wizard in the same group (reply).
-Private flow: the user sends content straight to the bot; no deletion is
-ever needed and the wizard runs in place.
+Research groups keep the original message visible. Archive groups are write
+destinations only. Role questions and the tagging wizard never stay in the
+group; bot prompts there are deleted as soon as the private flow continues.
 """
 
 from __future__ import annotations
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.bale.errors import BaleAPIError, NetworkError
-from app.bale.keyboards import button, keyboard
+from app.bale.keyboards import button, keyboard, url_button
 from app.bale.models import InlineKeyboardMarkup, Message
 from app.config import IngestMode
 from app.core.context import BotContext
@@ -17,27 +19,19 @@ from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.users import UserRepository
 from app.domain.classify import classify
+from app.domain.group_roles import (
+    ROLE_ARCHIVE,
+    group_role,
+    is_archive_destination,
+    needs_role,
+    patch_settings,
+    role_already_asked,
+)
 from app.handlers.wizard import open_wizard, render_group_choice
 from app.i18n import fa
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
-
-ROLE_ARCHIVE = "archive"
-ROLE_RESEARCH = "research"
-
-
-def group_role(group: Group) -> str | None:
-    raw = group.settings.get("role")
-    return raw if isinstance(raw, str) else None
-
-
-def role_already_asked(group: Group) -> bool:
-    return bool(group.settings.get("role_asked"))
-
-
-def set_group_role(group: Group, role: str) -> None:
-    group.settings = {**group.settings, "role": role, "role_asked": True}
 
 
 def role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
@@ -49,38 +43,53 @@ def role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     )
 
 
-async def ask_group_role(
-    ctx: BotContext, message: Message, group: Group, *, force: bool = False
-) -> bool:
-    """Ask in the group itself whether this chat is research or archive.
+def archive_tag_keyboard(chat_id: int, tags: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    """``tags`` is (slug, button_label)."""
+    rows = [[button(label, "stg", str(chat_id), slug)] for slug, label in tags]
+    rows.append([button(fa.BTN_BACK, "srb", "", str(chat_id))])
+    return keyboard(rows)
 
-    Returns True when a prompt was posted (or attempted).
-    """
-    if not force and (role_already_asked(group) or group_role(group) is not None):
+
+async def ask_role_privately(
+    ctx: BotContext,
+    session: AsyncSession,
+    group: Group,
+    user_bale_id: int | None,
+    group_title: str,
+    *,
+    force: bool = False,
+) -> bool:
+    """Ask research vs archive in a private chat. Returns True if a DM was sent."""
+    if not force and not needs_role(group) and role_already_asked(group):
         return False
-    if not force:
-        set_group_role(group, ROLE_RESEARCH)
-    title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
-    text = fa.bot_added_ask_role(title)
-    markup = role_keyboard(message.chat.id)
+    patch_settings(group, role_asked=True)
+    if user_bale_id is None:
+        return False
+    text = fa.bot_added_ask_role(group_title)
+    markup = role_keyboard(group.bale_chat_id)
     try:
-        await ctx.api.send_message(
-            message.chat.id,
-            text,
-            markup,
-            reply_to_message_id=message.message_id,
-            is_group=True,
-        )
-        group.settings = {**group.settings, "role_asked": True}
+        await ctx.api.send_message(user_bale_id, text, markup)
         return True
     except (BaleAPIError, NetworkError) as exc:
-        logger.warning("bot_added_group_notice_failed", chat_id=message.chat.id, error=str(exc))
-        group.settings = {**group.settings, "role_asked": False}
-        return False
+        logger.warning("role_dm_failed", chat_id=group.bale_chat_id, error=str(exc))
+    hint = fa.group_role_private_hint(ctx.bot_username)
+    url = f"https://ble.ir/{ctx.bot_username}" if ctx.bot_username else None
+    hint_markup = keyboard([[url_button(fa.BTN_OPEN_PRIVATE, url)]]) if url else None
+    try:
+        sent = await ctx.api.send_message(group.bale_chat_id, hint, hint_markup, is_group=True)
+        patch_settings(
+            group,
+            prompt_chat_id=group.bale_chat_id,
+            prompt_message_id=sent.message_id,
+        )
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("role_group_hint_failed", chat_id=group.bale_chat_id, error=str(exc))
+        patch_settings(group, role_asked=False)
+    return False
 
 
 async def handle_group_hello(ctx: BotContext, message: Message) -> None:
-    """`/start` (or equivalent) typed in a group: introduce the bot and ask the role."""
+    """`/start` in a group: ask the role privately, do not clutter the group."""
     async with ctx.db.session() as session:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
@@ -89,18 +98,9 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
             from app.handlers.admin import promote_first_owner
 
             await promote_first_owner(ctx, session, message.from_user)
-        asked = await ask_group_role(ctx, message, group, force=True)
-    if asked:
-        return
-    try:
-        await ctx.api.send_message(
-            message.chat.id,
-            fa.GROUP_HELLO,
-            reply_to_message_id=message.message_id,
-            is_group=True,
-        )
-    except (BaleAPIError, NetworkError) as exc:
-        logger.warning("group_hello_failed", chat_id=message.chat.id, error=str(exc))
+        title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        user_id = message.from_user.id if message.from_user is not None else None
+        await ask_role_privately(ctx, session, group, user_id, title, force=True)
 
 
 async def register_group_events(ctx: BotContext, message: Message) -> None:
@@ -126,7 +126,9 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
             from app.handlers.admin import promote_first_owner
 
             await promote_first_owner(ctx, session, message.from_user)
-        await ask_group_role(ctx, message, group)
+        title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        user_id = message.from_user.id if message.from_user is not None else None
+        await ask_role_privately(ctx, session, group, user_id, title)
 
 
 def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:
@@ -146,7 +148,6 @@ def _should_ignore(ctx: BotContext, message: Message) -> bool:
         return True
     classified = classify(message)
     if classified.content_type is ContentType.OTHER:
-        # Still keep anything with a caption/text; classify already mapped those.
         return True
     return classified.content_type is ContentType.TEXT and not (message.text or "").strip()
 
@@ -154,11 +155,9 @@ def _should_ignore(ctx: BotContext, message: Message) -> bool:
 async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
     """Process one buffered batch (single message or album) from a group."""
     primary = messages[0]
-    if ctx.archive_chat_id is not None and primary.chat.id == ctx.archive_chat_id:
+    if not _is_allowed_group(ctx, primary.chat.id):
         return
     if ctx.settings.ingest_mode is IngestMode.PRIVATE_FIRST:
-        return
-    if not _is_allowed_group(ctx, primary.chat.id):
         return
 
     async with ctx.db.session() as session:
@@ -166,8 +165,18 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
         group = await groups.upsert(primary.chat.id, primary.chat.title, primary.chat.type)
         await groups.set_active(group.id, True)
 
-        if group_role(group) != ROLE_ARCHIVE and not role_already_asked(group):
-            await ask_group_role(ctx, primary, group)
+        if is_archive_destination(group, ctx.archive_chat_id):
+            return
+
+        if needs_role(group) and not role_already_asked(group):
+            from app.handlers.admin import is_admin, promote_first_owner
+
+            if primary.from_user is not None:
+                await promote_first_owner(ctx, session, primary.from_user)
+            user_id = primary.from_user.id if primary.from_user is not None else None
+            title = primary.chat.title or group.title or fa.fa_digits(primary.chat.id)
+            if user_id is not None and await is_admin(ctx, session, user_id):
+                await ask_role_privately(ctx, session, group, user_id, title)
 
         if primary.from_user is None:
             return
@@ -188,12 +197,7 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
 
         if not ctx.spam_guard.allow(user.bale_user_id):
             try:
-                await ctx.api.send_message(
-                    primary.chat.id,
-                    fa.ERR_SPAM_LIMIT,
-                    reply_to_message_id=primary.message_id,
-                    is_group=True,
-                )
+                await ctx.api.send_message(user.bale_user_id, fa.ERR_SPAM_LIMIT)
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("spam_notice_failed", error=str(exc))
             notify_id = ctx.admin_notify_chat_id or ctx.settings.admin_chat_id
@@ -220,12 +224,7 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
 
         if not result.archived or result.submission is None:
             try:
-                await ctx.api.send_message(
-                    primary.chat.id,
-                    fa.ERR_SERVER,
-                    reply_to_message_id=primary.message_id,
-                    is_group=True,
-                )
+                await ctx.api.send_message(user.bale_user_id, fa.ERR_SERVER)
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("intake_failure_notice_failed", error=str(exc))
             return
@@ -266,7 +265,7 @@ async def process_private_content(ctx: BotContext, message: Message) -> None:
             g
             for g in await groups_repo.list_active()
             if _is_allowed_group(ctx, g.bale_chat_id)
-            and g.bale_chat_id != ctx.archive_chat_id
+            and not is_archive_destination(g, ctx.archive_chat_id)
             and group_role(g) != ROLE_ARCHIVE
         ]
         target_group: Group | None = active_groups[0] if len(active_groups) == 1 else None

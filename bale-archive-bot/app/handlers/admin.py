@@ -20,7 +20,7 @@ from app.bale.keyboards import button, keyboard, parse_callback
 from app.bale.models import CallbackQuery, Message
 from app.core.context import BotContext
 from app.core.fsm import Conversation, WizardState
-from app.db.models import ContentType
+from app.db.models import ContentType, Group
 from app.db.repositories.groups import GroupRepository
 from app.db.repositories.misc import AppSettingsRepository, AuditRepository
 from app.db.repositories.outbox import OutboxRepository
@@ -28,13 +28,35 @@ from app.db.repositories.submissions import SubmissionRepository
 from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
 from app.domain import reports
+from app.domain.group_roles import (
+    ROLE_ARCHIVE,
+    ROLE_RESEARCH,
+    archive_setting_key,
+    delete_group_prompt,
+    patch_settings,
+    settings_of,
+    tag_slug_of,
+)
 from app.domain.tags import make_hashtag, make_slug, unique_slug
 from app.i18n import fa
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-ADMIN_ACTIONS = {"ap", "adty", "adtn", "abcy", "abcn", "atgy", "atgn", "apg", "sar", "srg"}
+ADMIN_ACTIONS = {
+    "ap",
+    "adty",
+    "adtn",
+    "abcy",
+    "abcn",
+    "atgy",
+    "atgn",
+    "apg",
+    "sar",
+    "srg",
+    "stg",
+    "srb",
+}
 
 _PAGE_SIZE = 10
 
@@ -557,9 +579,18 @@ async def send_groups(ctx: BotContext, session: AsyncSession, chat_id: int) -> N
     groups = GroupRepository(session)
     all_groups = await groups.list_active()
     lines = [fa.GROUPS_HEADER]
-    lines.extend(
-        fa.group_line(g.title, g.bale_chat_id, g.is_active, g.bot_can_delete) for g in all_groups
-    )
+    for group in all_groups:
+        role_value = settings_of(group).get("role")
+        lines.append(
+            fa.group_line(
+                group.title,
+                group.bale_chat_id,
+                group.is_active,
+                group.bot_can_delete,
+                role=role_value if isinstance(role_value, str) else None,
+                tag=tag_slug_of(group),
+            )
+        )
     await ctx.api.send_message(chat_id, "\n".join(lines))
 
 
@@ -607,22 +638,75 @@ async def handle_forget(
     await ctx.api.send_message(chat_id, fa.FORGET_DONE)
 
 
-async def persist_archive_chat(ctx: BotContext, session: AsyncSession, chat_id: int) -> None:
+async def persist_archive_chat(
+    ctx: BotContext,
+    session: AsyncSession,
+    chat_id: int,
+    *,
+    slug: str | None = None,
+    title: str | None = None,
+) -> None:
     ctx.archive_chat_id = chat_id
     settings_repo = AppSettingsRepository(session)
     await settings_repo.set("archive_chat_id", chat_id)
+    if slug:
+        await settings_repo.set(archive_setting_key(slug), chat_id)
     groups = GroupRepository(session)
-    group = await groups.upsert(chat_id, None, "group")
+    group = await groups.upsert(chat_id, title, "group")
     await groups.set_active(group.id, True)
-    group.settings = {**group.settings, "role": "archive", "role_asked": True}
+    changes: dict[str, Any] = {"role": ROLE_ARCHIVE, "role_asked": True}
+    if slug:
+        changes["tag_slug"] = slug
+    patch_settings(group, **changes)
     audit = AuditRepository(session)
-    await audit.record("archive_chat_set", None, "group", str(chat_id), {})
+    await audit.record(
+        "archive_chat_set", None, "group", str(chat_id), {"slug": slug} if slug else {}
+    )
+
+
+async def persist_research_chat(
+    session: AsyncSession, chat_id: int, *, title: str | None = None
+) -> Group:
+    groups = GroupRepository(session)
+    group = await groups.upsert(chat_id, title, "group")
+    await groups.set_active(group.id, True)
+    patch_settings(group, role=ROLE_RESEARCH, role_asked=True, tag_slug=None)
+    return group
+
+
+async def _send_archive_tag_picker(
+    ctx: BotContext, session: AsyncSession, user_id: int, group_chat_id: int, group_title: str
+) -> None:
+    from app.handlers.group_intake import archive_tag_keyboard
+
+    tags = await TagRepository(session).list_active()
+    labels = [(tag.slug, f"{tag.hashtag}  {tag.title_fa}") for tag in tags]
+    await ctx.api.send_message(
+        user_id,
+        fa.archive_tag_prompt(group_title),
+        archive_tag_keyboard(group_chat_id, labels),
+    )
 
 
 async def handle_set_archive(ctx: BotContext, session: AsyncSession, message: Message) -> None:
-    """Mark the current group as the private archive chat."""
-    await persist_archive_chat(ctx, session, message.chat.id)
-    await ctx.api.send_message(message.chat.id, fa.ARCHIVE_SET_DONE, is_group=True)
+    """Ask privately which hashtag this group archives. No bot message stays in-group."""
+    assert message.from_user is not None
+    groups = GroupRepository(session)
+    group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
+    await groups.set_active(group.id, True)
+    title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+    try:
+        await _send_archive_tag_picker(ctx, session, message.from_user.id, message.chat.id, title)
+        return
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("archive_picker_dm_failed", error=str(exc))
+    try:
+        sent = await ctx.api.send_message(
+            message.chat.id, fa.group_role_private_hint(ctx.bot_username), is_group=True
+        )
+        patch_settings(group, prompt_chat_id=message.chat.id, prompt_message_id=sent.message_id)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("archive_picker_hint_failed", error=str(exc))
 
 
 async def handle_onboard(ctx: BotContext, message: Message) -> None:
@@ -708,33 +792,67 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
         try:
             archive_id = int(data.arg)
         except ValueError:
-            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+            await ctx.api.send_message(cq.from_user.id, fa.ERR_GENERIC)
         else:
-            await persist_archive_chat(ctx, session, archive_id)
-            await ctx.api.send_message(chat_id, fa.ARCHIVE_SET_DONE)
-            if archive_id != chat_id:
+            groups = GroupRepository(session)
+            group = await groups.upsert(archive_id, None, "group")
+            title = group.title or fa.fa_digits(archive_id)
+            await delete_group_prompt(ctx.api, group)
+            if cq.message is not None and cq.message.chat.id < 0:
                 try:
-                    await ctx.api.send_message(archive_id, fa.ARCHIVE_SET_DONE, is_group=True)
+                    await ctx.api.delete_message(cq.message.chat.id, cq.message.message_id)
                 except (BaleAPIError, NetworkError) as exc:
-                    logger.info("archive_group_confirm_failed", error=str(exc))
+                    logger.info("archive_prompt_delete_failed", error=str(exc))
+            try:
+                await _send_archive_tag_picker(ctx, session, cq.from_user.id, archive_id, title)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("archive_tag_picker_failed", error=str(exc))
+                await ctx.api.send_message(cq.from_user.id, fa.ERR_GENERIC)
+    elif data.action == "srb":
+        try:
+            group_chat_id = int(data.arg)
+        except ValueError:
+            await ctx.api.send_message(cq.from_user.id, fa.ERR_GENERIC)
+        else:
+            from app.handlers.group_intake import role_keyboard
+
+            groups = GroupRepository(session)
+            group = await groups.get_by_bale_id(group_chat_id)
+            title = (group.title if group else None) or fa.fa_digits(group_chat_id)
+            await ctx.api.send_message(
+                cq.from_user.id, fa.bot_added_ask_role(title), role_keyboard(group_chat_id)
+            )
+    elif data.action == "stg":
+        slug = data.arg
+        try:
+            archive_id = int(data.sid)
+        except ValueError:
+            await ctx.api.send_message(cq.from_user.id, fa.ERR_GENERIC)
+        else:
+            tags = TagRepository(session)
+            tag = await tags.get_by_slug(slug)
+            groups = GroupRepository(session)
+            group = await groups.upsert(archive_id, None, "group")
+            await persist_archive_chat(ctx, session, archive_id, slug=slug, title=group.title)
+            await delete_group_prompt(ctx.api, group)
+            hashtag = tag.hashtag if tag is not None else f"#{slug}"
+            title = group.title or fa.fa_digits(archive_id)
+            await ctx.api.send_message(cq.from_user.id, fa.archive_set_done(title, hashtag))
     elif data.action == "srg":
         try:
             group_chat_id = int(data.arg)
         except ValueError:
-            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+            await ctx.api.send_message(cq.from_user.id, fa.ERR_GENERIC)
         else:
-            groups = GroupRepository(session)
-            group = await groups.upsert(group_chat_id, None, "group")
-            await groups.set_active(group.id, True)
-            group.settings = {**group.settings, "role": "research", "role_asked": True}
-            await ctx.api.send_message(chat_id, fa.RESEARCH_GROUP_READY)
-            if group_chat_id != chat_id:
+            group = await persist_research_chat(session, group_chat_id)
+            await delete_group_prompt(ctx.api, group)
+            if cq.message is not None and cq.message.chat.id < 0:
                 try:
-                    await ctx.api.send_message(
-                        group_chat_id, fa.RESEARCH_GROUP_READY, is_group=True
-                    )
+                    await ctx.api.delete_message(cq.message.chat.id, cq.message.message_id)
                 except (BaleAPIError, NetworkError) as exc:
-                    logger.info("research_group_confirm_failed", error=str(exc))
+                    logger.info("research_prompt_delete_failed", error=str(exc))
+            title = group.title or fa.fa_digits(group_chat_id)
+            await ctx.api.send_message(cq.from_user.id, fa.research_set_done(title))
 
     if ctx.caps.has("answerCallbackQuery"):
         try:

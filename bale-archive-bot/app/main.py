@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import signal
 from collections.abc import AsyncIterator
 from typing import Any
@@ -316,9 +317,10 @@ class Application:
             if settings.run_mode is RunMode.WEBHOOK:
                 try:
                     await app_instance.api.set_webhook(settings.webhook_url)
-                    logger.info("webhook_registered")
+                    logger.info("webhook_registered", url=settings.webhook_url)
                 except (BaleAPIError, NetworkError) as exc:
                     logger.error("webhook_registration_failed", error=str(exc))
+                await app_instance._notify_owner_ready()
             yield
             await app_instance.shutdown()
 
@@ -353,12 +355,29 @@ class Application:
                 if len(body) > _WEBHOOK_BODY_LIMIT:
                     return Response(status_code=413)
                 try:
-                    update = Update.model_validate_json(body)
-                except ValueError:
+                    raw = json.loads(body.decode("utf-8"))
+                except (ValueError, UnicodeDecodeError):
                     logger.warning("webhook_invalid_body")
                     return Response(status_code=200)
+                items: list[object]
+                if isinstance(raw, list):
+                    items = raw
+                elif isinstance(raw, dict) and "update_id" in raw:
+                    items = [raw]
+                elif isinstance(raw, dict) and isinstance(raw.get("result"), list):
+                    items = raw["result"]
+                elif isinstance(raw, dict) and isinstance(raw.get("result"), dict):
+                    items = [raw["result"]]
+                else:
+                    items = [raw]
                 assert app_instance.dispatcher is not None
-                app_instance._track(app_instance.dispatcher.dispatch(update))
+                for item in items:
+                    update = Update.try_parse(item)
+                    if update is None:
+                        logger.warning("webhook_invalid_body", raw=item)
+                        continue
+                    logger.info("webhook_update", update_id=update.update_id, kind=update.kind)
+                    app_instance._track(app_instance.dispatcher.dispatch(update))
                 return Response(status_code=200)
 
         return web

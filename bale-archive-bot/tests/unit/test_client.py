@@ -131,22 +131,22 @@ async def test_read_methods_use_get_like_official_library() -> None:
     await client.close()
 
 
-async def test_get_updates_uses_query_string_get() -> None:
+async def test_get_updates_posts_json_like_official_library() -> None:
     from app.bale.methods import BaleAPI
 
     server = FakeBaleServer()
     client = await make_client(server)
     api = BaleAPI(client)
     await api.get_updates(offset=12, limit=50)
-    assert server.last_http_method == "GET"
+    assert server.last_http_method == "POST"
     params = server.calls_for("getUpdates")[0]
-    assert params["offset"] == "12"
-    assert params["limit"] == "50"
+    assert str(params["offset"]) == "12"
+    assert str(params["limit"]) == "50"
     assert "timeout" not in params
     await client.close()
 
 
-async def test_get_updates_falls_back_to_post_when_get_rejected() -> None:
+async def test_get_updates_falls_back_to_get_when_post_rejected() -> None:
     from app.bale.methods import BaleAPI
 
     server = FakeBaleServer()
@@ -156,5 +156,5 @@ async def test_get_updates_falls_back_to_post_when_get_rejected() -> None:
     result = await api.get_updates()
     assert result == []
     assert len(server.calls_for("getUpdates")) == 2
-    assert server.last_http_method == "POST"
+    assert server.last_http_method == "GET"
     await client.close()

@@ -51,14 +51,14 @@ class BaleAPI:
         if offset is not None:
             params["offset"] = int(offset)
         try:
-            result = await self.client.request("getUpdates", params)
+            # python-bale-bot (what works inside Iran) POSTs JSON.
+            result = await self.client.request("getUpdates", params, force_post=True)
         except (BadRequest, NotFound, BaleAPIError) as exc:
             code = getattr(exc, "error_code", 0)
             if code not in {400, 404, 405, 501}:
                 raise
-            # Bale staff: getUpdates is GET; some gateways only accept POST JSON.
-            logger.info("get_updates_get_fallback_post", error=str(exc))
-            result = await self.client.request("getUpdates", params, force_post=True)
+            logger.info("get_updates_post_fallback_get", error=str(exc))
+            result = await self.client.request("getUpdates", params)
         if isinstance(result, dict):
             result = result.get("updates") or result.get("result") or [result]
         updates: list[Update] = []

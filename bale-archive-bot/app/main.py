@@ -408,6 +408,7 @@ async def _run_polling_mode(app_instance: Application) -> None:
 def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level, settings.log_format)
+    logger.info("starting", run_mode=str(settings.run_mode))
     app_instance = Application(settings)
 
     if settings.run_mode is RunMode.POLLING:

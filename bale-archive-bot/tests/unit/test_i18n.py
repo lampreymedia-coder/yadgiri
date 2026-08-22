@@ -54,3 +54,8 @@ def test_owner_setup_mentions_archive_command() -> None:
     assert "مینا" in text
     assert "/archive" in text
     assert "/panel" in text
+    assert "یادگیری" in text
+    assert "سند" in text
+    assert "شبکه و منبع" in text
+    assert "محتوایی" in text
+    assert "دو نفره" in text

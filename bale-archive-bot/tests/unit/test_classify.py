@@ -93,6 +93,33 @@ def test_voice_metadata_extracted() -> None:
     assert result.content_subtype == "audio/ogg"
 
 
+def test_ogg_document_classified_as_voice() -> None:
+    message = load_message("document")
+    assert message.document is not None
+    message.document.mime_type = "audio/ogg"
+    message.document.file_name = "note.ogg"
+    result = classify(message)
+    assert result.content_type is ContentType.VOICE
+
+
+def test_file_field_ogg_classified_as_voice() -> None:
+    message = Message.model_validate(
+        {
+            "message_id": 1,
+            "chat": {"id": -100200300, "type": "group", "title": "رصد"},
+            "from": {"id": 1, "is_bot": False, "first_name": "a"},
+            "file": {
+                "file_id": "voice-file",
+                "mime_type": "audio/ogg; codecs=opus",
+                "file_name": "voice.ogg",
+            },
+        }
+    )
+    result = classify(message)
+    assert result.content_type is ContentType.VOICE
+    assert result.media[0].file_id == "voice-file"
+
+
 # ─── Persian normalisation (mandatory rules) ───
 
 

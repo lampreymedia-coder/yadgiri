@@ -78,7 +78,6 @@ async def test_caption_over_1024_splits_into_reply(
     sid = submission.short_id
     msg_id = wizard_message_id(fake_bale, USER_ID)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
     markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     tag_cb = next(
@@ -113,7 +112,6 @@ async def test_undo_within_window(
     sid = submission.short_id
     msg_id = wizard_message_id(fake_bale, USER_ID)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
     markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     tag_cb = next(
@@ -251,7 +249,7 @@ async def test_double_click_second_ignored_while_locked(
     await asyncio.gather(first, second)
     submission = await get_submission(ctx)
     # Exactly one forward transition happened.
-    assert submission.status is SubmissionStatus.AWAITING_TAG_COUNT
+    assert submission.status is SubmissionStatus.AWAITING_TAGS
 
 
 async def test_forwarded_message_intake(dispatcher: Dispatcher, ctx: BotContext) -> None:

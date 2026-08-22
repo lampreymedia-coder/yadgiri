@@ -1,4 +1,4 @@
-"""The tagging wizard: decision → tag count → tag selection → preview → done.
+"""The tagging wizard: decision → hashtag multi-select → preview → done.
 
 All keyboard updates go through ``safe_edit`` (text + keyboard together).
 State lives in Postgres (conversation_states), never in process memory; the back button
@@ -427,8 +427,6 @@ async def _dispatch_action(
     conversation: Conversation,
 ) -> bool:
     selected: list[int] = list(conversation.payload.get("selected", []))
-    target_raw = conversation.payload.get("target")
-    target: int | None = int(target_raw) if target_raw is not None else None
 
     if action == ACT_PICK_GROUP:
         chosen = await session.get(Group, int(arg)) if arg else None
@@ -441,10 +439,12 @@ async def _dispatch_action(
         return True
 
     if action == ACT_DECISION_YES:
-        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAG_COUNT)
-        conversation.transition(WizardState.AWAITING_TAG_COUNT)
+        conversation.payload["target"] = None
+        submission.meta = {**submission.meta, "target_count": None}
+        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
+        conversation.transition(WizardState.AWAITING_TAGS)
         active = await tags_repo.list_active()
-        text, markup = render_tag_count(len(active), submission.short_id, conversation.can_go_back)
+        text, markup = render_tags(active, selected, None, submission.short_id)
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -472,17 +472,13 @@ async def _dispatch_action(
         return True
 
     if action == ACT_TAG_COUNT:
-        active = await tags_repo.list_active()
-        new_target = None if arg == "free" else max(1, min(int(arg), len(active)))
-        conversation.payload["target"] = new_target
-        submission.meta = {**submission.meta, "target_count": new_target}
-        # Preserve previous selections but trim overflow against a lower target.
-        if new_target is not None and len(selected) > new_target:
-            selected = selected[:new_target]
-            conversation.payload["selected"] = selected
+        # Older keyboards still send a count; ignore it and show all hashtags.
+        conversation.payload["target"] = None
+        submission.meta = {**submission.meta, "target_count": None}
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
         conversation.transition(WizardState.AWAITING_TAGS)
-        text, markup = render_tags(active, selected, new_target, submission.short_id)
+        active = await tags_repo.list_active()
+        text, markup = render_tags(active, selected, None, submission.short_id)
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -493,14 +489,10 @@ async def _dispatch_action(
         if tag_id in selected:
             selected.remove(tag_id)
         else:
-            if target is not None and len(selected) >= target:
-                # Limit reached: toast only, message unchanged.
-                await _answer(ctx, cq, fa.toast_tag_limit(target))
-                return False
             selected.append(tag_id)
         conversation.payload["selected"] = selected
         page = int(conversation.payload.get("page", 1))
-        text, markup = render_tags(active, selected, target, submission.short_id, page)
+        text, markup = render_tags(active, selected, None, submission.short_id, page)
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -509,7 +501,7 @@ async def _dispatch_action(
         page = int(arg) if arg else 1
         conversation.payload["page"] = page
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, target, submission.short_id, page)
+        text, markup = render_tags(active, selected, None, submission.short_id, page)
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -517,9 +509,6 @@ async def _dispatch_action(
     if action == ACT_TAGS_CONTINUE:
         if not selected:
             await _answer(ctx, cq, fa.TOAST_NO_TAG_SELECTED)
-            return False
-        if target is not None and len(selected) != target:
-            await _answer(ctx, cq, fa.TOAST_NEED_FULL_COUNT)
             return False
         await service.submissions.set_tags(submission, selected)
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_CONFIRM)
@@ -534,7 +523,7 @@ async def _dispatch_action(
     if action == ACT_EDIT_TAGS:
         conversation.transition(WizardState.AWAITING_TAGS)
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, target, submission.short_id)
+        text, markup = render_tags(active, selected, None, submission.short_id)
         await _edit_wizard(ctx, submission, text, markup)
         await _answer(ctx, cq)
         return True
@@ -548,6 +537,8 @@ async def _dispatch_action(
 
     if action == ACT_BACK:
         previous = conversation.go_back()
+        while previous is WizardState.AWAITING_TAG_COUNT:
+            previous = conversation.go_back()
         await _render_state(
             ctx,
             session,
@@ -605,20 +596,16 @@ async def _render_state(
 ) -> None:
     """Render the wizard message for ``state`` (used by back and /resume)."""
     selected: list[int] = list(conversation.payload.get("selected", []))
-    target_raw = conversation.payload.get("target")
-    target: int | None = int(target_raw) if target_raw is not None else None
 
     if state is WizardState.AWAITING_DECISION:
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_DECISION)
         text, markup = render_decision(submission, owner, group, ctx.bot_username, False)
-    elif state is WizardState.AWAITING_TAG_COUNT:
-        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAG_COUNT)
-        active = await tags_repo.list_active()
-        text, markup = render_tag_count(len(active), submission.short_id, conversation.can_go_back)
-    elif state is WizardState.AWAITING_TAGS:
+    elif state is WizardState.AWAITING_TAGS or state is WizardState.AWAITING_TAG_COUNT:
+        conversation.payload["target"] = None
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
+        conversation.state = WizardState.AWAITING_TAGS
         active = await tags_repo.list_active()
-        text, markup = render_tags(active, selected, target, submission.short_id)
+        text, markup = render_tags(active, selected, None, submission.short_id)
     else:  # AWAITING_CONFIRM / AWAITING_NOTE render the preview
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_CONFIRM)
         conversation.state = WizardState.AWAITING_CONFIRM

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.bale.models import Message
 from app.db.models import ContentType
@@ -170,6 +171,47 @@ def _link_dominant(text: str, urls: list[str]) -> bool:
     return len(stripped.strip()) <= max(20, len(text) // 5)
 
 
+def _media_from_mapping(raw: Any) -> MediaInfo | None:
+    if isinstance(raw, list) and raw:
+        raw = raw[0]
+    if not isinstance(raw, dict):
+        return None
+    file_id = raw.get("file_id")
+    if not isinstance(file_id, str) or not file_id:
+        return None
+    duration = raw.get("duration")
+    width = raw.get("width") or raw.get("length")
+    height = raw.get("height") or raw.get("length")
+    file_unique = raw.get("file_unique_id")
+    file_name = raw.get("file_name")
+    mime_type = raw.get("mime_type")
+    file_size = raw.get("file_size")
+    if isinstance(duration, float):
+        duration = int(duration)
+    if isinstance(width, float):
+        width = int(width)
+    if isinstance(height, float):
+        height = int(height)
+    return MediaInfo(
+        file_id=file_id,
+        file_unique_id=file_unique if isinstance(file_unique, str) else None,
+        file_name=file_name if isinstance(file_name, str) else None,
+        mime_type=mime_type if isinstance(mime_type, str) else None,
+        file_size=file_size if isinstance(file_size, int) else None,
+        duration=duration if isinstance(duration, int) else None,
+        width=width if isinstance(width, int) else None,
+        height=height if isinstance(height, int) else None,
+    )
+
+
+def _looks_like_voice_mime(mime_type: str | None, file_name: str | None) -> bool:
+    mime = (mime_type or "").lower()
+    name = (file_name or "").lower()
+    if "ogg" in mime or name.endswith(".ogg") or name.endswith(".opus"):
+        return True
+    return "opus" in mime
+
+
 def classify(message: Message) -> ClassifiedContent:
     """Classify a message into a :class:`ClassifiedContent` (spec section 7)."""
     is_forwarded, forward_source = _forward_source(message)
@@ -202,17 +244,25 @@ def classify(message: Message) -> ClassifiedContent:
             v.mime_type,
             [MediaInfo(v.file_id, v.file_unique_id, None, v.mime_type, v.file_size, v.duration)],
         )
+    extra = message.model_extra or {}
+    extra_voice = _media_from_mapping(extra.get("voice"))
+    if extra_voice is not None:
+        return result(ContentType.VOICE, extra_voice.mime_type, [extra_voice])
     if message.audio is not None:
         a = message.audio
-        return result(
-            ContentType.AUDIO,
-            audio_subtype(a.mime_type, a.file_name),
-            [
-                MediaInfo(
-                    a.file_id, a.file_unique_id, a.file_name, a.mime_type, a.file_size, a.duration
-                )
-            ],
-        )
+        media = [
+            MediaInfo(
+                a.file_id,
+                a.file_unique_id,
+                a.file_name,
+                a.mime_type,
+                a.file_size,
+                a.duration,
+            )
+        ]
+        if _looks_like_voice_mime(a.mime_type, a.file_name) and not a.title:
+            return result(ContentType.VOICE, audio_subtype(a.mime_type, a.file_name), media)
+        return result(ContentType.AUDIO, audio_subtype(a.mime_type, a.file_name), media)
     if message.animation is not None:
         # Must precede document: Bale fills document alongside animation.
         an = message.animation
@@ -232,6 +282,27 @@ def classify(message: Message) -> ClassifiedContent:
                 )
             ],
         )
+    if message.video_note is not None:
+        vn = message.video_note
+        return result(
+            ContentType.VIDEO,
+            vn.mime_type,
+            [
+                MediaInfo(
+                    vn.file_id,
+                    vn.file_unique_id,
+                    None,
+                    vn.mime_type,
+                    vn.file_size,
+                    vn.duration,
+                    vn.length,
+                    vn.length,
+                )
+            ],
+        )
+    extra_note = _media_from_mapping(extra.get("video_note"))
+    if extra_note is not None:
+        return result(ContentType.VIDEO, extra_note.mime_type, [extra_note])
     if message.video is not None:
         vd = message.video
         return result(
@@ -272,11 +343,10 @@ def classify(message: Message) -> ClassifiedContent:
         )
     if message.document is not None:
         d = message.document
-        return result(
-            ContentType.DOCUMENT,
-            document_subtype(d.mime_type, d.file_name),
-            [MediaInfo(d.file_id, d.file_unique_id, d.file_name, d.mime_type, d.file_size)],
-        )
+        media = [MediaInfo(d.file_id, d.file_unique_id, d.file_name, d.mime_type, d.file_size)]
+        if _looks_like_voice_mime(d.mime_type, d.file_name):
+            return result(ContentType.VOICE, document_subtype(d.mime_type, d.file_name), media)
+        return result(ContentType.DOCUMENT, document_subtype(d.mime_type, d.file_name), media)
     if message.sticker is not None:
         s = message.sticker
         return result(
@@ -303,7 +373,6 @@ def classify(message: Message) -> ClassifiedContent:
         return result(ContentType.TEXT, None, [], text)
     if message.caption:
         return result(ContentType.TEXT, None, [], message.caption)
-    extra = message.model_extra or {}
     for extra_key, extra_type in (
         ("photo", ContentType.IMAGE),
         ("video", ContentType.VIDEO),
@@ -311,7 +380,13 @@ def classify(message: Message) -> ClassifiedContent:
         ("audio", ContentType.AUDIO),
         ("voice", ContentType.VOICE),
         ("animation", ContentType.ANIMATION),
+        ("video_note", ContentType.VIDEO),
+        ("file", ContentType.DOCUMENT),
     ):
-        if extra.get(extra_key):
-            return result(extra_type, None, [])
+        extra_media = extra.get(extra_key)
+        if extra_media:
+            parsed = _media_from_mapping(extra_media)
+            if parsed is not None and _looks_like_voice_mime(parsed.mime_type, parsed.file_name):
+                return result(ContentType.VOICE, parsed.mime_type, [parsed])
+            return result(extra_type, None, [parsed] if parsed else [])
     return result(ContentType.OTHER)

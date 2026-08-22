@@ -19,17 +19,13 @@ logger = get_logger(__name__)
 FlushCallback = Callable[[list[Message]], Awaitable[None]]
 
 
-def _has_media(message: Message) -> bool:
-    return any(
-        (
-            message.photo,
-            message.video,
-            message.animation,
-            message.document,
-            message.audio,
-            message.voice,
-        )
-    )
+def _is_album_candidate(message: Message) -> bool:
+    """Only photos/videos can arrive as albums; voice and files flush immediately."""
+    if message.voice or message.audio or message.document or message.animation:
+        return False
+    if message.video_note is not None:
+        return False
+    return bool(message.photo or message.video)
 
 
 class AlbumBuffer:
@@ -48,7 +44,7 @@ class AlbumBuffer:
 
     async def add(self, message: Message) -> None:
         """Buffer a media message; non-media messages flush immediately."""
-        if not _has_media(message):
+        if not _is_album_candidate(message):
             await self._flush([message])
             return
         key = self._key(message)

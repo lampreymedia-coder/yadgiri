@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 _ID_KEYS = {
     "id",
@@ -31,10 +31,14 @@ def _as_int(value: Any) -> Any:
         return value
     if isinstance(value, int):
         return value
+    if isinstance(value, float):
+        return int(value)
     if isinstance(value, str):
         stripped = value.strip()
         if stripped.lstrip("-").isdigit():
             return int(stripped)
+        if stripped.count(".") == 1 and stripped.replace(".", "").lstrip("-").isdigit():
+            return int(float(stripped))
     return value
 
 
@@ -97,6 +101,11 @@ class Audio(_BaleModel):
     mime_type: str | None = None
     file_size: int | None = None
 
+    @field_validator("duration", "file_size", mode="before")
+    @classmethod
+    def _audio_ints(cls, value: Any) -> Any:
+        return _as_int(value)
+
 
 class Voice(_BaleModel):
     file_id: str
@@ -105,6 +114,11 @@ class Voice(_BaleModel):
     mime_type: str | None = None
     file_size: int | None = None
 
+    @field_validator("duration", "file_size", mode="before")
+    @classmethod
+    def _voice_ints(cls, value: Any) -> Any:
+        return _as_int(value)
+
 
 class Document(_BaleModel):
     file_id: str
@@ -112,6 +126,11 @@ class Document(_BaleModel):
     file_name: str | None = None
     mime_type: str | None = None
     file_size: int | None = None
+
+    @field_validator("file_size", mode="before")
+    @classmethod
+    def _document_ints(cls, value: Any) -> Any:
+        return _as_int(value)
 
 
 class Video(_BaleModel):
@@ -124,6 +143,11 @@ class Video(_BaleModel):
     mime_type: str | None = None
     file_size: int | None = None
 
+    @field_validator("width", "height", "duration", "file_size", mode="before")
+    @classmethod
+    def _video_ints(cls, value: Any) -> Any:
+        return _as_int(value)
+
 
 class Animation(_BaleModel):
     file_id: str
@@ -134,6 +158,11 @@ class Animation(_BaleModel):
     file_name: str | None = None
     mime_type: str | None = None
     file_size: int | None = None
+
+    @field_validator("width", "height", "duration", "file_size", mode="before")
+    @classmethod
+    def _animation_ints(cls, value: Any) -> Any:
+        return _as_int(value)
 
 
 class Sticker(_BaleModel):
@@ -163,6 +192,20 @@ class File(_BaleModel):
     file_path: str | None = None
 
 
+class VideoNote(_BaleModel):
+    file_id: str
+    file_unique_id: str | None = None
+    length: int | None = None
+    duration: int | None = None
+    file_size: int | None = None
+    mime_type: str | None = None
+
+    @field_validator("length", "duration", "file_size", mode="before")
+    @classmethod
+    def _video_note_ints(cls, value: Any) -> Any:
+        return _as_int(value)
+
+
 class Message(_BaleModel):
     message_id: int
     date: int | None = None
@@ -175,6 +218,7 @@ class Message(_BaleModel):
     voice: Voice | None = None
     document: Document | None = None
     video: Video | None = None
+    video_note: VideoNote | None = None
     animation: Animation | None = None
     sticker: Sticker | None = None
     contact: Contact | None = None
@@ -191,6 +235,33 @@ class Message(_BaleModel):
     group_chat_created: bool | None = None
     # Undocumented in Bale docs; kept optional and verified by api_probe.
     media_group_id: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_media_payload(cls, value: Any) -> Any:
+        """Accept Bale variants: ``file`` instead of document, list wrappers, string file_ids."""
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if data.get("file") and not data.get("document"):
+            data["document"] = data["file"]
+        for key in (
+            "voice",
+            "audio",
+            "video",
+            "video_note",
+            "document",
+            "animation",
+            "sticker",
+        ):
+            item = data.get(key)
+            if isinstance(item, list) and item:
+                data[key] = item[0]
+            elif isinstance(item, str) and item:
+                data[key] = {"file_id": item}
+            elif item in ({}, False):
+                data.pop(key, None)
+        return data
 
     def added_members(self) -> list[User]:
         """Join events: Bale may send an array, a single user, or both."""

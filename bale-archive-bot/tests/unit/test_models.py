@@ -49,3 +49,28 @@ def test_private_chat_without_title_stays_private() -> None:
         }
     )
     assert message.is_private_message is True
+
+
+def test_voice_float_duration_parses() -> None:
+    update = Update.try_parse(
+        {
+            "update_id": 9,
+            "message": {
+                "message_id": 16,
+                "date": 1,
+                "chat": {"id": 12345, "type": "group", "title": "رصد"},
+                "from": {"id": 1, "is_bot": False, "first_name": "a"},
+                "voice": {
+                    "file_id": "voice1",
+                    "duration": 12.0,
+                    "file_size": 3000.4,
+                    "mime_type": "audio/ogg",
+                },
+            },
+        }
+    )
+    assert update is not None
+    assert update.message is not None
+    assert update.message.voice is not None
+    assert update.message.voice.duration == 12
+    assert update.message.voice.file_size == 3000

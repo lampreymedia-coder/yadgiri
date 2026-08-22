@@ -46,9 +46,11 @@ async def test_submission_lifecycle(seeded_db: Database) -> None:
         )
         short_id = submission.short_id
         assert len(short_id) == 6
+        from app.i18n.fa import SEED_TAGS
+
         tags = TagRepository(session)
         active = await tags.list_active()
-        assert len(active) == 3
+        assert len(active) == len(SEED_TAGS)
         await subs.set_tags(submission, [active[0].id, active[2].id])
         await subs.set_status(submission, SubmissionStatus.COMPLETED)
 

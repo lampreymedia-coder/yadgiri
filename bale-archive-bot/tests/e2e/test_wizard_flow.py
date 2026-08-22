@@ -122,7 +122,6 @@ async def test_copy_failure_on_confirm_still_saves_sql(
     sid = submission.short_id
     msg_id = wizard_message_id(fake_bale, USER_ID)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
     buttons = wizard_buttons(fake_bale, USER_ID)
     tag_cb = next(cb for cb in buttons.values() if "|tg|" in cb)
     await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
@@ -144,30 +143,27 @@ async def test_full_happy_path_two_tags(
     sid = submission.short_id
     msg_id = wizard_message_id(fake_bale, USER_ID)
 
-    # Step 1: yes
+    # Step 1: yes → hashtags immediately (no count step)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
     buttons = wizard_buttons(fake_bale, USER_ID)
-    assert any("|cnt|" in cb for cb in buttons.values())
-
-    # Step 2: two tags
-    await dispatcher.dispatch(callback_update(f"1|cnt|{sid}|2", USER_ID, msg_id))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    assert not any("|cnt|" in cb for cb in buttons.values())
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
-    assert len(tag_callbacks) == 3
+    assert len(tag_callbacks) == 4
+    labels = list(buttons)
+    assert any("یادگیری" in label for label in labels)
+    assert any("سند" in label for label in labels)
+    assert any("شبکه" in label for label in labels)
+    assert any("محتوایی" in label for label in labels)
 
-    # Step 3: toggle two tags; a third toggle must be rejected via toast.
+    # Step 2: toggle two tags; a third is also allowed (no count limit).
     await dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
     await dispatcher.dispatch(callback_update(tag_callbacks[1], USER_ID, msg_id))
-    calls_before = len(fake_bale.calls_for("editMessageText"))
-    await dispatcher.dispatch(callback_update(tag_callbacks[2], USER_ID, msg_id))
-    assert len(fake_bale.calls_for("editMessageText")) == calls_before  # unchanged
-    answers = fake_bale.calls_for("answerCallbackQuery")
-    assert any(a.get("text") and "دو" in str(a["text"]) for a in answers)
 
-    # Step 4: continue → preview
+    # Step 3: continue → preview with edit
     await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
     buttons = wizard_buttons(fake_bale, USER_ID)
     assert any("|fin|" in cb for cb in buttons.values())
+    assert any("|edt|" in cb for cb in buttons.values())
 
     # Back keeps selections.
     await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", USER_ID, msg_id))
@@ -265,9 +261,7 @@ async def test_restart_mid_wizard_state_survives(
     msg_id = wizard_message_id(fake_bale, USER_ID)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
 
-    # Simulate a process restart: a brand-new dispatcher and context caches.
     fresh_dispatcher = Dispatcher(ctx)
-    await fresh_dispatcher.dispatch(callback_update(f"1|cnt|{sid}|1", USER_ID, msg_id))
     buttons = wizard_buttons(fake_bale, USER_ID)
     tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
     await fresh_dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
@@ -317,6 +311,26 @@ async def test_album_buffer_groups_media(
     assert len(submission.media_files) == 2
 
 
+async def test_voice_opens_private_wizard_immediately(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await dispatcher.dispatch(Update.model_validate(load_update("voice")))
+    submission = await get_submission(ctx)
+    assert submission.content_type.value == "voice"
+    assert fake_bale.last_markup(USER_ID) is not None
+    assert any("|yes|" in cb for cb in wizard_buttons(fake_bale, USER_ID).values())
+
+
+async def test_contact_and_location_open_private_wizard(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await dispatcher.dispatch(Update.model_validate(load_update("contact")))
+    assert fake_bale.last_markup(USER_ID) is not None
+    await dispatcher.dispatch(Update.model_validate(load_update("location")))
+    submission = await get_submission(ctx)
+    assert submission.content_type.value == "location"
+
+
 async def test_sticker_ignored_by_default(
     dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
@@ -325,3 +339,31 @@ async def test_sticker_ignored_by_default(
     async with ctx.db.session() as session:
         result = await session.execute(__import__("sqlalchemy").select(Submission))
         assert result.scalars().first() is None
+
+
+async def test_gif_animation_ignored(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await dispatcher.dispatch(Update.model_validate(load_update("animation")))
+    async with ctx.db.session() as session:
+        result = await session.execute(__import__("sqlalchemy").select(Submission))
+        assert result.scalars().first() is None
+
+
+async def test_edit_tags_from_preview(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await intake_text(dispatcher)
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    tag_callbacks = [cb for cb in buttons.values() if "|tg|" in cb]
+    await dispatcher.dispatch(callback_update(tag_callbacks[0], USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    assert any("|edt|" in cb for cb in wizard_buttons(fake_bale, USER_ID).values())
+    await dispatcher.dispatch(callback_update(f"1|edt|{sid}|", USER_ID, msg_id))
+    labels = list(wizard_buttons(fake_bale, USER_ID))
+    assert any("سند" in label for label in labels)
+    assert any("|tg|" in cb for cb in wizard_buttons(fake_bale, USER_ID).values())

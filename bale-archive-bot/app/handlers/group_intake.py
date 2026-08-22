@@ -18,7 +18,7 @@ from app.db.models import ContentType, Group
 from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.users import UserRepository
-from app.domain.classify import classify
+from app.domain.classify import ClassifiedContent, classify
 from app.domain.group_roles import (
     ROLE_ARCHIVE,
     group_role,
@@ -136,18 +136,80 @@ def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:
     return not allowed or chat_id in allowed
 
 
+def _is_gif(classified: ClassifiedContent) -> bool:
+    if classified.content_type is ContentType.ANIMATION:
+        return True
+    if classified.content_type is ContentType.DOCUMENT:
+        mime = (classified.content_subtype or "").lower()
+        name = ""
+        if classified.media:
+            name = (classified.media[0].file_name or "").lower()
+        if mime == "image_file" and name.endswith(".gif"):
+            return True
+        raw_mime = classified.media[0].mime_type if classified.media else None
+        if raw_mime and "gif" in raw_mime.lower():
+            return True
+    return False
+
+
+def _has_user_content(message: Message) -> bool:
+    extra = message.model_extra or {}
+    return any(
+        (
+            (message.text or "").strip(),
+            (message.caption or "").strip(),
+            message.photo,
+            message.video,
+            message.video_note,
+            message.audio,
+            message.voice,
+            message.document,
+            message.animation,
+            message.sticker,
+            message.contact,
+            message.location,
+            extra.get("file"),
+            extra.get("voice"),
+            extra.get("audio"),
+            extra.get("video_note"),
+        )
+    )
+
+
+def _is_service_message(message: Message) -> bool:
+    extra = message.model_extra or {}
+    service_keys = (
+        "new_chat_title",
+        "new_chat_photo",
+        "delete_chat_photo",
+        "pinned_message",
+        "migrate_to_chat_id",
+        "migrate_from_chat_id",
+        "supergroup_chat_created",
+        "channel_chat_created",
+        "video_chat_started",
+        "video_chat_ended",
+        "video_chat_participants_invited",
+        "message_auto_delete_timer_changed",
+    )
+    return any(extra.get(key) for key in service_keys) and not _has_user_content(message)
+
+
 def _should_ignore(ctx: BotContext, message: Message) -> bool:
+    del ctx
     if message.from_user is None or message.from_user.is_bot:
         return True
     if message.new_chat_members or message.new_chat_member or message.left_chat_member:
         return True
+    if _is_service_message(message):
+        return True
     text = message.text or ""
     if text.startswith("/"):
         return True
-    if ctx.settings.ignore_stickers and message.sticker is not None:
-        return True
     classified = classify(message)
-    if classified.content_type is ContentType.OTHER:
+    if classified.content_type is ContentType.STICKER:
+        return True
+    if _is_gif(classified):
         return True
     return classified.content_type is ContentType.TEXT and not (message.text or "").strip()
 

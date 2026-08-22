@@ -106,6 +106,10 @@ class Dispatcher:
                 from_id=message.from_user.id if message.from_user else None,
                 text_preview=(message.text or message.caption or "")[:80],
                 added_members=len(message.added_members()),
+                has_voice=message.voice is not None,
+                has_audio=message.audio is not None,
+                has_document=message.document is not None,
+                has_video_note=message.video_note is not None,
             )
         elif update.callback_query is not None:
             logger.info(
@@ -146,7 +150,12 @@ class Dispatcher:
 
         user_id = message.from_user.id
         lock = self.ctx.locks.get(message.chat.id, user_id)
-        if lock.locked() and parse_command(message.text or "") is None:
+        # Group content must not be dropped while another update holds the lock.
+        if (
+            message.is_private_message
+            and lock.locked()
+            and parse_command(message.text or "") is None
+        ):
             try:
                 await self.ctx.api.send_message(message.chat.id, fa.ERR_BUSY)
             except (BaleAPIError, NetworkError) as exc:

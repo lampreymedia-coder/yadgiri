@@ -750,7 +750,10 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
     data = parse_callback(cq.data or "")
     if not await is_admin(ctx, session, cq.from_user.id):
         if ctx.caps.has("answerCallbackQuery"):
-            await ctx.api.answer_callback_query(cq.id, fa.ERR_NOT_YOURS)
+            try:
+                await ctx.api.answer_callback_query(cq.id, fa.ERR_NOT_YOURS)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.info("admin_denied_answer_failed", error=str(exc))
         return
     chat_id = cq.message.chat.id if cq.message is not None else cq.from_user.id
 

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from app.bale.models import Message
+from app.bale.keyboards import keyboard, url_button
+from app.bale.models import InlineKeyboardMarkup, Message
 from app.core.context import BotContext
 from app.db.models import Group
 from app.db.repositories.users import UserRepository
@@ -11,6 +12,21 @@ from app.i18n import fa
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _add_to_group_markup(ctx: BotContext) -> InlineKeyboardMarkup | None:
+    if not ctx.bot_username:
+        return None
+    return keyboard(
+        [
+            [
+                url_button(
+                    fa.BTN_ADD_TO_GROUP,
+                    f"https://ble.ir/{ctx.bot_username}?startgroup=start",
+                )
+            ]
+        ]
+    )
 
 
 async def handle_start(ctx: BotContext, message: Message) -> None:
@@ -33,7 +49,7 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
             text = fa.start_owner_setup(name)
         else:
             text = fa.start_message(name)
-    await ctx.api.send_message(message.chat.id, text)
+    await ctx.api.send_message(message.chat.id, text, _add_to_group_markup(ctx))
 
 
 async def handle_help(ctx: BotContext, message: Message) -> None:

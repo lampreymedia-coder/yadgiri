@@ -7,6 +7,7 @@ for specific methods.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 from dataclasses import dataclass, field
@@ -37,6 +38,9 @@ class FakeBaleServer:
     fail_methods: dict[str, dict[str, Any]] = field(default_factory=dict)
     forbidden_private_chats: set[int] = field(default_factory=set)
     _message_seq: itertools.count[int] = field(default_factory=lambda: itertools.count(1000))
+
+    last_request: httpx.Request | None = None
+    last_http_method: str = ""
 
     # ─── Failure injection ───
 
@@ -91,19 +95,33 @@ class FakeBaleServer:
     def transport(self) -> httpx.MockTransport:
         return httpx.MockTransport(self._handle)
 
+    def _parse_params(self, request: httpx.Request) -> dict[str, Any]:
+        params: dict[str, Any] = dict(request.url.params.multi_items())
+        raw = request.content or b""
+        if not raw:
+            return params
+        ctype = request.headers.get("content-type", "")
+        if "application/x-www-form-urlencoded" in ctype:
+            params.update(dict(httpx.QueryParams(raw.decode("utf-8", "replace"))))
+            return params
+        try:
+            loaded = json.loads(raw)
+        except ValueError:
+            return params
+        if isinstance(loaded, dict):
+            params.update(loaded)
+        return params
+
     def _handle(self, request: httpx.Request) -> httpx.Response:
         method = request.url.path.rsplit("/", 1)[-1]
-        try:
-            params: dict[str, Any] = json.loads(request.content) if request.content else {}
-        except ValueError:
-            params = {}
+        self.last_request = request
+        self.last_http_method = request.method
+        params = self._parse_params(request)
         self.calls.append((method, dict(params)))
         markup = params.get("reply_markup")
         if isinstance(markup, str):
-            try:
+            with contextlib.suppress(ValueError):
                 params["reply_markup"] = json.loads(markup)
-            except ValueError:
-                pass
 
         injected = self._maybe_fail(method)
         if injected is not None:

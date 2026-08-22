@@ -118,3 +118,43 @@ async def test_send_payload_matches_bale_libraries() -> None:
     decoded = json.loads(sent["reply_markup"])
     assert decoded["inline_keyboard"][0][0]["text"] == "بله"
     await client.close()
+
+
+async def test_read_methods_use_get_like_official_library() -> None:
+    server = FakeBaleServer()
+    client = await make_client(server)
+    await client.request("getMe")
+    assert server.last_http_method == "GET"
+    assert server.last_request is not None
+    assert "python-bale-bot" in server.last_request.headers["user-agent"]
+    assert "fa-IR" in server.last_request.headers["accept-language"]
+    await client.close()
+
+
+async def test_get_updates_uses_query_string_get() -> None:
+    from app.bale.methods import BaleAPI
+
+    server = FakeBaleServer()
+    client = await make_client(server)
+    api = BaleAPI(client)
+    await api.get_updates(offset=12, limit=50)
+    assert server.last_http_method == "GET"
+    params = server.calls_for("getUpdates")[0]
+    assert params["offset"] == "12"
+    assert params["limit"] == "50"
+    assert "timeout" not in params
+    await client.close()
+
+
+async def test_get_updates_falls_back_to_post_when_get_rejected() -> None:
+    from app.bale.methods import BaleAPI
+
+    server = FakeBaleServer()
+    server.fail_with("getUpdates", 404, "method not found", times=1)
+    client = await make_client(server)
+    api = BaleAPI(client)
+    result = await api.get_updates()
+    assert result == []
+    assert len(server.calls_for("getUpdates")) == 2
+    assert server.last_http_method == "POST"
+    await client.close()

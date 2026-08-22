@@ -153,6 +153,33 @@ async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer)
     assert any("آرشیو" in label for label in labels)
 
 
+async def test_group_start_without_chat_type_still_asks_role(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    _clear_bootstrap(ctx)
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900012,
+                "message": {
+                    "message_id": 6,
+                    "date": 1,
+                    "chat": {"id": -100200302, "title": "رصد بدون نوع"},
+                    "from": {
+                        "id": OWNER_ID,
+                        "is_bot": False,
+                        "first_name": "مینا",
+                    },
+                    "text": "/start",
+                },
+            }
+        )
+    )
+    texts = "\n".join(fake_bale.sent_texts(-100200302))
+    assert "این گروه چیست" in texts
+
+
 async def test_bot_added_singular_member_asks_role(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:

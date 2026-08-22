@@ -1,7 +1,8 @@
 """Application entrypoint: polling or webhook mode.
 
-Polling (Bale has no long-polling): a short-interval adaptive loop with a
-manually computed offset. On Windows the process is kept alive by NSSM.
+Polling uses short GET getUpdates (no long-poll). Iranian NAT/DPI and Bale's
+edge drop hung sockets; a 2s idle loop matches the original Bale docs.
+On Windows the process is kept alive by NSSM.
 """
 
 from __future__ import annotations
@@ -247,22 +248,14 @@ class Application:
     # ─── Polling ───
 
     async def run_polling(self) -> None:
-        """Short-interval adaptive polling with a manually computed offset."""
+        """Short-interval GET polling. Offset is only advanced from live replies.
+
+        Never restore a stored offset: a stale high offset confirms (drops)
+        newer updates whose ids restarted, which Bale does after idle gaps.
+        Duplicate delivery is already handled by claim_update.
+        """
         assert self.dispatcher is not None
         offset: int | None = None
-        # Resume from the last processed update after a restart.
-        try:
-            async with self.db.session() as session:
-                from app.db.repositories.misc import ProcessedUpdateRepository
-
-                last = await ProcessedUpdateRepository(session).last_update_id()
-                if last is not None:
-                    offset = last + 1
-        except Exception as exc:
-            if type(exc).__module__.startswith(("asyncpg", "sqlalchemy")):
-                logger.warning("offset_restore_failed", error=str(exc))
-            else:
-                raise
 
         await self._prepare_polling()
         await self._notify_owner_ready()
@@ -270,9 +263,18 @@ class Application:
         empty_cycles = 0
         while not self.stop_event.is_set():
             try:
-                updates = await self.api.get_updates(offset=offset, limit=100)
+                updates = await asyncio.wait_for(
+                    self.api.get_updates(offset=offset, limit=100),
+                    timeout=30,
+                )
+            except TimeoutError:
+                logger.warning("get_updates_watchdog")
+                await self._reset_http()
+                await self._sleep(self.settings.polling_idle_sleep)
+                continue
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("get_updates_failed", error=str(exc))
+                await self._reset_http()
                 await self._sleep(self.settings.polling_idle_sleep)
                 continue
 
@@ -289,9 +291,14 @@ class Application:
                 empty_cycles += 1
                 if empty_cycles == 1 or empty_cycles % 30 == 0:
                     logger.info("polling_idle", offset=offset, empty_cycles=empty_cycles)
-                pause = 0.2 if self.api._poll_timeout else self.settings.polling_idle_sleep
-                await self._sleep(pause)
+                await self._sleep(self.settings.polling_idle_sleep)
         logger.info("polling_stopped", offset=offset)
+
+    async def _reset_http(self) -> None:
+        try:
+            await self.api.client.reset()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("http_reset_failed", error=str(exc))
 
     async def _sleep(self, seconds: float) -> None:
         with contextlib.suppress(TimeoutError):

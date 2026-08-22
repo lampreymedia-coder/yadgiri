@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import ValidationError
-
 from app.bale.client import BaleClient
 from app.bale.errors import BadRequest, BaleAPIError, NotFound
 from app.bale.models import (
@@ -31,7 +29,9 @@ class BaleAPI:
 
     def __init__(self, client: BaleClient) -> None:
         self.client = client
-        self._poll_timeout: int | None = 25
+        # Long-poll timeout is not used. Iranian NAT/DPI and idle hosts kill
+        # hung getUpdates sockets; short GET polls match the original Bale docs.
+        self._poll_timeout: int | None = None
 
     # ─── Bot lifecycle ───
 
@@ -47,26 +47,27 @@ class BaleAPI:
     # ─── Updates ───
 
     async def get_updates(self, offset: int | None = None, limit: int = 100) -> list[Update]:
-        params: dict[str, Any] = {"offset": offset, "limit": max(1, min(limit, 100))}
-        if self._poll_timeout:
-            params["timeout"] = self._poll_timeout
+        params: dict[str, Any] = {"limit": max(1, min(limit, 100))}
+        if offset is not None:
+            params["offset"] = int(offset)
         try:
             result = await self.client.request("getUpdates", params)
-        except BadRequest as exc:
-            if self._poll_timeout is not None:
-                logger.info("get_updates_timeout_unsupported", error=str(exc))
-                self._poll_timeout = None
-                result = await self.client.request(
-                    "getUpdates", {"offset": offset, "limit": max(1, min(limit, 100))}
-                )
-            else:
+        except (BadRequest, NotFound, BaleAPIError) as exc:
+            code = getattr(exc, "error_code", 0)
+            if code not in {400, 404, 405, 501}:
                 raise
+            # Bale staff: getUpdates is GET; some gateways only accept POST JSON.
+            logger.info("get_updates_get_fallback_post", error=str(exc))
+            result = await self.client.request("getUpdates", params, force_post=True)
+        if isinstance(result, dict):
+            result = result.get("updates") or result.get("result") or [result]
         updates: list[Update] = []
         for item in result or []:
-            try:
-                updates.append(Update.model_validate(item))
-            except (ValidationError, ValueError, TypeError):
+            parsed = Update.try_parse(item)
+            if parsed is None:
                 logger.warning("update_parse_failed", raw=item)
+                continue
+            updates.append(parsed)
         return updates
 
     async def set_webhook(self, url: str) -> bool:

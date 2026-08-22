@@ -22,8 +22,28 @@ if (-not (Test-Path (Join-Path $Root ".venv"))) {
 }
 
 $VenvPy = Join-Path $Root ".venv\Scripts\python.exe"
-& $VenvPy -m pip install --upgrade pip
-& $VenvPy -m pip install -e ".[dev]"
+
+function Install-WithIranMirrors {
+    param([string[]]$PipArgs)
+    # pypi.org is often filtered in Iran; try Iranian mirrors next.
+    $Indexes = @(
+        @{ Url = "https://pypi.org/simple"; Host = "pypi.org" },
+        @{ Url = "https://mirror-pypi.runflare.com/simple"; Host = "mirror-pypi.runflare.com" },
+        @{ Url = "https://pypi.iranrepo.ir/simple"; Host = "pypi.iranrepo.ir" },
+        @{ Url = "https://mirror.arvancloud.ir/pypi/simple"; Host = "mirror.arvancloud.ir" }
+    )
+    $last = 1
+    foreach ($Index in $Indexes) {
+        Write-Host "Installing packages from $($Index.Url)"
+        & $VenvPy -m pip @PipArgs -i $Index.Url --trusted-host $Index.Host
+        $last = $LASTEXITCODE
+        if ($last -eq 0) { return }
+    }
+    Write-Error "pip install failed. pypi.org may be filtered; Iranian mirrors also failed."
+}
+
+Install-WithIranMirrors @("install", "--upgrade", "pip")
+Install-WithIranMirrors @("install", "-e", ".[dev]")
 
 foreach ($Rel in @("data", "data\media", "data\backups", "data\spool")) {
     $Dir = Join-Path $Root $Rel

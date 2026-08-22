@@ -11,7 +11,42 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+_ID_KEYS = {
+    "id",
+    "update_id",
+    "message_id",
+    "chat_id",
+    "from_chat_id",
+    "user_id",
+    "date",
+    "forward_from_message_id",
+    "forward_date",
+}
+
+
+def _as_int(value: Any) -> Any:
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped.lstrip("-").isdigit():
+            return int(stripped)
+    return value
+
+
+def _coerce_ids(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_coerce_ids(item) for item in value]
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        for key, item in value.items():
+            out[key] = _as_int(item) if key in _ID_KEYS else _coerce_ids(item)
+        return out
+    return value
 
 
 class _BaleModel(BaseModel):
@@ -25,14 +60,24 @@ class User(_BaleModel):
     last_name: str | None = None
     username: str | None = None
 
+    @field_validator("id", mode="before")
+    @classmethod
+    def _user_id(cls, value: Any) -> Any:
+        return _as_int(value)
+
 
 class Chat(_BaleModel):
     id: int
-    type: str = "private"
+    type: str = ""
     title: str | None = None
     username: str | None = None
     first_name: str | None = None
     last_name: str | None = None
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _chat_id(cls, value: Any) -> Any:
+        return _as_int(value)
 
 
 class PhotoSize(_BaleModel):
@@ -156,13 +201,15 @@ class Message(_BaleModel):
 
     @property
     def is_group_message(self) -> bool:
-        # Bale chat types vary; anything that is not a 1:1 private chat is
-        # treated as a group so intake never silently drops messages.
-        return (self.chat.type or "").lower() not in ("private", "pv")
+        return not self.is_private_message
 
     @property
     def is_private_message(self) -> bool:
-        return (self.chat.type or "").lower() in ("private", "pv")
+        ctype = (self.chat.type or "").lower()
+        if ctype in ("group", "supergroup", "channel"):
+            return False
+        # Missing type or private/pv: a title means a group/channel.
+        return not bool(self.chat.title)
 
     def raw(self) -> dict[str, Any]:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -180,6 +227,24 @@ class Update(_BaleModel):
     message: Message | None = None
     edited_message: Message | None = None
     callback_query: CallbackQuery | None = None
+
+    @field_validator("update_id", mode="before")
+    @classmethod
+    def _update_id(cls, value: Any) -> Any:
+        return _as_int(value)
+
+    @classmethod
+    def try_parse(cls, item: Any) -> Update | None:
+        """Parse one update; coerce string ids used by some Bale gateways."""
+        try:
+            return cls.model_validate(item)
+        except (ValidationError, ValueError, TypeError):
+            if not isinstance(item, dict):
+                return None
+            try:
+                return cls.model_validate(_coerce_ids(item))
+            except (ValidationError, ValueError, TypeError):
+                return None
 
     @property
     def kind(self) -> str:

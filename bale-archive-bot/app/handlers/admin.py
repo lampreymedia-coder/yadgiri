@@ -801,7 +801,7 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
             group = await groups.upsert(archive_id, None, "group")
             title = group.title or fa.fa_digits(archive_id)
             await delete_group_prompt(ctx.api, group)
-            if cq.message is not None and cq.message.chat.id < 0:
+            if cq.message is not None and cq.message.is_group_message:
                 try:
                     await ctx.api.delete_message(cq.message.chat.id, cq.message.message_id)
                 except (BaleAPIError, NetworkError) as exc:
@@ -849,7 +849,7 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
         else:
             group = await persist_research_chat(session, group_chat_id)
             await delete_group_prompt(ctx.api, group)
-            if cq.message is not None and cq.message.chat.id < 0:
+            if cq.message is not None and cq.message.is_group_message:
                 try:
                     await ctx.api.delete_message(cq.message.chat.id, cq.message.message_id)
                 except (BaleAPIError, NetworkError) as exc:

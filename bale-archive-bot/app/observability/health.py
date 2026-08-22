@@ -33,4 +33,6 @@ async def health_payload(ctx: BotContext) -> tuple[bool, dict[str, Any]]:
         "database": "up" if db_ok else "down",
         "circuit_breaker": "open" if degraded else "closed",
         "capabilities_probed": ctx.caps.probed,
+        "safety_polling": ctx.safety_polling,
+        "webhook_pending": ctx.webhook_pending,
     }

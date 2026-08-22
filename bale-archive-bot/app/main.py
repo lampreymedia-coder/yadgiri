@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import signal
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -30,6 +31,7 @@ from app.config import RunMode, Settings, get_settings
 from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
 from app.core.ratelimit import OutboundRateLimiter
+from app.core.receive import webhook_needs_reregister
 from app.db.session import Database
 from app.observability import metrics as app_metrics
 from app.observability.health import health_payload
@@ -161,6 +163,10 @@ class Application:
         self.scheduler.add_job(
             self.dispatcher.process_spool, IntervalTrigger(seconds=60), max_instances=1
         )
+        if self.settings.run_mode is RunMode.WEBHOOK:
+            self.scheduler.add_job(
+                self.heal_webhook, IntervalTrigger(seconds=20), max_instances=1
+            )
 
     async def shutdown(self) -> None:
         """Graceful: stop intake, drain in-flight work (≤30s), close pools."""
@@ -305,6 +311,83 @@ class Application:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(self.stop_event.wait(), timeout=seconds)
 
+    async def run_safety_polling(self) -> None:
+        """Drain getUpdates while webhook is registered so a dead tunnel is not silent.
+
+        Does not delete the webhook. Duplicate update_ids are dropped by claim_update.
+        """
+        assert self.dispatcher is not None
+        assert self.ctx is not None
+        self.ctx.safety_polling = True
+        offset: int | None = None
+        logger.info("safety_polling_started")
+        while not self.stop_event.is_set():
+            try:
+                updates = await asyncio.wait_for(
+                    self.api.get_updates(offset=offset, limit=100),
+                    timeout=30,
+                )
+            except TimeoutError:
+                logger.warning("safety_polling_watchdog")
+                await self._reset_http()
+                await self._sleep(self.settings.polling_idle_sleep)
+                continue
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("safety_polling_failed", error=str(exc))
+                await self._reset_http()
+                await self._sleep(self.settings.polling_idle_sleep)
+                continue
+            if updates:
+                offset = max(u.update_id for u in updates) + 1
+                logger.info("safety_polling_batch", count=len(updates), offset=offset)
+                for update in updates:
+                    if self.stop_event.is_set():
+                        break
+                    task = self._track(self.dispatcher.dispatch(update))
+                    await task
+                await self._sleep(self.settings.polling_busy_sleep)
+            else:
+                await self._sleep(self.settings.polling_idle_sleep)
+        logger.info("safety_polling_stopped", offset=offset)
+
+    async def heal_webhook(self) -> None:
+        """Re-register the webhook if Bale dropped it; report a stranded queue."""
+        assert self.ctx is not None
+        try:
+            info = await self.api.get_webhook_info()
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("webhook_heal_info_failed", error=str(exc))
+            return
+        self.ctx.webhook_pending = info.pending_update_count
+        pending = info.pending_update_count or 0
+        if pending:
+            logger.warning("webhook_backlog", pending=pending, url_set=bool(info.url))
+            await self._notify_receive_backlog(pending)
+        expected = self.settings.webhook_url
+        if webhook_needs_reregister(info.url, expected):
+            try:
+                await self.api.set_webhook(expected)
+                logger.info("webhook_reregistered")
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning("webhook_reregister_failed", error=str(exc))
+
+    async def _notify_receive_backlog(self, pending: int) -> None:
+        assert self.ctx is not None
+        from app.i18n import fa
+
+        now = time.monotonic()
+        last = self.ctx.error_throttle.get("receive_backlog", 0.0)
+        if now - last < 600:
+            return
+        self.ctx.error_throttle["receive_backlog"] = now
+        owner_id = next(iter(self.ctx.runtime_admin_ids), None) or self.ctx.admin_notify_chat_id
+        if owner_id is None:
+            return
+        try:
+            await self.api.send_message(owner_id, fa.receive_backlog(pending))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("receive_backlog_notice_failed", error=str(exc))
+
     # ─── Webhook (FastAPI) ───
 
     def build_webapp(self) -> FastAPI:
@@ -314,15 +397,24 @@ class Application:
         @contextlib.asynccontextmanager
         async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await app_instance.startup()
+            poll_task: asyncio.Task[None] | None = None
             if settings.run_mode is RunMode.WEBHOOK:
                 try:
                     await app_instance.api.set_webhook(settings.webhook_url)
                     logger.info("webhook_registered", url=settings.webhook_url)
                 except (BaleAPIError, NetworkError) as exc:
                     logger.error("webhook_registration_failed", error=str(exc))
+                poll_task = asyncio.create_task(app_instance.run_safety_polling())
                 await app_instance._notify_owner_ready()
-            yield
-            await app_instance.shutdown()
+            try:
+                yield
+            finally:
+                app_instance.stop_event.set()
+                if poll_task is not None:
+                    poll_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await poll_task
+                await app_instance.shutdown()
 
         web = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -377,6 +469,8 @@ class Application:
                         logger.warning("webhook_invalid_body", raw=item)
                         continue
                     logger.info("webhook_update", update_id=update.update_id, kind=update.kind)
+                    if app_instance.ctx is not None:
+                        app_instance.ctx.last_webhook_at = time.monotonic()
                     app_instance._track(app_instance.dispatcher.dispatch(update))
                 return Response(status_code=200)
 

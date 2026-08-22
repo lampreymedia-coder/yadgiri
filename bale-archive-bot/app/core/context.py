@@ -30,6 +30,9 @@ class BotContext:
     archive_chat_id: int | None = None
     admin_notify_chat_id: int | None = None
     runtime_admin_ids: set[int] = field(default_factory=set)
+    webhook_pending: int | None = None
+    last_webhook_at: float = 0.0
+    safety_polling: bool = False
 
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)

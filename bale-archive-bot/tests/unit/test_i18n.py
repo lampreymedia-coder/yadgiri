@@ -49,6 +49,12 @@ def test_caption_header_format() -> None:
     assert "#یادگیری" in header
 
 
+def test_receive_backlog_mentions_pending_count() -> None:
+    text = fa.receive_backlog(89)
+    assert "۸۹" in text
+    assert "پشتیبان" in text
+
+
 def test_owner_setup_mentions_archive_command() -> None:
     text = fa.start_owner_setup("مینا")
     assert "مینا" in text

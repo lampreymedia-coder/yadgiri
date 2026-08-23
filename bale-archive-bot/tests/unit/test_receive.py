@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.core.receive import (
+    poll_receive_stale,
     safety_polling_needed,
     should_register_webhook,
     webhook_needs_reregister,
@@ -30,6 +31,13 @@ def test_polling_needed_when_pending_unknown_and_webhook_stale() -> None:
 def test_dead_tunnel_must_not_keep_webhook() -> None:
     assert should_register_webhook(False) is False
     assert should_register_webhook(True) is True
+
+
+def test_poll_receive_stale_after_long_silence() -> None:
+    assert poll_receive_stale(100.0, 200.0, max_age_seconds=90) is True
+    assert poll_receive_stale(100.0, 150.0, max_age_seconds=90) is False
+    assert poll_receive_stale(None, 200.0, max_age_seconds=90) is False
+    assert poll_receive_stale(0.0, 200.0, max_age_seconds=90) is False
 
 
 def test_webhook_reregister_when_missing_or_host_changed() -> None:

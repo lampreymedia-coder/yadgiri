@@ -31,6 +31,17 @@ def should_register_webhook(public_ok: bool) -> bool:
     return public_ok
 
 
+def poll_receive_stale(
+    last_poll_at: float | None,
+    now: float,
+    max_age_seconds: float = 90.0,
+) -> bool:
+    """True when the receive loop has not completed a cycle recently."""
+    if not last_poll_at:
+        return False
+    return (now - last_poll_at) > max_age_seconds
+
+
 def webhook_needs_reregister(current_url: str | None, expected_url: str) -> bool:
     """True when Bale has no webhook (or a different host) than we expect."""
     if not expected_url:

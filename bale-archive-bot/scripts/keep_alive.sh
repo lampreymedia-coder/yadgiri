@@ -17,6 +17,7 @@ while true; do
     set +a
   fi
   export RUN_MODE="${RUN_MODE:-polling}"
+  export PYTHONUNBUFFERED=1
   echo "keep_alive: starting app.main at $(date -u +%Y-%m-%dT%H:%M:%SZ) mode=${RUN_MODE}"
   "$PYTHON" -m app.main
   code=$?

@@ -33,6 +33,7 @@ from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
 from app.core.ratelimit import OutboundRateLimiter
 from app.core.receive import should_register_webhook, webhook_needs_reregister
+from app.core.watchdog import StallWatchdog
 from app.db.session import Database
 from app.observability import metrics as app_metrics
 from app.observability.health import health_payload
@@ -66,6 +67,7 @@ class Application:
         self.stop_event = asyncio.Event()
         self.started_event = asyncio.Event()
         self._inflight: set[asyncio.Task[None]] = set()
+        self.watchdog = StallWatchdog()
 
     async def startup(self) -> None:
         from app.bale.capabilities import Capabilities
@@ -169,6 +171,7 @@ class Application:
         """Graceful: stop intake, drain in-flight work (≤30s), close pools."""
         logger.info("shutdown_started")
         self.stop_event.set()
+        self.watchdog.stop()
         if self.scheduler.running:
             self.scheduler.shutdown(wait=False)
         if self.dispatcher is not None:
@@ -263,6 +266,8 @@ class Application:
 
         await self._prepare_polling()
         await self._notify_owner_ready()
+        self.watchdog.start()
+        self._mark_poll()
         logger.info("polling_started", offset=offset)
         empty_cycles = 0
         while not self.stop_event.is_set():
@@ -273,15 +278,18 @@ class Application:
                 )
             except TimeoutError:
                 logger.warning("get_updates_watchdog")
+                self._mark_poll()
                 await self._reset_http()
                 await self._sleep(self.settings.polling_idle_sleep)
                 continue
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("get_updates_failed", error=str(exc))
+                self._mark_poll()
                 await self._reset_http()
                 await self._sleep(self.settings.polling_idle_sleep)
                 continue
 
+            self._mark_poll()
             if updates:
                 empty_cycles = 0
                 offset = max(u.update_id for u in updates) + 1
@@ -296,6 +304,11 @@ class Application:
                     logger.info("polling_idle", offset=offset, empty_cycles=empty_cycles)
                 await self._sleep(self.settings.polling_idle_sleep)
         logger.info("polling_stopped", offset=offset)
+
+    def _mark_poll(self) -> None:
+        self.watchdog.beat()
+        if self.ctx is not None:
+            self.ctx.last_poll_at = time.time()
 
     async def _reset_http(self) -> None:
         try:
@@ -316,6 +329,8 @@ class Application:
         assert self.ctx is not None
         self.ctx.safety_polling = True
         offset: int | None = None
+        self.watchdog.start()
+        self._mark_poll()
         logger.info("safety_polling_started")
         while not self.stop_event.is_set():
             try:
@@ -325,14 +340,17 @@ class Application:
                 )
             except TimeoutError:
                 logger.warning("safety_polling_watchdog")
+                self._mark_poll()
                 await self._reset_http()
                 await self._sleep(self.settings.polling_idle_sleep)
                 continue
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning("safety_polling_failed", error=str(exc))
+                self._mark_poll()
                 await self._reset_http()
                 await self._sleep(self.settings.polling_idle_sleep)
                 continue
+            self._mark_poll()
             if updates:
                 offset = max(u.update_id for u in updates) + 1
                 logger.info("safety_polling_batch", count=len(updates), offset=offset)

@@ -71,6 +71,12 @@ def test_receive_backlog_mentions_pending_count() -> None:
     assert "پشتیبان" in text
 
 
+def test_unauthorized_join_copy() -> None:
+    assert "مدیر" in fa.BOT_JOIN_DENIED
+    assert "خارج" in fa.bot_left_unauthorized_group("رصد تازه")
+    assert "رصد تازه" in fa.admin_unauthorized_add("رصد تازه", "علی")
+
+
 def test_owner_setup_mentions_archive_command() -> None:
     text = fa.start_owner_setup("مینا")
     assert "مینا" in text

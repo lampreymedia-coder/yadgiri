@@ -60,7 +60,9 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
             text = fa.start_owner_setup(name)
         else:
             text = fa.start_message(name)
-    await ctx.api.send_message(message.chat.id, text, _add_to_group_markup(ctx))
+        show_add = promoted or ctx.is_runtime_admin(message.from_user.id) or bool(user.is_admin)
+    markup = _add_to_group_markup(ctx) if show_add else None
+    await ctx.api.send_message(message.chat.id, text, markup)
 
 
 async def handle_help(ctx: BotContext, message: Message) -> None:

@@ -412,6 +412,22 @@ def bot_added_ask_role(group_title: str) -> str:
     )
 
 
+BOT_JOIN_DENIED = "فقط مدیر ربات می‌تواند آن را به گروه اضافه کند."
+
+
+def bot_left_unauthorized_group(group_title: str) -> str:
+    return f"این ربات فقط با دعوت مدیر وارد گروه می‌شود و از «{group_title}» خارج شد."
+
+
+def admin_unauthorized_add(group_title: str, adder_name: str) -> str:
+    who = adder_name or "نامشخص"
+    return (
+        f"کسی غیر از مدیر، ربات را به گروه «{group_title}» اضافه کرد.\n"
+        f"اضافه‌کننده: {who}\n"
+        "ربات از آن گروه خارج شد."
+    )
+
+
 GROUP_HELLO = "ربات در این گروه فعال است. نقش گروه را در پیام خصوصی مشخص کنید."
 
 GROUP_GOT_IT = "این پیام برای بایگانی مناسب نیست. متن، عکس، فایل، صوت یا کلیپ بفرستید."

@@ -7,6 +7,7 @@ from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
 from app.db.repositories.misc import AppSettingsRepository
 from app.db.repositories.users import UserRepository
+from app.i18n import fa
 from tests.fakes.fake_bale import FakeBaleServer
 
 OWNER_ID = 4242
@@ -247,6 +248,135 @@ async def test_bot_added_singular_member_asks_role(
     texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
     assert "نقش این گروه" in texts
     assert fake_bale.last_markup(-100200301) is None
+    assert fake_bale.calls_for("leaveChat") == []
+
+
+async def test_non_admin_cannot_add_bot_to_group(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    dispatcher = Dispatcher(ctx)
+    stranger = 999001
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900020,
+                "message": {
+                    "message_id": 20,
+                    "date": 1,
+                    "chat": {"id": -100200399, "type": "group", "title": "گروه غریبه"},
+                    "from": {
+                        "id": stranger,
+                        "is_bot": False,
+                        "first_name": "مهمان",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    leave_calls = fake_bale.calls_for("leaveChat")
+    assert leave_calls
+    assert str(-100200399) in str(leave_calls[0].get("chat_id"))
+    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(stranger))
+    assert any("خارج" in t for t in fake_bale.sent_texts(-100200399))
+    assert any("مدیر" in t for t in fake_bale.sent_texts(stranger))
+    assert any("گروه غریبه" in t for t in fake_bale.sent_texts(111))
+
+
+async def test_admin_add_keeps_bot_and_asks_role(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900021,
+                "message": {
+                    "message_id": 21,
+                    "date": 1,
+                    "chat": {"id": -100200400, "type": "group", "title": "رصد تازه"},
+                    "from": {
+                        "id": 111,
+                        "is_bot": False,
+                        "first_name": "مدیر",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat") == []
+    assert "نقش این گروه" in "\n".join(fake_bale.sent_texts(111))
+
+
+async def test_member_start_has_no_add_to_group_button(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900022,
+                "message": {
+                    "message_id": 22,
+                    "date": 1,
+                    "chat": {"id": 55555, "type": "private"},
+                    "from": {
+                        "id": 55555,
+                        "is_bot": False,
+                        "first_name": "عضو",
+                    },
+                    "text": "/start",
+                },
+            }
+        )
+    )
+    markup = fake_bale.last_markup(55555)
+    labels = []
+    if markup:
+        labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
+    assert fa.BTN_ADD_TO_GROUP not in labels
+
+
+async def test_admin_start_has_add_to_group_button(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.runtime_admin_ids = {111}
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900023,
+                "message": {
+                    "message_id": 23,
+                    "date": 1,
+                    "chat": {"id": 111, "type": "private"},
+                    "from": {
+                        "id": 111,
+                        "is_bot": False,
+                        "first_name": "مدیر",
+                    },
+                    "text": "/start",
+                },
+            }
+        )
+    )
+    markup = fake_bale.last_markup(111)
+    assert markup is not None
+    labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
+    assert fa.BTN_ADD_TO_GROUP in labels
 
 
 async def test_group_content_opens_wizard_in_private(

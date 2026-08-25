@@ -94,13 +94,53 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
         await groups.set_active(group.id, True)
-        if message.from_user is not None:
-            from app.handlers.admin import promote_first_owner
+        from app.handlers.admin import is_admin, promote_first_owner
 
+        if message.from_user is not None:
             await promote_first_owner(ctx, session, message.from_user)
-        title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
         user_id = message.from_user.id if message.from_user is not None else None
+        if user_id is None or not await is_admin(ctx, session, user_id):
+            return
+        title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
         await ask_role_privately(ctx, session, group, user_id, title, force=True)
+
+
+async def _leave_unauthorized_group(
+    ctx: BotContext,
+    session: AsyncSession,
+    message: Message,
+    group: Group,
+) -> None:
+    groups = GroupRepository(session)
+    title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+    adder = message.from_user
+    adder_id = adder.id if adder is not None else None
+    adder_name = ""
+    if adder is not None:
+        adder_name = adder.first_name or adder.username or fa.fa_digits(adder.id)
+    try:
+        await ctx.api.send_message(
+            message.chat.id, fa.bot_left_unauthorized_group(title), is_group=True
+        )
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("unauthorized_join_notice_failed", chat_id=message.chat.id, error=str(exc))
+    if adder_id is not None:
+        try:
+            await ctx.api.send_message(adder_id, fa.BOT_JOIN_DENIED)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("unauthorized_join_dm_failed", chat_id=adder_id, error=str(exc))
+    owner_id = next(iter(ctx.runtime_admin_ids), None) or ctx.admin_notify_chat_id
+    if owner_id is not None and owner_id != adder_id:
+        try:
+            await ctx.api.send_message(owner_id, fa.admin_unauthorized_add(title, adder_name))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("unauthorized_join_owner_failed", chat_id=owner_id, error=str(exc))
+    try:
+        await ctx.api.leave_chat(message.chat.id)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("unauthorized_leave_failed", chat_id=message.chat.id, error=str(exc))
+    await groups.set_active(group.id, False)
+    logger.info("bot_left_unauthorized_group", chat_id=message.chat.id, adder_id=adder_id)
 
 
 async def register_group_events(ctx: BotContext, message: Message) -> None:
@@ -121,14 +161,18 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         if not bot_joined:
             return
         logger.info("bot_added_to_group", chat_id=message.chat.id)
-        await groups.set_active(group.id, True)
-        if message.from_user is not None:
-            from app.handlers.admin import promote_first_owner
+        from app.handlers.admin import is_admin, promote_first_owner
 
+        if message.from_user is not None:
             await promote_first_owner(ctx, session, message.from_user)
+        adder_id = message.from_user.id if message.from_user is not None else None
+        allowed = adder_id is not None and await is_admin(ctx, session, adder_id)
+        if not allowed:
+            await _leave_unauthorized_group(ctx, session, message, group)
+            return
+        await groups.set_active(group.id, True)
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
-        user_id = message.from_user.id if message.from_user is not None else None
-        await ask_role_privately(ctx, session, group, user_id, title)
+        await ask_role_privately(ctx, session, group, adder_id, title)
 
 
 def _is_allowed_group(ctx: BotContext, chat_id: int) -> bool:

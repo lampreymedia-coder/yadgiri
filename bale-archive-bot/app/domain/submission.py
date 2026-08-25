@@ -347,6 +347,8 @@ class SubmissionService:
             missing_archives=missing_archives or [],
         )
         await self._notify_admins(text)
+        if missing_archives:
+            await self._notify_admins(fa.missing_archive_howto(missing_archives))
 
 
 def _split_media(messages: list[Message], classified: ClassifiedContent) -> list[list[Any]]:

@@ -218,6 +218,34 @@ NOTE_PROMPT = "📝 توضیح خود را در یک پیام بفرستید. ب
 USER_SAVED = "اطلاعات شما با موفقیت ذخیره شد."
 
 
+def user_saved(missing_archives: list[str] | None = None) -> str:
+    missing = missing_archives or []
+    if not missing:
+        return USER_SAVED
+    return (
+        f"{USER_SAVED}\n"
+        f"به گروه آرشیو کپی نشد چون اتصال {' '.join(missing)} قطع است.\n"
+        "گروه را از نو نسازید. داخل همان گروه آرشیو /archive بزنید و همان هشتگ را انتخاب کنید."
+    )
+
+
+def missing_archive_howto(hashtags: list[str] | None = None) -> str:
+    tags = " ".join(hashtags) if hashtags else seed_tag_titles_comma()
+    return (
+        "اتصال گروه‌های آرشیو قطع است. خود گروه‌ها در بله مانده‌اند؛ "
+        "فقط حافظهٔ این ماشین از نو ساخته شده و ربات دیگر شناسهٔ آن‌ها را ندارد.\n"
+        "گروه‌ها را از نو نسازید.\n"
+        "\n"
+        f"هشتگ‌های بدون گروه: {tags}\n"
+        "\n"
+        "برای وصل دوباره، در هر گروه آرشیو دو نفره (یادگیری، شبکه و منبع، محتوایی، سند):\n"
+        "۱) داخل همان گروه بنویسید /archive\n"
+        "۲) در پیام خصوصی، همان هشتگ را برای آن گروه انتخاب کنید.\n"
+        "\n"
+        "بعد از این کار، محتوای بعدی همان‌جا کپی می‌شود. محتوای همین الان را دوباره در گروه رصد بفرستید."
+    )
+
+
 def success_message(short_id: str, hashtags: str, group_title: str, undo_minutes: int) -> str:
     del short_id, hashtags, group_title, undo_minutes
     return USER_SAVED
@@ -256,7 +284,11 @@ def admin_new_submission(
     missing = missing_archives or []
     missing_line = ""
     if missing:
-        missing_line = "\nگروه آرشیو ناقص: " + " ".join(missing)
+        missing_line = (
+            "\nگروه آرشیو ناقص: "
+            + " ".join(missing)
+            + "\nگروه‌های قبلی را از نو نسازید. داخل همان گروه آرشیو /archive بزنید و هشتگ را انتخاب کنید."
+        )
     return (
         "داده جدید ذخیره شد\n"
         "\n"

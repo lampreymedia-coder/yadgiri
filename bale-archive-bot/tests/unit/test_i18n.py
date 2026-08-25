@@ -77,7 +77,18 @@ def test_unauthorized_join_copy() -> None:
     assert "رصد تازه" in fa.admin_unauthorized_add("رصد تازه", "علی")
 
 
-def test_owner_setup_mentions_archive_command() -> None:
+def test_missing_archive_howto_tells_admin_to_rebind() -> None:
+    text = fa.missing_archive_howto(["#محتوایی"])
+    assert "#محتوایی" in text
+    assert "/archive" in text
+    assert "نسازید" in text
+
+
+def test_user_saved_mentions_missing_archive() -> None:
+    assert "موفقیت" in fa.user_saved()
+    text = fa.user_saved(["#محتوایی"])
+    assert "#محتوایی" in text
+    assert "/archive" in text
     text = fa.start_owner_setup("مینا")
     assert "مینا" in text
     assert "/archive" in text

@@ -675,7 +675,7 @@ async def _dispatch_action(
         await _delete_group_hint(ctx, refreshed)
         submission.wizard_chat_id = refreshed.wizard_chat_id = submission.wizard_chat_id
         submission.wizard_message_id = refreshed.wizard_message_id = submission.wizard_message_id
-        await _edit_wizard(ctx, submission, fa.USER_SAVED, None)
+        await _edit_wizard(ctx, submission, fa.user_saved(missing), None)
         await service.notify_admin_completed(
             refreshed, owner, group, media_details(refreshed), missing_archives=missing
         )

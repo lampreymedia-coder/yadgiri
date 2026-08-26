@@ -139,14 +139,17 @@ async def settle_private_chat(ctx: BotContext, submission: Submission, summary: 
     submission.meta = meta
 
 
-async def sweep_private_ephemeral(ctx: BotContext) -> int:
-    """Delete due summaries and leftover private messages of decided items."""
+async def sweep_private_ephemeral(ctx: BotContext, *, max_submissions: int = 5) -> int:
+    """Delete due summaries and leftover private messages of decided items.
+
+    Bounded per run so a large backlog cannot occupy the process for minutes.
+    """
     deleted = 0
     now = datetime.now(UTC)
     async with ctx.db.session() as session:
         service = ctx.submission_service(session)
         rows = await service.submissions.list_terminal_private_residue()
-        for submission in rows:
+        for submission in rows[:max_submissions]:
             meta = meta_of(submission)
             chat_id = private_chat_id(submission)
             due_at = parse_utc(meta.get(META_EPHEMERAL_AT))

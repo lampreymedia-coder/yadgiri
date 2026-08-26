@@ -96,12 +96,6 @@ class Application:
         self.dispatcher = Dispatcher(self.ctx)
         self._register_jobs()
         self.scheduler.start()
-        try:
-            cleaned = await run_private_cleanup_once(self.ctx)
-            if cleaned:
-                logger.info("private_residue_swept", deleted=cleaned)
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning("private_residue_sweep_failed", error=str(exc))
 
         if self.ctx.archive_chat_id is not None:
             try:

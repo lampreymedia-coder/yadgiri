@@ -71,7 +71,14 @@ def test_receive_backlog_mentions_pending_count() -> None:
     assert "پشتیبان" in text
 
 
-def test_unauthorized_join_copy() -> None:
+def test_research_copy_requires_admin() -> None:
+    text = fa.research_set_done("تست ربات")
+    assert "تست ربات" in text
+    assert "ادمین" in text
+    assert "منشن" in text
+    need = fa.research_need_admin("تست ربات")
+    assert "ادمین" in need
+    assert "نقش این گروه" not in need
     assert "مدیر" in fa.BOT_JOIN_DENIED
     assert "خارج" in fa.bot_left_unauthorized_group("رصد تازه")
     assert "رصد تازه" in fa.admin_unauthorized_add("رصد تازه", "علی")

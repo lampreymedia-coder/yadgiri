@@ -21,6 +21,7 @@ from app.db.repositories.users import UserRepository
 from app.domain.classify import ClassifiedContent, classify
 from app.domain.group_roles import (
     ROLE_ARCHIVE,
+    ROLE_RESEARCH,
     group_role,
     is_archive_destination,
     needs_role,
@@ -89,7 +90,7 @@ async def ask_role_privately(
 
 
 async def handle_group_hello(ctx: BotContext, message: Message) -> None:
-    """`/start` in a group: ask the role privately, do not clutter the group."""
+    """`/start` or a bare mention in a group: never clutter the group itself."""
     async with ctx.db.session() as session:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
@@ -102,6 +103,17 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
         if user_id is None or not await is_admin(ctx, session, user_id):
             return
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        role = group_role(group)
+        try:
+            if role == ROLE_RESEARCH:
+                await ctx.api.send_message(user_id, fa.research_need_admin(title))
+                return
+            if role == ROLE_ARCHIVE:
+                await ctx.api.send_message(user_id, fa.archive_already_set(title))
+                return
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("group_hello_dm_failed", error=str(exc))
+            return
         await ask_role_privately(ctx, session, group, user_id, title, force=True)
 
 

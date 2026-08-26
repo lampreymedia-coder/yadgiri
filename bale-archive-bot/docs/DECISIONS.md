@@ -73,10 +73,14 @@ returns 404 handler-not-found); users can react in the app, but a bot cannot
 put an emoji on another member's message. We do not reply in the research
 group to fake a mark. Full save reports stay in the admin private chat.
 
-## D-11: Edited messages are logged and ignored
-`edited_message` arrives after the gateway has already archived/deleted the
-original. Re-running intake would duplicate content; the raw update is still
-recorded in logs for audit. Revisit if editing becomes a real workflow.
+## D-11: Origin edits replace the stored copy; the latest text is archived
+`edited_message` is matched to the existing submission by origin chat +
+message id (no second intake). SQL text/caption is overwritten, the private
+subject copy is replaced, and archive copies use the stored latest text for
+text/link (Bale `copyMessage` can still return the pre-edit snapshot). If the
+item was already completed, archive copies are deleted and rewritten. Private
+wizard leftovers of a decided item are deleted; only a short summary stays,
+then that summary is deleted after `PRIVATE_SUMMARY_TTL_SECONDS` (default 30).
 
 ## D-12: `pg_trgm` creation is attempted inside the migration
 `CREATE EXTENSION IF NOT EXISTS pg_trgm` runs in migration 0001. On managed

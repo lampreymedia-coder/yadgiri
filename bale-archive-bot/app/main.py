@@ -41,7 +41,12 @@ from app.observability.logging import configure_logging, get_logger
 from app.workers.digest import run_weekly_digest
 from app.workers.media_worker import build_storage, run_media_once
 from app.workers.outbox import run_outbox_once
-from app.workers.ttl_sweeper import run_expiry_once, run_nightly_cleanup, run_reminders_once
+from app.workers.ttl_sweeper import (
+    run_expiry_once,
+    run_nightly_cleanup,
+    run_private_cleanup_once,
+    run_reminders_once,
+)
 
 logger = get_logger(__name__)
 
@@ -91,6 +96,12 @@ class Application:
         self.dispatcher = Dispatcher(self.ctx)
         self._register_jobs()
         self.scheduler.start()
+        try:
+            cleaned = await run_private_cleanup_once(self.ctx)
+            if cleaned:
+                logger.info("private_residue_swept", deleted=cleaned)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("private_residue_sweep_failed", error=str(exc))
 
         if self.ctx.archive_chat_id is not None:
             try:
@@ -152,6 +163,9 @@ class Application:
         )
         self.scheduler.add_job(
             run_expiry_once, IntervalTrigger(seconds=60), args=[ctx], max_instances=1
+        )
+        self.scheduler.add_job(
+            run_private_cleanup_once, IntervalTrigger(seconds=10), args=[ctx], max_instances=1
         )
         self.scheduler.add_job(
             run_nightly_cleanup, CronTrigger(hour=3, minute=30), args=[ctx], max_instances=1

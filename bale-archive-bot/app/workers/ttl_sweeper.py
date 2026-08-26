@@ -16,6 +16,7 @@ from app.core.context import BotContext
 from app.core.idempotency import purge_old_records
 from app.db.models import Group, SubmissionStatus
 from app.db.repositories.tags import TagRepository
+from app.domain.private_chat import META_REMINDER, settle_private_chat, sweep_private_ephemeral
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -35,10 +36,11 @@ async def run_reminders_once(ctx: BotContext) -> int:
             if submission.wizard_chat_id is None:
                 continue
             try:
-                await ctx.api.send_message(
+                posted = await ctx.api.send_message(
                     submission.wizard_chat_id,
                     fa.reminder_message(submission.content_type.value),
                 )
+                submission.meta = {**submission.meta, META_REMINDER: posted.message_id}
                 sent += 1
             except (BaleAPIError, NetworkError) as exc:
                 logger.info("reminder_send_failed", short_id=submission.short_id, error=str(exc))
@@ -93,17 +95,10 @@ async def run_expiry_once(ctx: BotContext) -> int:
                 )
                 continue
 
-            # Tell the user and close the wizard message.
-            if submission.wizard_chat_id is not None and submission.wizard_message_id is not None:
-                try:
-                    await ctx.api.safe_edit(
-                        submission.wizard_chat_id,
-                        submission.wizard_message_id,
-                        fa.expired_republished_message(submission.short_id),
-                        None,
-                    )
-                except (BaleAPIError, NetworkError) as exc:
-                    logger.info("expiry_notice_failed", error=str(exc))
+            # Close the private wizard; keep only a short summary.
+            await settle_private_chat(
+                ctx, submission, fa.expired_republished_message(submission.short_id)
+            )
     return handled
 
 
@@ -111,3 +106,8 @@ async def run_nightly_cleanup(ctx: BotContext) -> None:
     """Purge processed_updates older than 7 days."""
     async with ctx.db.session() as session:
         await purge_old_records(session, days=7)
+
+
+async def run_private_cleanup_once(ctx: BotContext) -> int:
+    """Delete leftover private wizard traffic and due summaries."""
+    return await sweep_private_ephemeral(ctx)

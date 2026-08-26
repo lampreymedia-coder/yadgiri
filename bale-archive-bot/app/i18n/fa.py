@@ -212,7 +212,7 @@ NOTE_PROMPT = "📝 توضیح خود را در یک پیام بفرستید. ب
 
 # ─── گام ۵: موفقیت ───
 
-USER_SAVED = "اطلاعات شما با موفقیت ذخیره شد."
+USER_SAVED = "آرشیو شد."
 
 
 def user_saved(missing_archives: list[str] | None = None) -> str:
@@ -261,8 +261,8 @@ def republished_header(sender_name: str) -> str:
     return sender_name
 
 
-DECLINED_MESSAGE = "ثبت شد. پیام شما در گروه می‌ماند و در آرشیو ذخیره نشد."
-CANCELLED_MESSAGE = "ثبت لغو شد. پیام شما در گروه باقی است."
+DECLINED_MESSAGE = "در آرشیو ذخیره نشد."
+CANCELLED_MESSAGE = "ثبت لغو شد."
 
 # ─── اعلان به ادمین ───
 
@@ -283,9 +283,7 @@ def admin_new_submission(
     missing_line = ""
     if missing:
         missing_line = (
-            "\nگروه آرشیو ناقص: "
-            + " ".join(missing)
-            + "\nگروه‌های قبلی را از نو نسازید. "
+            "\nگروه آرشیو ناقص: " + " ".join(missing) + "\nگروه‌های قبلی را از نو نسازید. "
             "داخل همان گروه آرشیو /archive بزنید و هشتگ را انتخاب کنید."
         )
     return (

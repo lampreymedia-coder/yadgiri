@@ -39,7 +39,7 @@ def test_text_bar_rtl_safe_blocks() -> None:
 
 def test_success_message_is_short_confirmation() -> None:
     text = fa.success_message("k7f2qa", "#یادگیری", "گروه رصد", 10)
-    assert "موفقیت" in text
+    assert "آرشیو شد" in text
     assert "/undo" not in text
 
 
@@ -85,7 +85,7 @@ def test_missing_archive_howto_tells_admin_to_rebind() -> None:
 
 
 def test_user_saved_mentions_missing_archive() -> None:
-    assert "موفقیت" in fa.user_saved()
+    assert "آرشیو شد" in fa.user_saved()
     text = fa.user_saved(["#محتوایی"])
     assert "#محتوایی" in text
     assert "/archive" in text

@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     IN_PROGRESS_STATUSES,
+    TERMINAL_STATUSES,
     ContentType,
     MediaFile,
     Submission,
@@ -199,6 +200,50 @@ class SubmissionRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def find_by_origin_for_user(
+        self, user_id: int, chat_id: int, message_id: int
+    ) -> Submission | None:
+        """Match an origin group/private message to its submission."""
+        recent = datetime.now(UTC) - timedelta(days=2)
+        result = await self._session.execute(
+            select(Submission)
+            .options(selectinload(Submission.tags), selectinload(Submission.media_files))
+            .where(
+                Submission.user_id == user_id,
+                (Submission.status.in_(IN_PROGRESS_STATUSES) | (Submission.updated_at >= recent)),
+            )
+            .order_by(Submission.created_at.desc())
+            .limit(200)
+        )
+        for submission in result.scalars():
+            meta = submission.meta if isinstance(submission.meta, dict) else {}
+            origin = meta.get("origin_chat_id")
+            raw_ids = meta.get("origin_message_ids") or []
+            origin_ids = [int(item) for item in raw_ids if str(item).lstrip("-").isdigit()]
+            if origin != chat_id:
+                continue
+            if message_id in origin_ids or submission.original_message_id == message_id:
+                return submission
+        return None
+
+    async def list_terminal_private_residue(self, limit: int = 300) -> list[Submission]:
+        """Decided submissions that may still have leftover private-chat messages."""
+        result = await self._session.execute(
+            select(Submission)
+            .where(Submission.status.in_(TERMINAL_STATUSES))
+            .order_by(Submission.updated_at.desc())
+            .limit(limit)
+        )
+        found: list[Submission] = []
+        for submission in result.scalars():
+            meta = submission.meta if isinstance(submission.meta, dict) else {}
+            if submission.wizard_message_id is not None:
+                found.append(submission)
+                continue
+            if meta.get("subject_message_id") or meta.get("ephemeral_message_ids"):
+                found.append(submission)
+        return found
 
     async def find_duplicate_by_sha(self, sha256: str) -> Submission | None:
         result = await self._session.execute(

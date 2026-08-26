@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -192,8 +193,14 @@ async def test_full_happy_path_two_tags(
     assert len(submission.tags) == 2
     assert submission.published_message_id is None
     copies = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
-    assert len(copies) == 2
-    assert any("موفقیت" in t for t in fake_bale.sent_texts(USER_ID))
+    assert copies == []
+    archive_texts = [
+        str(c.get("text") or "")
+        for c in fake_bale.calls_for("sendMessage")
+        if int(c.get("chat_id", 0)) == ARCHIVE_ID
+    ]
+    assert any("متن آزمایشی" in text for text in archive_texts)
+    assert any("آرشیو شد" in t for t in fake_bale.sent_texts(USER_ID))
     assert not any("مجموع امروز" in t for t in fake_bale.sent_texts(USER_ID))
     assert not any(int(c.get("chat_id", 0)) == GROUP_ID for c in fake_bale.calls_for("sendMessage"))
     async with ctx.db.session() as session:
@@ -224,6 +231,8 @@ async def test_cancel_removes_everything(
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.CANCELLED
     assert submission.published_message_id is None
+    assert any("لغو" in t for t in fake_bale.sent_texts(USER_ID))
+    assert fake_bale.last_markup(USER_ID) is None
 
 
 async def test_foreign_user_click_rejected(
@@ -407,3 +416,108 @@ async def test_edit_tags_from_preview(
     labels = list(wizard_buttons(fake_bale, USER_ID))
     assert any("سند" in label for label in labels)
     assert any("|tg|" in cb for cb in wizard_buttons(fake_bale, USER_ID).values())
+
+
+def _edited_text_update(new_text: str) -> Update:
+    payload = load_update("text")
+    message = dict(payload["message"])
+    message["text"] = new_text
+    message["edit_date"] = 1755600099
+    return Update.model_validate({"update_id": next(_update_seq), "edited_message": message})
+
+
+async def _confirm_first_tag(dispatcher: Dispatcher, fake_bale: FakeBaleServer, sid: str) -> None:
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    tag_cb = next(cb for cb in buttons.values() if "|tg|" in cb)
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+
+
+async def test_origin_edit_updates_private_copy_and_archive(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await bind_archives(ctx)
+    await intake_text(dispatcher)
+    edited = "نسخه ویرایش‌شده برای آرشیو نهایی"
+    await dispatcher.dispatch(_edited_text_update(edited))
+    submission = await get_submission(ctx)
+    assert submission.text_content == edited
+    assert any(edited in text for text in fake_bale.sent_texts(USER_ID))
+    assert not any("متن آزمایشی برای بایگانی است" in text for text in fake_bale.sent_texts(USER_ID))
+
+    await _confirm_first_tag(dispatcher, fake_bale, submission.short_id)
+    submission = await get_submission(ctx)
+    assert submission.status is SubmissionStatus.COMPLETED
+    archive_texts = [
+        str(call.get("text") or "")
+        for call in fake_bale.calls_for("sendMessage")
+        if int(call.get("chat_id", 0)) == ARCHIVE_ID
+    ]
+    assert any(edited in text for text in archive_texts)
+    assert not any("متن آزمایشی برای بایگانی است" in text for text in archive_texts)
+
+
+async def test_settled_private_chat_drops_wizard_and_summary(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await bind_archives(ctx)
+    await intake_text(dispatcher)
+    submission = await get_submission(ctx)
+    await _confirm_first_tag(dispatcher, fake_bale, submission.short_id)
+    assert any("آرشیو شد" in text for text in fake_bale.sent_texts(USER_ID))
+    assert fake_bale.last_markup(USER_ID) is None
+
+    async with ctx.db.session() as session:
+        reloaded = await SubmissionRepository(session).get_by_short_id(submission.short_id)
+        assert reloaded is not None
+        meta = dict(reloaded.meta or {})
+        meta["ephemeral_delete_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        reloaded.meta = meta
+
+    from app.workers.ttl_sweeper import run_private_cleanup_once
+
+    deleted = await run_private_cleanup_once(ctx)
+    assert deleted >= 1
+    assert not any("آرشیو شد" in text for text in fake_bale.sent_texts(USER_ID))
+
+
+async def test_backlog_decided_wizard_is_deleted(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await intake_text(dispatcher)
+    submission = await get_submission(ctx)
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    async with ctx.db.session() as session:
+        reloaded = await SubmissionRepository(session).get_by_short_id(submission.short_id)
+        assert reloaded is not None
+        reloaded.status = SubmissionStatus.COMPLETED
+        reloaded.completed_at = datetime.now(UTC)
+
+    from app.workers.ttl_sweeper import run_private_cleanup_once
+
+    deleted = await run_private_cleanup_once(ctx)
+    assert deleted >= 1
+    leftover = fake_bale.messages.get((USER_ID, msg_id))
+    assert leftover is None or leftover.deleted
+
+
+async def test_edit_after_complete_rewrites_archive(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await bind_archives(ctx)
+    await intake_text(dispatcher)
+    submission = await get_submission(ctx)
+    await _confirm_first_tag(dispatcher, fake_bale, submission.short_id)
+    later = "بعد از آرشیو هم ویرایش شد"
+    await dispatcher.dispatch(_edited_text_update(later))
+    submission = await get_submission(ctx)
+    assert submission.text_content == later
+    archive_texts = [
+        str(call.get("text") or "")
+        for call in fake_bale.calls_for("sendMessage")
+        if int(call.get("chat_id", 0)) == ARCHIVE_ID
+    ]
+    assert any(later in text for text in archive_texts)

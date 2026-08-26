@@ -33,6 +33,7 @@ logger = get_logger(__name__)
 
 CAPTION_LIMIT = 1024
 TEXT_LIMIT = 4096
+_SEND_STORED_TEXT = {ContentType.TEXT, ContentType.LINK}
 
 
 @dataclass(slots=True)
@@ -126,6 +127,37 @@ class SubmissionService:
         await self.submissions.set_status(submission, SubmissionStatus.AWAITING_DECISION)
         return IntakeResult(submission=submission, deleted_original=False, archived=True)
 
+    def apply_content_update(
+        self,
+        submission: Submission,
+        classified: ClassifiedContent,
+        raw_update: dict[str, Any] | None,
+    ) -> None:
+        """Overwrite stored text/caption with the latest origin edit."""
+        if (
+            classified.content_type in _SEND_STORED_TEXT
+            and submission.content_type in _SEND_STORED_TEXT
+        ):
+            submission.content_type = classified.content_type
+        submission.text_content = classified.text_content
+        submission.text_normalized = classified.text_normalized
+        submission.caption = classified.caption
+        submission.urls = list(classified.urls)
+        if raw_update is not None:
+            submission.raw_update = raw_update
+        submission.updated_at = datetime.now(UTC)
+        submission.meta = {**submission.meta, "origin_edited": True}
+        if classified.media and submission.media_files:
+            first = classified.media[0]
+            media = submission.media_files[0]
+            media.bale_file_id = first.file_id
+            if first.file_unique_id:
+                media.bale_file_unique = first.file_unique_id
+            if first.file_name:
+                media.file_name = first.file_name
+            if first.mime_type:
+                media.mime_type = first.mime_type
+
     async def _alert_admin_intake_failure(self, reason: str) -> None:
         await self._notify_admins(fa.admin_intake_failure_alert(reason))
 
@@ -195,6 +227,43 @@ class SubmissionService:
         metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
         return missing
 
+    async def refresh_archive_copies(self, submission: Submission, sender_name: str) -> None:
+        """Replace already-archived copies with the latest stored content."""
+        copies = submission.meta.get("tag_archive_copies") or {}
+        if not isinstance(copies, dict):
+            copies = {}
+        for slug, ids in copies.items():
+            dest = await resolve_archive_chat_id(self._session, str(slug))
+            if dest is None:
+                continue
+            for message_id in ids or []:
+                await try_delete_message(self._api, dest, int(message_id))
+        origin_chat = submission.meta.get("origin_chat_id")
+        origin_ids = self._origin_message_ids(submission)
+        footer = self._archive_footer(submission, sender_name)
+        new_copies: dict[str, list[int]] = {}
+        missing: list[str] = []
+        for tag in submission.tags:
+            dest = await resolve_archive_chat_id(self._session, tag.slug)
+            if dest is None:
+                missing.append(tag.hashtag)
+                continue
+            copied_ids = await self._copy_origin_to_archive(
+                dest, origin_chat, origin_ids, footer, submission, sender_name
+            )
+            if copied_ids:
+                new_copies[tag.slug] = copied_ids
+        if new_copies:
+            first_slug = next(iter(new_copies))
+            first_ids = new_copies[first_slug]
+            submission.archive_chat_id = await resolve_archive_chat_id(self._session, first_slug)
+            submission.archive_message_id = first_ids[0] if first_ids else None
+        submission.meta = {
+            **submission.meta,
+            "tag_archive_copies": new_copies,
+            "missing_archives": missing,
+        }
+
     async def _copy_origin_to_archive(
         self,
         dest_chat_id: int,
@@ -205,13 +274,23 @@ class SubmissionService:
         sender_name: str,
     ) -> list[int]:
         copied: list[int] = []
-        if isinstance(origin_chat, int) and origin_ids:
+        use_stored_text = submission.content_type in _SEND_STORED_TEXT
+        if use_stored_text:
+            fallback_id = await self._send_archive_fallback(dest_chat_id, submission, sender_name)
+            if fallback_id is not None:
+                copied.append(fallback_id)
+        elif isinstance(origin_chat, int) and origin_ids:
+            caption_override = None
+            caption = submission.caption or ""
+            if submission.meta.get("origin_edited") and 0 < len(caption) <= CAPTION_LIMIT:
+                caption_override = caption
             for message_id in origin_ids:
                 try:
                     new_id = await self._api.copy_message(
                         chat_id=dest_chat_id,
                         from_chat_id=origin_chat,
                         message_id=message_id,
+                        caption=caption_override,
                         is_group=True,
                     )
                     copied.append(new_id)

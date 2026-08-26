@@ -14,7 +14,7 @@ from app.bale.keyboards import button, keyboard, url_button
 from app.bale.models import InlineKeyboardMarkup, Message
 from app.config import IngestMode
 from app.core.context import BotContext
-from app.db.models import ContentType, Group
+from app.db.models import IN_PROGRESS_STATUSES, ContentType, Group, SubmissionStatus
 from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.users import UserRepository
@@ -27,7 +27,7 @@ from app.domain.group_roles import (
     patch_settings,
     role_already_asked,
 )
-from app.handlers.wizard import open_wizard, render_group_choice
+from app.handlers.wizard import open_wizard, refresh_after_origin_edit, render_group_choice
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -400,3 +400,43 @@ async def process_private_content(ctx: BotContext, message: Message) -> None:
             return
 
         await open_wizard(ctx, session, submission, user, target_group, origin=message)
+
+
+async def handle_edited_message(ctx: BotContext, message: Message) -> None:
+    """Apply an origin edit to the existing submission; never open a second wizard."""
+    if message.from_user is None or message.from_user.is_bot:
+        return
+    async with ctx.db.session() as session:
+        users = UserRepository(session)
+        user = await users.get_by_bale_id(message.from_user.id)
+        if user is None:
+            logger.info(
+                "edited_message_unknown_user",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+            return
+        service = ctx.submission_service(session)
+        submission = await service.submissions.find_by_origin_for_user(
+            user.id, message.chat.id, message.message_id
+        )
+        if submission is None:
+            logger.info(
+                "edited_message_no_submission",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+            )
+            return
+        classified = classify(message)
+        service.apply_content_update(submission, classified, message.raw())
+        logger.info(
+            "origin_edit_applied",
+            short_id=submission.short_id,
+            status=submission.status.value,
+        )
+        if submission.status in IN_PROGRESS_STATUSES:
+            await refresh_after_origin_edit(ctx, session, submission)
+            return
+        if submission.status is SubmissionStatus.COMPLETED:
+            sender = user.display_name or user.username or fa.fa_digits(user.bale_user_id)
+            await service.refresh_archive_copies(submission, sender)

@@ -128,11 +128,7 @@ class Dispatcher:
         if update.message is not None:
             await self._on_message(update.message)
         elif update.edited_message is not None:
-            logger.info(
-                "edited_message_ignored",
-                chat_id=update.edited_message.chat.id,
-                message_id=update.edited_message.message_id,
-            )
+            await self._on_edited_message(update.edited_message)
         elif update.callback_query is not None:
             await self._on_callback(update.callback_query)
 
@@ -208,6 +204,14 @@ class Dispatcher:
         if group_intake._should_ignore(self.ctx, message):
             return
         await self.albums.add(message)
+
+    async def _on_edited_message(self, message: Message) -> None:
+        if message.from_user is not None and message.from_user.is_bot:
+            return
+        user_id = message.from_user.id if message.from_user is not None else 0
+        lock = self.ctx.locks.get(message.chat.id, user_id)
+        async with lock:
+            await group_intake.handle_edited_message(self.ctx, message)
 
     async def _on_command(self, message: Message, command: str, args: list[str]) -> None:
         assert message.from_user is not None

@@ -74,6 +74,14 @@ IN_PROGRESS_STATUSES: tuple[SubmissionStatus, ...] = (
     SubmissionStatus.AWAITING_CONFIRM,
 )
 
+TERMINAL_STATUSES: tuple[SubmissionStatus, ...] = (
+    SubmissionStatus.COMPLETED,
+    SubmissionStatus.DECLINED,
+    SubmissionStatus.CANCELLED,
+    SubmissionStatus.EXPIRED,
+    SubmissionStatus.FAILED,
+)
+
 
 class StorageStatus(enum.StrEnum):
     PENDING = "pending"

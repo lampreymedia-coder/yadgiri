@@ -17,10 +17,18 @@ from app.bale.models import CallbackQuery, InlineKeyboardButton, InlineKeyboardM
 from app.core.context import BotContext
 from app.core.fsm import Conversation, WizardState
 from app.core.locks import advisory_xact_lock
-from app.db.models import Group, Submission, SubmissionStatus, Tag, User
+from app.db.models import (
+    TERMINAL_STATUSES,
+    Group,
+    Submission,
+    SubmissionStatus,
+    Tag,
+    User,
+)
 from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
 from app.domain.group_roles import try_delete_message
+from app.domain.private_chat import META_SUBJECT, settle_private_chat
 from app.domain.submission import SubmissionService
 from app.i18n import fa
 from app.observability.logging import get_logger
@@ -60,14 +68,6 @@ WIZARD_ACTIONS = {
 
 _TAGS_PER_PAGE = 16
 _TWO_COLUMN_THRESHOLD = 8
-
-TERMINAL_STATUSES = (
-    SubmissionStatus.COMPLETED,
-    SubmissionStatus.DECLINED,
-    SubmissionStatus.CANCELLED,
-    SubmissionStatus.EXPIRED,
-    SubmissionStatus.FAILED,
-)
 
 
 def media_details(submission: Submission) -> str:
@@ -266,13 +266,13 @@ async def _send_subject_copy(
     if from_chat is not None and message_id is not None:
         try:
             copied_id = await ctx.api.copy_message(dest, from_chat, message_id)
-            submission.meta = {**submission.meta, "subject_message_id": copied_id}
+            submission.meta = {**submission.meta, META_SUBJECT: copied_id}
             return copied_id
         except (BaleAPIError, NetworkError) as exc:
             logger.info("subject_copy_failed", error=str(exc))
         try:
             forwarded = await ctx.api.forward_message(dest, from_chat, message_id)
-            submission.meta = {**submission.meta, "subject_message_id": forwarded.message_id}
+            submission.meta = {**submission.meta, META_SUBJECT: forwarded.message_id}
             return forwarded.message_id
         except (BaleAPIError, NetworkError) as exc:
             logger.info("subject_forward_failed", error=str(exc))
@@ -282,11 +282,79 @@ async def _send_subject_copy(
     )
     try:
         sent = await ctx.api.send_message(dest, fallback)
-        submission.meta = {**submission.meta, "subject_message_id": sent.message_id}
+        submission.meta = {**submission.meta, META_SUBJECT: sent.message_id}
         return sent.message_id
     except (BaleAPIError, NetworkError) as exc:
         logger.warning("subject_fallback_failed", error=str(exc))
     return None
+
+
+async def _replace_subject_copy(
+    ctx: BotContext,
+    submission: Submission,
+    user: User,
+    group: Group | None,
+) -> int | None:
+    """Drop the stale private copy and post the latest origin text."""
+    dest = user.bale_user_id
+    meta = dict(submission.meta or {})
+    old_id = meta.get(META_SUBJECT)
+    if isinstance(old_id, int):
+        await try_delete_message(ctx.api, dest, old_id)
+    body = (submission.text_content or submission.caption or "").strip()
+    if submission.content_type.value in {"text", "link"} and body:
+        try:
+            sent = await ctx.api.send_message(dest, body)
+            submission.meta = {**meta, META_SUBJECT: sent.message_id}
+            return sent.message_id
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("subject_latest_send_failed", error=str(exc))
+    return await _send_subject_copy(ctx, submission, user, group, origin=None)
+
+
+async def refresh_after_origin_edit(
+    ctx: BotContext, session: AsyncSession, submission: Submission
+) -> None:
+    """Show the latest origin text in the still-open private wizard."""
+    if submission.status in TERMINAL_STATUSES:
+        return
+    owner = await UserRepository(session).get_by_id(submission.user_id)
+    if owner is None:
+        return
+    group = await session.get(Group, submission.group_id) if submission.group_id else None
+    new_subject = await _replace_subject_copy(ctx, submission, owner, group)
+    chat_id = owner.bale_user_id
+    if submission.wizard_message_id is not None:
+        await try_delete_message(ctx.api, chat_id, submission.wizard_message_id)
+    store = ctx.state_store(session)
+    stored = await store.load(chat_id, owner.bale_user_id)
+    if stored is not None and stored.payload.get("sid") == submission.short_id:
+        conversation = stored
+    else:
+        conversation = _rebuild_conversation(submission, chat_id, owner.bale_user_id)
+    try:
+        sent = await ctx.api.send_message(
+            chat_id,
+            fa.START_RESUME,
+            reply_to_message_id=new_subject,
+        )
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("wizard_reresend_failed", error=str(exc))
+        return
+    submission.wizard_chat_id = chat_id
+    submission.wizard_message_id = sent.message_id
+    tags_repo = TagRepository(session)
+    await _render_state(
+        ctx,
+        session,
+        ctx.submission_service(session),
+        tags_repo,
+        submission,
+        owner,
+        group,
+        conversation,
+        conversation.state,
+    )
 
 
 async def _delete_group_hint(ctx: BotContext, submission: Submission) -> None:
@@ -545,7 +613,7 @@ async def _dispatch_action(
         else:
             await service.submissions.set_status(submission, SubmissionStatus.DECLINED)
         await _delete_group_hint(ctx, submission)
-        await _edit_wizard(ctx, submission, fa.DECLINED_MESSAGE, None)
+        await settle_private_chat(ctx, submission, fa.DECLINED_MESSAGE)
         conversation.state = WizardState.IDLE
         await _answer(ctx, cq)
         return True
@@ -553,7 +621,7 @@ async def _dispatch_action(
     if action == ACT_CANCEL:
         await service.cancel_completely(submission)
         await _delete_group_hint(ctx, submission)
-        await _edit_wizard(ctx, submission, fa.CANCELLED_MESSAGE, None)
+        await settle_private_chat(ctx, submission, fa.CANCELLED_MESSAGE)
         conversation.state = WizardState.IDLE
         await _answer(ctx, cq)
         return True
@@ -675,7 +743,10 @@ async def _dispatch_action(
         await _delete_group_hint(ctx, refreshed)
         submission.wizard_chat_id = refreshed.wizard_chat_id = submission.wizard_chat_id
         submission.wizard_message_id = refreshed.wizard_message_id = submission.wizard_message_id
-        await _edit_wizard(ctx, submission, fa.user_saved(missing), None)
+        await settle_private_chat(ctx, submission, fa.user_saved(missing))
+        refreshed.wizard_chat_id = submission.wizard_chat_id
+        refreshed.wizard_message_id = submission.wizard_message_id
+        refreshed.meta = submission.meta
         await service.notify_admin_completed(
             refreshed, owner, group, media_details(refreshed), missing_archives=missing
         )

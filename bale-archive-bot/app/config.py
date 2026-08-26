@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     reminder_after_minutes: int = Field(default=10, alias="REMINDER_AFTER_MINUTES")
     expired_policy: ExpiredPolicy = Field(default=ExpiredPolicy.REPUBLISH, alias="EXPIRED_POLICY")
     undo_window_minutes: int = Field(default=10, alias="UNDO_WINDOW_MINUTES")
+    private_summary_ttl_seconds: int = Field(default=30, alias="PRIVATE_SUMMARY_TTL_SECONDS")
     album_window_ms: int = Field(default=2500, alias="ALBUM_WINDOW_MS")
     ignore_stickers: bool = Field(default=True, alias="IGNORE_STICKERS")
     formatting_enabled: bool = Field(default=False, alias="FORMATTING_ENABLED")

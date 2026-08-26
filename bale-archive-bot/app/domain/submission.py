@@ -181,19 +181,43 @@ class SubmissionService:
             if copied_ids:
                 copies[tag.slug] = copied_ids
 
-        submission.meta = {
-            **submission.meta,
-            "tag_archive_copies": copies,
-            "missing_archives": missing,
-        }
         if copies:
             first_slug = next(iter(copies))
             first_ids = copies[first_slug]
             submission.archive_chat_id = await resolve_archive_chat_id(self._session, first_slug)
             submission.archive_message_id = first_ids[0] if first_ids else None
+        mark_id = await self._mark_origin_archived(origin_chat, origin_ids)
+        submission.meta = {
+            **submission.meta,
+            "tag_archive_copies": copies,
+            "missing_archives": missing,
+            "research_mark_chat_id": origin_chat if isinstance(origin_chat, int) else None,
+            "research_mark_message_id": mark_id,
+        }
         await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
         metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
         return missing
+
+    async def _mark_origin_archived(self, origin_chat: Any, origin_ids: list[int]) -> int | None:
+        """Put a single-icon reply on the research-group original. No sentence."""
+        if not isinstance(origin_chat, int) or not origin_ids:
+            return None
+        try:
+            sent = await self._api.send_message(
+                origin_chat,
+                fa.ARCHIVE_MARK,
+                reply_to_message_id=origin_ids[0],
+                is_group=True,
+            )
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info(
+                "research_archive_mark_failed",
+                chat_id=origin_chat,
+                message_id=origin_ids[0],
+                error=str(exc),
+            )
+            return None
+        return sent.message_id
 
     async def _copy_origin_to_archive(
         self,
@@ -318,6 +342,10 @@ class SubmissionService:
                     continue
                 for message_id in ids or []:
                     await try_delete_message(self._api, dest, int(message_id))
+        mark_chat = submission.meta.get("research_mark_chat_id")
+        mark_id = submission.meta.get("research_mark_message_id")
+        if isinstance(mark_chat, int) and isinstance(mark_id, int):
+            await try_delete_message(self._api, mark_chat, mark_id)
         await self.submissions.set_status(submission, SubmissionStatus.CANCELLED)
         metrics.submissions_total.labels(status="undone").inc()
         return True

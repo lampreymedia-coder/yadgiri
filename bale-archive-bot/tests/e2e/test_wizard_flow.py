@@ -15,6 +15,7 @@ from app.core.dispatcher import Dispatcher
 from app.db.models import Submission, SubmissionStatus
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.submissions import SubmissionRepository
+from app.i18n import fa
 from tests.fakes.fake_bale import FakeBaleServer
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "updates"
@@ -193,8 +194,18 @@ async def test_full_happy_path_two_tags(
     assert submission.published_message_id is None
     copies = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
     assert len(copies) == 2
+    marks = [
+        c
+        for c in fake_bale.calls_for("sendMessage")
+        if int(c.get("chat_id", 0)) == GROUP_ID and c.get("text") == fa.ARCHIVE_MARK
+    ]
+    assert len(marks) == 1
+    assert int(marks[0].get("reply_to_message_id", 0)) == 11
+    group_texts = fake_bale.sent_texts(GROUP_ID)
+    assert all(t == fa.ARCHIVE_MARK for t in group_texts)
+    assert not any("آرشیو شد" in t for t in group_texts)
+    assert not any("مجموع امروز" in t for t in group_texts)
     assert any("موفقیت" in t for t in fake_bale.sent_texts(USER_ID))
-    assert not any("مجموع امروز" in t for t in fake_bale.sent_texts(USER_ID))
     async with ctx.db.session() as session:
         outbox = OutboxRepository(session)
         assert await outbox.pending_count() >= 1
@@ -223,6 +234,10 @@ async def test_cancel_removes_everything(
     submission = await get_submission(ctx)
     assert submission.status is SubmissionStatus.CANCELLED
     assert submission.published_message_id is None
+    assert not any(
+        c.get("text") == fa.ARCHIVE_MARK and int(c.get("chat_id", 0)) == GROUP_ID
+        for c in fake_bale.calls_for("sendMessage")
+    )
 
 
 async def test_foreign_user_click_rejected(
@@ -336,9 +351,7 @@ async def test_two_research_groups_keep_separate_subjects(
     second_sub = next(item for item in rows if item.original_message_id == 77)
     first_msg = wizard_message_id(fake_bale, USER_ID)
     # The latest keyboard belongs to the second intake; drive the first by sid.
-    await dispatcher.dispatch(
-        callback_update(f"1|yes|{first_sub.short_id}|", USER_ID, first_msg)
-    )
+    await dispatcher.dispatch(callback_update(f"1|yes|{first_sub.short_id}|", USER_ID, first_msg))
     first_reloaded = await get_submission_by_sid(ctx, first_sub.short_id)
     second_reloaded = await get_submission_by_sid(ctx, second_sub.short_id)
     assert first_reloaded.status is SubmissionStatus.AWAITING_TAGS

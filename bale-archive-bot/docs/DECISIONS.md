@@ -68,7 +68,9 @@ Each active hashtag can be bound to its own private archive group
 `copyMessage`d into every selected tag's archive chat and a compact footer
 is sent as a reply. SQL is the source of truth: a missing archive group does
 not block the save; admins are notified instead. The research group is never
-republished into.
+republished into. Bale's bot HTTP API has no `setMessageReaction` (404
+handler-not-found), so the original is marked with a single-emoji reply
+(`🏷`) instead of a sentence. Full save reports stay in the admin private chat.
 
 ## D-11: Edited messages are logged and ignored
 `edited_message` arrives after the gateway has already archived/deleted the

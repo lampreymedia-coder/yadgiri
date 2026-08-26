@@ -180,6 +180,52 @@ async def _leave_unauthorized_group(
     logger.info("bot_left_unauthorized_group", chat_id=message.chat.id, adder_id=adder_id)
 
 
+async def _chat_member_status(ctx: BotContext, chat_id: int, user_id: int) -> str | None:
+    try:
+        member = await ctx.api.get_chat_member(chat_id, user_id)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning(
+            "chat_member_status_failed", chat_id=chat_id, user_id=user_id, error=str(exc)
+        )
+        return None
+    status = member.get("status")
+    return str(status).lower() if status is not None else None
+
+
+async def _leave_without_message_access(
+    ctx: BotContext,
+    session: AsyncSession,
+    message: Message,
+    group: Group,
+) -> None:
+    groups = GroupRepository(session)
+    title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+    notice = fa.bot_join_needs_direct_admin(title)
+    try:
+        await ctx.api.send_message(message.chat.id, notice, is_group=True)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning(
+            "missing_access_group_notice_failed",
+            chat_id=message.chat.id,
+            error=str(exc),
+        )
+    if message.from_user is not None:
+        try:
+            await ctx.api.send_message(message.from_user.id, notice)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning(
+                "missing_access_private_notice_failed",
+                chat_id=message.from_user.id,
+                error=str(exc),
+            )
+    try:
+        await ctx.api.leave_chat(message.chat.id)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("missing_access_leave_failed", chat_id=message.chat.id, error=str(exc))
+    await groups.set_active(group.id, False)
+    logger.info("bot_left_without_message_access", chat_id=message.chat.id)
+
+
 async def register_group_events(ctx: BotContext, message: Message) -> None:
     """Track bot membership: new_chat_members / new_chat_member / group_chat_created."""
     members = message.added_members()
@@ -203,12 +249,41 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         if message.from_user is not None:
             await promote_first_owner(ctx, session, message.from_user)
         adder_id = message.from_user.id if message.from_user is not None else None
-        allowed = adder_id is not None and await is_admin(ctx, session, adder_id)
+        bot_status = await _chat_member_status(ctx, message.chat.id, ctx.bot_user_id)
+        if bot_status not in {"administrator", "creator"}:
+            await _leave_without_message_access(ctx, session, message, group)
+            return
+        app_admin = adder_id is not None and await is_admin(ctx, session, adder_id)
+        adder_status = (
+            await _chat_member_status(ctx, message.chat.id, adder_id)
+            if adder_id is not None
+            else None
+        )
+        group_admin = adder_status in {"administrator", "creator"}
+        allowed = app_admin or group_admin
         if not allowed:
             await _leave_unauthorized_group(ctx, session, message, group)
             return
+        if adder_status != "creator":
+            await _leave_without_message_access(ctx, session, message, group)
+            return
         await groups.set_active(group.id, True)
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        if not app_admin and group_admin:
+            from app.handlers.admin import persist_research_chat
+
+            await persist_research_chat(
+                session, message.chat.id, title=message.chat.title or group.title
+            )
+            try:
+                await ctx.api.send_message(adder_id, fa.research_owner_setup_done(title))
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning(
+                    "research_owner_setup_dm_failed",
+                    chat_id=message.chat.id,
+                    error=str(exc),
+                )
+            return
         role = group_role(group)
         if role == ROLE_RESEARCH:
             try:

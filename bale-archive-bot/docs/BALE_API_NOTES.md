@@ -12,7 +12,7 @@
 | `Update` has only `message`, `edited_message`, `callback_query` | join/leave detection via `new_chat_members` only (`group_intake.register_group_events`) |
 | `getUpdates` has only `offset`, `limit` (1..100); no long-polling | adaptive short-interval loop in `app/main.py` with manual offset |
 | Webhook: only `url` param | optional; default run mode is polling on Windows |
-| `getChatMember` does not exist | admins tracked in `ADMIN_USER_IDS` + `users.is_admin` |
+| `getChatMember` and `getChatAdministrators` exist | group joiners can be verified against their live Bale group role |
 | `editMessageText` accepts `reply_markup`; no `editMessageReplyMarkup` | all keyboard updates send text+keyboard together via `safe_edit()` |
 | `callback_data` ≤ 64 bytes | ASCII scheme `<v>|<act>|<sid>|<arg>` (`app/bale/keyboards.py`) |
 | `sendMessage` has no `parse_mode` | plain-text messages only; `FORMATTING_ENABLED=false` |

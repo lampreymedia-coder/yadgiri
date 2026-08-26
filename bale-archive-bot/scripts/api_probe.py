@@ -52,6 +52,8 @@ APPROVED_METHODS = [
     "deleteMessage",
     "getFile",
     "getChat",
+    "getChatAdministrators",
+    "getChatMember",
     "getChatMembersCount",
     "leaveChat",
     "banChatMember",
@@ -104,12 +106,15 @@ async def call(client: httpx.AsyncClient, method: str, params: dict[str, Any]) -
 async def probe_methods(client: httpx.AsyncClient) -> dict[str, dict[str, Any]]:
     results: dict[str, dict[str, Any]] = {}
     chat = int(CHAT_ID) if CHAT_ID else 0
+    user = int(os.environ.get("PROBE_USER_ID", "1"))
     harmless: dict[str, dict[str, Any]] = {
         "getMe": {},
         "getUpdates": {"limit": 1},
         "getWebhookInfo": {},
         "sendMessage": {"chat_id": chat, "text": "probe"},
         "getChat": {"chat_id": chat},
+        "getChatAdministrators": {"chat_id": chat},
+        "getChatMember": {"chat_id": chat, "user_id": user},
         "getChatMembersCount": {"chat_id": chat},
         "getFile": {"file_id": "probe-nonexistent"},
         "answerCallbackQuery": {"callback_query_id": "probe-nonexistent"},

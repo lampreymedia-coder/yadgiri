@@ -222,6 +222,7 @@ async def test_bot_added_singular_member_asks_role(
 ) -> None:
     _clear_bootstrap(ctx)
     ctx.bot_user_id = fake_bale.bot_id
+    fake_bale.set_chat_member_status(-100200301, OWNER_ID, "creator")
     dispatcher = Dispatcher(ctx)
     await dispatcher.dispatch(
         Update.model_validate(
@@ -294,6 +295,7 @@ async def test_admin_add_keeps_bot_and_asks_role(
 ) -> None:
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
+    fake_bale.set_chat_member_status(-100200400, 111, "creator")
     dispatcher = Dispatcher(ctx)
     await dispatcher.dispatch(
         Update.model_validate(
@@ -320,6 +322,182 @@ async def test_admin_add_keeps_bot_and_asks_role(
     assert fake_bale.calls_for("leaveChat") == []
     assert "نقش این گروه" in "\n".join(fake_bale.sent_texts(111))
     assert "ادمین" in "\n".join(fake_bale.sent_texts(111))
+
+
+async def test_non_owner_admin_readd_is_rejected_to_avoid_silent_message_filtering(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    chat_id = -100200403
+    fake_bale.set_chat_member_status(chat_id, 111, "administrator")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900027,
+                "message": {
+                    "message_id": 27,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "مالک دیگر"},
+                    "from": {
+                        "id": 111,
+                        "is_bot": False,
+                        "first_name": "مدیر",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat")
+    text = "\n".join(fake_bale.sent_texts(111))
+    assert "مالک گروه" in text
+    assert "همه پیام" in text
+
+
+async def test_group_owner_add_auto_registers_research_and_accepts_ordinary_forward(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import Submission
+
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    chat_id = -100200401
+    owner_id = 777
+    fake_bale.set_chat_member_status(chat_id, owner_id, "creator")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900023,
+                "message": {
+                    "message_id": 23,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "رصد مالک"},
+                    "from": {
+                        "id": owner_id,
+                        "is_bot": False,
+                        "first_name": "مالک",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat") == []
+    owner_text = "\n".join(fake_bale.sent_texts(owner_id))
+    assert "رصد فعال شد" in owner_text
+    assert "بدون منشن" in owner_text
+
+    for update_id, message_id, user_id, payload in (
+        (900024, 24, 778, {"text": "متن عادی گروه مالک"}),
+        (
+            900025,
+            25,
+            779,
+            {
+                "text": "متن فورواردشده",
+                "forward_from_chat": {
+                    "id": -800,
+                    "type": "channel",
+                    "title": "منبع",
+                },
+                "forward_from_message_id": 10,
+                "forward_date": 1,
+            },
+        ),
+    ):
+        await dispatcher.dispatch(
+            Update.model_validate(
+                {
+                    "update_id": update_id,
+                    "message": {
+                        "message_id": message_id,
+                        "date": 1,
+                        "chat": {
+                            "id": chat_id,
+                            "type": "group",
+                            "title": "رصد مالک",
+                        },
+                        "from": {
+                            "id": user_id,
+                            "is_bot": False,
+                            "first_name": "عضو",
+                        },
+                        **payload,
+                    },
+                }
+            )
+        )
+    await asyncio.sleep(0.2)
+    assert fake_bale.last_markup(778) is not None
+    assert fake_bale.last_markup(779) is not None
+    async with ctx.db.session() as session:
+        submissions = (
+            (
+                await session.execute(
+                    select(Submission)
+                    .where(Submission.original_message_id.in_([24, 25]))
+                    .order_by(Submission.original_message_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [item.text_content for item in submissions] == [
+            "متن عادی گروه مالک",
+            "متن فورواردشده",
+        ]
+        assert [item.is_forwarded for item in submissions] == [False, True]
+
+
+async def test_bot_added_without_admin_access_leaves_for_clean_readd(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    chat_id = -100200402
+    fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "member")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900026,
+                "message": {
+                    "message_id": 26,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "بدون دسترسی"},
+                    "from": {
+                        "id": 111,
+                        "is_bot": False,
+                        "first_name": "مدیر",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat")
+    texts = "\n".join(fake_bale.sent_texts(111))
+    assert "دسترسی دریافت همه پیام" in texts
+    assert "افزودن مدیر" in texts
 
 
 async def test_member_start_has_no_add_to_group_button(
@@ -528,8 +706,9 @@ async def test_research_choice_then_content_opens_wizard(
 
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
-    dispatcher = Dispatcher(ctx)
     chat_id = -100200777
+    fake_bale.set_chat_member_status(chat_id, 111, "creator")
+    dispatcher = Dispatcher(ctx)
     await dispatcher.dispatch(
         Update.model_validate(
             {

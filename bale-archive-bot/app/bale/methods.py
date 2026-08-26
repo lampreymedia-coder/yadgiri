@@ -375,6 +375,18 @@ class BaleAPI:
     async def get_chat_members_count(self, chat_id: int) -> int:
         return int(await self.client.request("getChatMembersCount", {"chat_id": chat_id}))
 
+    async def get_chat_member(self, chat_id: int, user_id: int) -> dict[str, Any]:
+        result = await self.client.request(
+            "getChatMember", {"chat_id": chat_id, "user_id": user_id}, chat_id=chat_id
+        )
+        return dict(result)
+
+    async def get_chat_administrators(self, chat_id: int) -> list[dict[str, Any]]:
+        result = await self.client.request(
+            "getChatAdministrators", {"chat_id": chat_id}, chat_id=chat_id
+        )
+        return [dict(item) for item in result]
+
     async def leave_chat(self, chat_id: int) -> bool:
         return bool(await self.client.request("leaveChat", {"chat_id": chat_id}))
 

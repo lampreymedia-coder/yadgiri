@@ -75,7 +75,8 @@ def test_research_copy_requires_admin() -> None:
     text = fa.research_set_done("تست ربات")
     assert "تست ربات" in text
     assert "ادمین" in text
-    assert "منشن" in text
+    assert "فوروارد" in text
+    assert "بدون منشن" in text
     need = fa.research_need_admin("تست ربات")
     assert "ادمین" in need
     assert "نقش این گروه" not in need

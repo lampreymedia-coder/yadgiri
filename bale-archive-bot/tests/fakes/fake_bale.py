@@ -37,6 +37,7 @@ class FakeBaleServer:
     messages: dict[tuple[int, int], SentMessage] = field(default_factory=dict)
     fail_methods: dict[str, dict[str, Any]] = field(default_factory=dict)
     forbidden_private_chats: set[int] = field(default_factory=set)
+    chat_member_statuses: dict[tuple[int, int], str] = field(default_factory=dict)
     _message_seq: itertools.count[int] = field(default_factory=lambda: itertools.count(1000))
 
     last_request: httpx.Request | None = None
@@ -89,6 +90,9 @@ class FakeBaleServer:
 
     def calls_for(self, method: str) -> list[dict[str, Any]]:
         return [params for name, params in self.calls if name == method]
+
+    def set_chat_member_status(self, chat_id: int, user_id: int, status: str) -> None:
+        self.chat_member_statuses[(chat_id, user_id)] = status
 
     # ─── Request handling ───
 
@@ -168,6 +172,34 @@ class FakeBaleServer:
             return []
         if method == "getWebhookInfo":
             return {"url": ""}
+        if method == "getChatMember":
+            chat_id = int(params["chat_id"])
+            user_id = int(params["user_id"])
+            status = self.chat_member_statuses.get(
+                (chat_id, user_id), "administrator" if user_id == self.bot_id else "member"
+            )
+            return {
+                "status": status,
+                "user": {
+                    "id": user_id,
+                    "is_bot": user_id == self.bot_id,
+                    "first_name": "Member",
+                },
+            }
+        if method == "getChatAdministrators":
+            chat_id = int(params["chat_id"])
+            return [
+                {
+                    "status": status,
+                    "user": {
+                        "id": user_id,
+                        "is_bot": user_id == self.bot_id,
+                        "first_name": "Member",
+                    },
+                }
+                for (stored_chat_id, user_id), status in self.chat_member_statuses.items()
+                if stored_chat_id == chat_id and status in {"administrator", "creator"}
+            ]
         if method == "setWebhook":
             return True
         if method == "deleteWebhook":

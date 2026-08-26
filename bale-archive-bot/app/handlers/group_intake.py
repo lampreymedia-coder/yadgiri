@@ -35,6 +35,29 @@ from app.observability.logging import get_logger
 logger = get_logger(__name__)
 
 
+def strip_leading_bot_mention(message: Message, bot_username: str | None) -> Message:
+    """Remove an addressing mention while preserving the user's content.
+
+    Bale may deliver addressed messages even when it withholds ordinary group
+    messages. Treat ``@bot content`` as content rather than archiving the bot
+    username with it, so every research group has a reliable fallback path.
+    """
+    if not bot_username:
+        return message
+    token = f"@{bot_username}".casefold()
+    changes: dict[str, str] = {}
+    for field in ("text", "caption"):
+        value = getattr(message, field)
+        stripped = (value or "").lstrip()
+        if not stripped.casefold().startswith(token):
+            continue
+        remainder = stripped[len(token) :]
+        if remainder and not remainder[0].isspace():
+            continue
+        changes[field] = remainder.lstrip()
+    return message.model_copy(update=changes) if changes else message
+
+
 def role_keyboard(chat_id: int) -> InlineKeyboardMarkup:
     return keyboard(
         [
@@ -106,7 +129,9 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
         role = group_role(group)
         try:
             if role == ROLE_RESEARCH:
-                await ctx.api.send_message(user_id, fa.research_need_admin(title))
+                await ctx.api.send_message(
+                    user_id, fa.research_need_admin(title, ctx.bot_username)
+                )
                 return
             if role == ROLE_ARCHIVE:
                 await ctx.api.send_message(user_id, fa.archive_already_set(title))
@@ -184,6 +209,25 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
             return
         await groups.set_active(group.id, True)
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        role = group_role(group)
+        if role == ROLE_RESEARCH:
+            try:
+                await ctx.api.send_message(
+                    adder_id, fa.research_rejoined(title, ctx.bot_username)
+                )
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning(
+                    "research_rejoin_dm_failed", chat_id=message.chat.id, error=str(exc)
+                )
+            return
+        if role == ROLE_ARCHIVE:
+            try:
+                await ctx.api.send_message(adder_id, fa.archive_already_set(title))
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning(
+                    "archive_rejoin_dm_failed", chat_id=message.chat.id, error=str(exc)
+                )
+            return
         await ask_role_privately(ctx, session, group, adder_id, title)
 
 

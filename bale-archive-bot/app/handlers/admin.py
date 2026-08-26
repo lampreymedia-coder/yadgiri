@@ -855,7 +855,9 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
                 except (BaleAPIError, NetworkError) as exc:
                     logger.info("research_prompt_delete_failed", error=str(exc))
             title = group.title or fa.fa_digits(group_chat_id)
-            await ctx.api.send_message(cq.from_user.id, fa.research_set_done(title))
+            await ctx.api.send_message(
+                cq.from_user.id, fa.research_set_done(title, ctx.bot_username)
+            )
 
     if ctx.caps.has("answerCallbackQuery"):
         try:

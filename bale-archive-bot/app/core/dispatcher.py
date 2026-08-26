@@ -201,6 +201,9 @@ class Dispatcher:
         if command is not None:
             await self._on_command(message, command[0], command[1])
             return
+        message = group_intake.strip_leading_bot_mention(
+            message, self.ctx.bot_username
+        )
         if group_intake._should_ignore(self.ctx, message):
             return
         await self.albums.add(message)

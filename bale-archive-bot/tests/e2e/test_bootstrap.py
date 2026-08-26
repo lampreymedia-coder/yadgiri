@@ -601,3 +601,47 @@ async def test_research_choice_then_content_opens_wizard(
     await asyncio.sleep(0.2)
     assert fake_bale.last_markup(12345) is not None
     assert "رصد سوم" in "\n".join(fake_bale.sent_texts(12345))
+
+
+async def test_mention_with_content_opens_wizard_without_archiving_mention(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.db.models import Submission
+    from app.handlers.admin import persist_research_chat
+
+    chat_id = -100200778
+    async with ctx.db.session() as session:
+        await persist_research_chat(session, chat_id, title="رصد منشن")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900046,
+                "message": {
+                    "message_id": 46,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "رصد منشن"},
+                    "from": {
+                        "id": 12346,
+                        "is_bot": False,
+                        "first_name": "سارا",
+                    },
+                    "text": f"@{fake_bale.bot_username} متن مسیر جایگزین",
+                },
+            }
+        )
+    )
+    await asyncio.sleep(0.2)
+    assert fake_bale.last_markup(12346) is not None
+    async with ctx.db.session() as session:
+        submission = (
+            await session.execute(
+                select(Submission).where(Submission.original_message_id == 46)
+            )
+        ).scalar_one()
+        assert submission.text_content == "متن مسیر جایگزین"
+        assert fake_bale.bot_username not in submission.text_content

@@ -47,6 +47,21 @@ def needs_role(group: Group) -> bool:
     return group_role(group) not in {ROLE_RESEARCH, ROLE_ARCHIVE}
 
 
+def ensure_research_role(group: Group) -> bool:
+    """Default a group to research unless it is already an archive.
+
+    Returns True when the stored role changed to research.
+    """
+    if group_role(group) == ROLE_ARCHIVE:
+        return False
+    if group_role(group) == ROLE_RESEARCH:
+        if not role_already_asked(group):
+            patch_settings(group, role_asked=True)
+        return False
+    patch_settings(group, role=ROLE_RESEARCH, role_asked=True, tag_slug=None)
+    return True
+
+
 def role_already_asked(group: Group) -> bool:
     return bool(settings_of(group).get("role_asked"))
 

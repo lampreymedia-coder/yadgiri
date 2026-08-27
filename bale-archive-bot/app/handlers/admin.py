@@ -823,8 +823,8 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
             from app.handlers.group_intake import role_keyboard
 
             groups = GroupRepository(session)
-            group = await groups.get_by_bale_id(group_chat_id)
-            title = (group.title if group else None) or fa.fa_digits(group_chat_id)
+            found = await groups.get_by_bale_id(group_chat_id)
+            title = (found.title if found is not None else None) or fa.fa_digits(group_chat_id)
             await ctx.api.send_message(
                 cq.from_user.id, fa.bot_added_ask_role(title), role_keyboard(group_chat_id)
             )

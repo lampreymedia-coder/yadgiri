@@ -189,17 +189,11 @@ userbot / `aiobale` (کلاینت کاربر) با قاعده «فقط متده�
 
 ورود گروه (`register_group_events` در `app/handlers/group_intake.py`):
 
-1. جوین از `new_chat_members` / `new_chat_member` / `group_chat_created` **یا** از `Update.my_chat_member` / `chat_member` (`membership_event_as_message`)
-2. اگر بازو هنوز ادمین نیست: **خارج نمی‌شود**. `pending_admin=true`، DM انتظار ارتقا، و اگر نقش خالی است کیبورد رصد/آرشیو برای اضافه‌کننده
-3. اضافه‌کننده باید مدیر/سازنده **همان گروه** باشد وگرنه leave
-4. مدیر سراسری ربات لازم نیست؛ مدیر گروه کافی است
-5. دکمه‌های `srg`/`sar`/`stg`/`srb` پشت `is_admin` سراسری قفل نیستند (`ROLE_SETUP_ACTIONS`)
-6. بعد از ارتقا، `_activate_pending_group` از hello، batch، یا رویداد membership صدا زده می‌شود
-7. اگر تقریباً همه ادمین باشند (`app/domain/delivery.py`: اعضا ≥ ۵ و ادمین‌ها ≥ اعضا−۱)، بعد از انتخاب رصد توضیح می‌دهد که بله ممکن است متن ندهد
-8. منشن اول خط از محتوا جدا می‌شود
-9. استیکر/GIF ignore
-10. پیام خالی گروه (stub / `ContentType.OTHER` بدون محتوا) اگر نقش رصد باشد به فرستنده می‌گوید بله متن را نداد
-11. اگر `needs_role` هنوز true باشد، محتوا پردازش نمی‌شود تا نقش مشخص شود
+1. جوین از `new_chat_members` / `new_chat_member` / `group_chat_created` **یا** از `Update.my_chat_member` / `chat_member`
+2. گروه جدید **خودکار رصد** می‌شود. سؤال رصد/آرشیو دیگر نمی‌آید.
+3. اگر بازو هنوز ادمین نیست: **خارج نمی‌شود**. `pending_admin=true` تا ارتقا.
+4. آرشیو فقط با نوشتن `آرشیو` یا `/archive` داخل همان گروه
+5. هر کسی بتواند اضافه کند؛ ترک به‌خاطر غیرمدیر بودن اضافه‌کننده حذف شد
 
 ویزارد خصوصی (`app/handlers/wizard.py`): تصمیم → انتخاب هشتگ (چندانتخاب) → پیش‌نمایش → `copyMessage` به هر گروه آرشیو بایندشده.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,7 +24,7 @@ class GroupRepository:
         return result.scalar_one_or_none()
 
     async def upsert(self, bale_chat_id: int, title: str | None, chat_type: str) -> Group:
-        values = {
+        values: dict[str, Any] = {
             "bale_chat_id": bale_chat_id,
             "title": title,
             "chat_type": chat_type,

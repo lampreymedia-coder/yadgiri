@@ -158,7 +158,7 @@ async def test_persian_archive_word_registers_chat(
     assert fake_bale.last_markup(ARCHIVE_GROUP) is None
 
 
-async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
+async def test_group_start_activates_research(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
     _clear_bootstrap(ctx)
     dispatcher = Dispatcher(ctx)
     await dispatcher.dispatch(
@@ -180,12 +180,9 @@ async def test_group_start_asks_role(ctx: BotContext, fake_bale: FakeBaleServer)
         )
     )
     texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
-    assert "نقش این گروه" in texts
-    markup = fake_bale.last_markup(OWNER_ID)
-    assert markup is not None
-    labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
-    assert any("رصد" in label for label in labels)
-    assert any("آرشیو" in label for label in labels)
+    assert "رصد" in texts
+    assert "نقش این گروه" not in texts
+    assert fake_bale.last_markup(OWNER_ID) is None
     assert fake_bale.last_markup(-100200300) is None
 
 
@@ -213,7 +210,8 @@ async def test_group_start_without_chat_type_still_asks_role(
         )
     )
     texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
-    assert "نقش این گروه" in texts
+    assert "رصد بدون نوع" in texts
+    assert "نقش این گروه" not in texts
     assert fake_bale.last_markup(-100200302) is None
 
 
@@ -247,14 +245,15 @@ async def test_bot_added_singular_member_asks_role(
         )
     )
     texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
-    assert "نقش این گروه" in texts
+    assert "رصد" in texts or "تیم" in texts
+    assert "نقش این گروه" not in texts
     assert fake_bale.last_markup(-100200301) is None
     assert fake_bale.calls_for("leaveChat") == []
 
 
-async def test_non_admin_cannot_add_bot_to_group(
-    ctx: BotContext, fake_bale: FakeBaleServer
-) -> None:
+async def test_anyone_can_add_bot_and_it_stays(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
+    from app.db.repositories.groups import GroupRepository
+
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
     dispatcher = Dispatcher(ctx)
@@ -281,13 +280,12 @@ async def test_non_admin_cannot_add_bot_to_group(
             }
         )
     )
-    leave_calls = fake_bale.calls_for("leaveChat")
-    assert leave_calls
-    assert str(-100200399) in str(leave_calls[0].get("chat_id"))
-    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(stranger))
-    assert any("خارج" in t for t in fake_bale.sent_texts(-100200399))
-    assert any("مدیر" in t for t in fake_bale.sent_texts(stranger))
-    assert any("گروه غریبه" in t for t in fake_bale.sent_texts(111))
+    assert fake_bale.calls_for("leaveChat") == []
+    async with ctx.db.session() as session:
+        group = await GroupRepository(session).get_by_bale_id(-100200399)
+        assert group is not None
+        assert group.is_active is True
+        assert group.settings.get("role") == "research"
 
 
 async def test_admin_add_keeps_bot_and_asks_role(
@@ -320,8 +318,8 @@ async def test_admin_add_keeps_bot_and_asks_role(
         )
     )
     assert fake_bale.calls_for("leaveChat") == []
-    assert "نقش این گروه" in "\n".join(fake_bale.sent_texts(111))
-    assert "ادمین" in "\n".join(fake_bale.sent_texts(111))
+    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(111))
+    assert "رصد تازه" in "\n".join(fake_bale.sent_texts(111))
 
 
 async def test_non_owner_group_admin_can_add_and_choose_role(
@@ -356,13 +354,15 @@ async def test_non_owner_group_admin_can_add_and_choose_role(
     )
     assert fake_bale.calls_for("leaveChat") == []
     text = "\n".join(fake_bale.sent_texts(111))
-    assert "نقش این گروه" in text
-    assert "مالک‌بودن" not in text
+    assert "نقش این گروه" not in text
+    assert "مالک دیگر" in text
 
 
-async def test_bot_admin_who_is_not_group_admin_cannot_add(
+async def test_bot_stays_when_adder_is_not_group_admin(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
+    from app.db.repositories.groups import GroupRepository
+
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
     chat_id = -100200404
@@ -389,8 +389,12 @@ async def test_bot_admin_who_is_not_group_admin_cannot_add(
             }
         )
     )
-    assert fake_bale.calls_for("leaveChat")
-    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(111))
+    assert fake_bale.calls_for("leaveChat") == []
+    async with ctx.db.session() as session:
+        group = await GroupRepository(session).get_by_bale_id(chat_id)
+        assert group is not None
+        assert group.is_active is True
+        assert group.settings.get("role") == "research"
 
 
 async def test_group_admin_add_auto_registers_research_and_accepts_ordinary_forward(
@@ -432,32 +436,8 @@ async def test_group_admin_add_auto_registers_research_and_accepts_ordinary_forw
     )
     assert fake_bale.calls_for("leaveChat") == []
     admin_text = "\n".join(fake_bale.sent_texts(admin_id))
-    assert "نقش این گروه" in admin_text
-    markup = fake_bale.last_markup(admin_id)
-    assert markup is not None
-    srg = next(
-        btn["callback_data"]
-        for row in markup["inline_keyboard"]
-        for btn in row
-        if "|srg|" in btn.get("callback_data", "")
-    )
-    await dispatcher.dispatch(
-        Update.model_validate(
-            {
-                "update_id": 9000231,
-                "callback_query": {
-                    "id": "cb-srg-owner",
-                    "from": {"id": admin_id, "is_bot": False, "first_name": "مدیر"},
-                    "message": {
-                        "message_id": 1,
-                        "chat": {"id": admin_id, "type": "private"},
-                        "text": "role",
-                    },
-                    "data": srg,
-                },
-            }
-        )
-    )
+    assert "نقش این گروه" not in admin_text
+    assert fake_bale.last_markup(admin_id) is None
 
     for update_id, message_id, user_id, payload in (
         (900024, 24, 778, {"text": "متن عادی گروه مالک"}),
@@ -600,31 +580,7 @@ async def test_group_admin_can_add_then_promote_and_first_plain_text_is_processe
         )
     )
     assert fake_bale.calls_for("leaveChat") == []
-    markup = fake_bale.last_markup(admin_id)
-    assert markup is not None
-    srg = next(
-        btn["callback_data"]
-        for row in markup["inline_keyboard"]
-        for btn in row
-        if "|srg|" in btn.get("callback_data", "")
-    )
-    await dispatcher.dispatch(
-        Update.model_validate(
-            {
-                "update_id": 9000291,
-                "callback_query": {
-                    "id": "cb-srg-promote",
-                    "from": {"id": admin_id, "is_bot": False, "first_name": "مدیر گروه"},
-                    "message": {
-                        "message_id": 1,
-                        "chat": {"id": admin_id, "type": "private"},
-                        "text": "role",
-                    },
-                    "data": srg,
-                },
-            }
-        )
-    )
+    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(admin_id))
 
     fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "administrator")
     fake_bale.set_chat_member_status(chat_id, admin_id, "administrator")
@@ -886,34 +842,10 @@ async def test_research_choice_then_content_opens_wizard(
             }
         )
     )
-    markup = fake_bale.last_markup(111)
-    assert markup is not None
-    srg = next(
-        btn["callback_data"]
-        for row in markup["inline_keyboard"]
-        for btn in row
-        if "|srg|" in btn.get("callback_data", "")
-    )
-    await dispatcher.dispatch(
-        Update.model_validate(
-            {
-                "update_id": 900044,
-                "callback_query": {
-                    "id": "cb-srg",
-                    "from": {"id": 111, "is_bot": False, "first_name": "مدیر"},
-                    "message": {
-                        "message_id": 1,
-                        "chat": {"id": 111, "type": "private"},
-                        "text": "role",
-                    },
-                    "data": srg,
-                },
-            }
-        )
-    )
-    after_choice = "\n".join(fake_bale.sent_texts(111))
-    assert "رصد سوم" in after_choice
-    assert "ادمین" in after_choice
+    texts = "\n".join(fake_bale.sent_texts(111))
+    assert "رصد سوم" in texts
+    assert "نقش این گروه" not in texts
+    assert fake_bale.last_markup(111) is None
     await dispatcher.dispatch(
         Update.model_validate(
             {
@@ -1047,34 +979,9 @@ async def test_almost_all_admins_warns_instead_of_claiming_plain_text_works(
             }
         )
     )
-    markup = fake_bale.last_markup(adder_id)
-    assert markup is not None
-    srg = next(
-        btn["callback_data"]
-        for row in markup["inline_keyboard"]
-        for btn in row
-        if "|srg|" in btn.get("callback_data", "")
-    )
-    await dispatcher.dispatch(
-        Update.model_validate(
-            {
-                "update_id": 900049,
-                "callback_query": {
-                    "id": "cb-srg-all-admins",
-                    "from": {"id": adder_id, "is_bot": False, "first_name": "مدیر گروه"},
-                    "message": {
-                        "message_id": 1,
-                        "chat": {"id": adder_id, "type": "private"},
-                        "text": "role",
-                    },
-                    "data": srg,
-                },
-            }
-        )
-    )
     texts = "\n".join(fake_bale.sent_texts(adder_id))
     assert "تست ربات" in texts
-    assert "نقش این گروه" in texts
+    assert "نقش این گروه" not in texts
     assert "۶" in texts or "۷" in texts
     assert "همه" in texts
     assert "خصوصی" in texts
@@ -1123,6 +1030,8 @@ async def test_my_chat_member_join_asks_research_or_archive(
         )
     )
     texts = "\n".join(fake_bale.sent_texts(adder_id))
-    assert "نقش این گروه" in texts
-    assert fake_bale.last_markup(adder_id) is not None
+    assert "گروه تازه" in texts
+    assert "نقش این گروه" not in texts
+    assert "ارتقا" in texts or "ادمین" in texts
+    assert fake_bale.last_markup(adder_id) is None
     assert fake_bale.calls_for("leaveChat") == []

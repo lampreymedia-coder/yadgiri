@@ -134,8 +134,16 @@ class Application:
             if owner_id is not None:
                 self.ctx.runtime_admin_ids.add(int(owner_id))
             users = UserRepository(session)
+            from app.db.repositories.groups import GroupRepository
+            from app.domain.group_roles import ensure_research_role, is_archive
+
             for admin_user in await users.list_admins():
                 self.ctx.runtime_admin_ids.add(admin_user.bale_user_id)
+            groups = GroupRepository(session)
+            for group in await groups.list_active():
+                if is_archive(group):
+                    continue
+                ensure_research_role(group)
         logger.info(
             "store_ready",
             archive_chat_id=self.ctx.archive_chat_id,

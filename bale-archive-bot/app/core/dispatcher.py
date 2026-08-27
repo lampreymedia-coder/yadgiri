@@ -128,8 +128,23 @@ class Dispatcher:
                 kind=update.kind,
                 data=update.callback_query.data,
             )
+        elif update.my_chat_member is not None or update.chat_member is not None:
+            payload = update.my_chat_member or update.chat_member or {}
+            chat = payload.get("chat") if isinstance(payload, dict) else None
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                chat_id=chat.get("id") if isinstance(chat, dict) else None,
+                extra_keys=sorted(payload.keys()) if isinstance(payload, dict) else [],
+            )
         else:
-            logger.info("update_received", update_id=update.update_id, kind=update.kind)
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                extra_keys=sorted((update.model_extra or {}).keys()),
+            )
 
         async with self.ctx.db.session() as session:
             if not await claim_update(session, update.update_id):
@@ -141,6 +156,22 @@ class Dispatcher:
             await self._on_edited_message(update.edited_message)
         elif update.callback_query is not None:
             await self._on_callback(update.callback_query)
+        elif update.my_chat_member is not None or update.chat_member is not None:
+            await self._on_membership_update(update)
+
+    async def _on_membership_update(self, update: Update) -> None:
+        payload = update.my_chat_member or update.chat_member
+        if not payload:
+            return
+        message = group_intake.membership_event_as_message(payload, self.ctx.bot_user_id)
+        if message is None:
+            logger.info(
+                "membership_update_ignored",
+                update_id=update.update_id,
+                kind=update.kind,
+            )
+            return
+        await group_intake.register_group_events(self.ctx, message)
 
     async def _on_message(self, message: Message) -> None:
         if message.added_members() or message.left_chat_member or message.group_chat_created:

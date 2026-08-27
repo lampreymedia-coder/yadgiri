@@ -58,6 +58,9 @@ ADMIN_ACTIONS = {
     "srb",
 }
 
+# Group admins may answer these without being a global bot admin.
+ROLE_SETUP_ACTIONS = {"sar", "srg", "stg", "srb"}
+
 _PAGE_SIZE = 10
 
 
@@ -748,7 +751,7 @@ async def send_panel(ctx: BotContext, chat_id: int) -> None:
 
 async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: CallbackQuery) -> None:
     data = parse_callback(cq.data or "")
-    if not await is_admin(ctx, session, cq.from_user.id):
+    if data.action not in ROLE_SETUP_ACTIONS and not await is_admin(ctx, session, cq.from_user.id):
         if ctx.caps.has("answerCallbackQuery"):
             try:
                 await ctx.api.answer_callback_query(cq.id, fa.ERR_NOT_YOURS)

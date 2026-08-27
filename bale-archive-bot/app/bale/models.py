@@ -1,7 +1,8 @@
 """Pydantic models for Bale API objects.
 
 Only the update kinds that Bale actually delivers are modelled:
-``message``, ``edited_message`` and ``callback_query``. Unknown extra
+``message``, ``edited_message``, ``callback_query``, and (when present)
+``my_chat_member`` / ``chat_member`` join events. Unknown extra
 fields are kept (``model_config.extra="allow"``) so the raw update stays
 lossless in ``submissions.raw_update`` and undocumented fields such as
 ``media_group_id`` can be probed at runtime.
@@ -245,6 +246,12 @@ class Message(_BaleModel):
         data = dict(value)
         if data.get("file") and not data.get("document"):
             data["document"] = data["file"]
+        members = data.get("new_chat_members")
+        if isinstance(members, dict):
+            data["new_chat_members"] = [members]
+        participant = data.get("new_chat_participant")
+        if participant and not data.get("new_chat_member"):
+            data["new_chat_member"] = participant
         for key in (
             "voice",
             "audio",
@@ -298,6 +305,8 @@ class Update(_BaleModel):
     message: Message | None = None
     edited_message: Message | None = None
     callback_query: CallbackQuery | None = None
+    my_chat_member: dict[str, Any] | None = None
+    chat_member: dict[str, Any] | None = None
 
     @field_validator("update_id", mode="before")
     @classmethod
@@ -325,6 +334,10 @@ class Update(_BaleModel):
             return "edited_message"
         if self.callback_query is not None:
             return "callback_query"
+        if self.my_chat_member is not None:
+            return "my_chat_member"
+        if self.chat_member is not None:
+            return "chat_member"
         return "unknown"
 
     def raw(self) -> dict[str, Any]:

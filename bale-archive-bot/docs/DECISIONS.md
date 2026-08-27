@@ -112,5 +112,8 @@ only join/service events and `@bot` mentions in groups where nearly every
 member is an administrator. When member/admin counts look like that, or when
 Bale delivers an empty group stub, the bot DMs the sender/admin with the
 concrete blocker and the private-first fallback instead of staying silent.
-The dispatcher cannot invent updates Bale never sent.
+The dispatcher cannot invent updates Bale never sent. Join events may
+arrive as ``new_chat_members`` or as ``my_chat_member``; both now open the
+research-vs-archive question for the adder, including group admins who are
+not global bot admins.
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import time
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +81,53 @@ def archive_tag_keyboard(chat_id: int, tags: list[tuple[str, str]]) -> InlineKey
     return keyboard(rows)
 
 
+def _payload_user_id(user: object) -> int | None:
+    if not isinstance(user, dict):
+        return None
+    raw = user.get("id")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.lstrip("-").isdigit():
+        return int(raw)
+    return None
+
+
+def membership_event_as_message(payload: dict[str, Any], bot_user_id: int) -> Message | None:
+    """Turn a ``my_chat_member`` / ``chat_member`` payload into a join/leave message."""
+    chat = payload.get("chat")
+    new_member = payload.get("new_chat_member")
+    if not isinstance(chat, dict) or not isinstance(new_member, dict):
+        return None
+    user = new_member.get("user")
+    if not isinstance(user, dict) or _payload_user_id(user) != bot_user_id:
+        return None
+    status = str(new_member.get("status") or "").lower()
+    old = payload.get("old_chat_member")
+    old_status = ""
+    if isinstance(old, dict):
+        old_status = str(old.get("status") or "").lower()
+    body: dict[str, Any] = {
+        "message_id": 0,
+        "date": payload.get("date") or 0,
+        "chat": chat,
+        "from": payload.get("from"),
+    }
+    if status in {"left", "kicked"}:
+        body["left_chat_member"] = user
+    elif status in {"member", "administrator", "creator", "restricted"}:
+        if old_status in {"administrator", "creator"} and status == "member":
+            return None
+        body["new_chat_member"] = user
+    else:
+        return None
+    try:
+        return Message.model_validate(body)
+    except (ValueError, TypeError):
+        return None
+
+
 async def ask_role_privately(
     ctx: BotContext,
     session: AsyncSession,
@@ -131,8 +179,13 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
         if message.from_user is not None:
             await promote_first_owner(ctx, session, message.from_user)
         user_id = message.from_user.id if message.from_user is not None else None
-        if user_id is None or not await is_admin(ctx, session, user_id):
+        if user_id is None:
             return
+        app_admin = await is_admin(ctx, session, user_id)
+        if not app_admin:
+            status = await _chat_member_status(ctx, message.chat.id, user_id)
+            if status not in {"administrator", "creator"}:
+                return
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
         role = group_role(group)
         if role == ROLE_RESEARCH:
@@ -326,6 +379,9 @@ async def handle_withheld_group_content(ctx: BotContext, message: Message) -> No
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
         if group.title != title:
             group.title = title
+        if needs_role(group):
+            await ask_role_privately(ctx, session, group, user_id, title, force=True)
+            return
         await send_research_ready_notice(
             ctx,
             session,
@@ -368,7 +424,6 @@ async def _activate_pending_group(
     from app.handlers.admin import (
         delete_group_prompt,
         is_admin,
-        persist_research_chat,
         promote_first_owner,
     )
 
@@ -383,14 +438,11 @@ async def _activate_pending_group(
     patch_settings(group, pending_admin=False, pending_adder_id=None)
     await delete_group_prompt(ctx.api, group)
     title = group.title or fa.fa_digits(group.bale_chat_id)
-    if not app_admin and needs_role(group):
-        group = await persist_research_chat(session, group.bale_chat_id, title=group.title)
-        await send_research_ready_notice(
-            ctx, session, group, adder_id, fa.research_admin_setup_done(title)
-        )
-    elif app_admin and needs_role(group):
-        await ask_role_privately(ctx, session, group, adder_id, title, force=True)
-        return False
+    if needs_role(group):
+        if not role_already_asked(group):
+            await ask_role_privately(ctx, session, group, adder_id, title, force=True)
+            return False
+        return True
     logger.info("pending_group_activated", chat_id=group.bale_chat_id, adder_id=adder_id)
     return True
 
@@ -403,6 +455,10 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
     async with ctx.db.session() as session:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
+        if group.settings.get("pending_admin"):
+            await _activate_pending_group(ctx, session, group)
+            if not group.settings.get("pending_admin"):
+                return
         bot_joined = message.group_chat_created or any(
             member.id == ctx.bot_user_id for member in members
         )
@@ -413,22 +469,33 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         if not bot_joined:
             return
         logger.info("bot_added_to_group", chat_id=message.chat.id)
-        from app.handlers.admin import is_admin, promote_first_owner
+        from app.handlers.admin import promote_first_owner
 
         adder_id = message.from_user.id if message.from_user is not None else None
         bot_status = await _chat_member_status(ctx, message.chat.id, ctx.bot_user_id)
         if bot_status not in {"administrator", "creator"}:
             await _wait_for_admin_promotion(ctx, session, message, group)
-            if adder_id is not None and await is_admin(ctx, session, adder_id):
+            if adder_id is not None:
                 title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
                 role = group_role(group)
                 if role == ROLE_RESEARCH:
-                    await ctx.api.send_message(
-                        adder_id, fa.research_need_admin(title, ctx.bot_username)
+                    await send_research_ready_notice(
+                        ctx,
+                        session,
+                        group,
+                        adder_id,
+                        fa.research_need_admin(title, ctx.bot_username),
                     )
                 elif role == ROLE_ARCHIVE:
-                    await ctx.api.send_message(adder_id, fa.archive_already_set(title))
-                else:
+                    try:
+                        await ctx.api.send_message(adder_id, fa.archive_already_set(title))
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.warning(
+                            "archive_pending_dm_failed",
+                            chat_id=message.chat.id,
+                            error=str(exc),
+                        )
+                elif needs_role(group):
                     await ask_role_privately(ctx, session, group, adder_id, title, force=True)
             return
         adder_status = (
@@ -442,18 +509,10 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
             return
         if message.from_user is not None:
             await promote_first_owner(ctx, session, message.from_user)
-        app_admin = adder_id is not None and await is_admin(ctx, session, adder_id)
         await groups.set_active(group.id, True)
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
-        if not app_admin:
-            from app.handlers.admin import persist_research_chat
-
-            group = await persist_research_chat(
-                session, message.chat.id, title=message.chat.title or group.title
-            )
-            await send_research_ready_notice(
-                ctx, session, group, adder_id, fa.research_admin_setup_done(title)
-            )
+        if needs_role(group):
+            await ask_role_privately(ctx, session, group, adder_id, title, force=True)
             return
         role = group_role(group)
         if role == ROLE_RESEARCH:
@@ -580,7 +639,13 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
                 await promote_first_owner(ctx, session, primary.from_user)
             user_id = primary.from_user.id if primary.from_user is not None else None
             title = primary.chat.title or group.title or fa.fa_digits(primary.chat.id)
-            if user_id is not None and await is_admin(ctx, session, user_id):
+            can_ask = False
+            if user_id is not None:
+                can_ask = await is_admin(ctx, session, user_id)
+                if not can_ask:
+                    status = await _chat_member_status(ctx, primary.chat.id, user_id)
+                    can_ask = status in {"administrator", "creator"}
+            if can_ask:
                 await ask_role_privately(ctx, session, group, user_id, title)
 
         if primary.from_user is None:

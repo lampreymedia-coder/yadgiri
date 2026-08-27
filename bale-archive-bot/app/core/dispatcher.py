@@ -111,6 +111,16 @@ class Dispatcher:
                 has_document=message.document is not None,
                 has_video_note=message.video_note is not None,
             )
+            extra = message.model_extra or {}
+            if message.is_group_message and not (message.text or message.caption):
+                logger.info(
+                    "group_update_without_text",
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    extra_keys=sorted(extra.keys()),
+                    raw_keys=sorted(message.raw().keys()),
+                )
         elif update.callback_query is not None:
             logger.info(
                 "update_received",
@@ -201,9 +211,10 @@ class Dispatcher:
         if command is not None:
             await self._on_command(message, command[0], command[1])
             return
-        message = group_intake.strip_leading_bot_mention(
-            message, self.ctx.bot_username
-        )
+        message = group_intake.strip_leading_bot_mention(message, self.ctx.bot_username)
+        if group_intake.looks_like_withheld_content(message):
+            await group_intake.handle_withheld_group_content(self.ctx, message)
+            return
         if group_intake._should_ignore(self.ctx, message):
             return
         await self.albums.add(message)

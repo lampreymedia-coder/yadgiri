@@ -7,6 +7,9 @@ group; bot prompts there are deleted as soon as the private flow continues.
 
 from __future__ import annotations
 
+import contextlib
+import time
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bale.errors import BaleAPIError, NetworkError
@@ -19,6 +22,7 @@ from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.users import UserRepository
 from app.domain.classify import ClassifiedContent, classify
+from app.domain.delivery import inspect_research_delivery
 from app.domain.group_roles import (
     ROLE_ARCHIVE,
     ROLE_RESEARCH,
@@ -33,6 +37,8 @@ from app.i18n import fa
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+_DELIVERY_NOTICE_COOLDOWN_SECONDS = 20 * 60
 
 
 def strip_leading_bot_mention(message: Message, bot_username: str | None) -> Message:
@@ -129,17 +135,16 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
             return
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
         role = group_role(group)
-        try:
-            if role == ROLE_RESEARCH:
-                await ctx.api.send_message(
-                    user_id, fa.research_need_admin(title, ctx.bot_username)
-                )
-                return
-            if role == ROLE_ARCHIVE:
+        if role == ROLE_RESEARCH:
+            await send_research_ready_notice(
+                ctx, session, group, user_id, fa.research_need_admin(title, ctx.bot_username)
+            )
+            return
+        if role == ROLE_ARCHIVE:
+            try:
                 await ctx.api.send_message(user_id, fa.archive_already_set(title))
-                return
-        except (BaleAPIError, NetworkError) as exc:
-            logger.info("group_hello_dm_failed", error=str(exc))
+            except (BaleAPIError, NetworkError) as exc:
+                logger.info("group_hello_dm_failed", error=str(exc))
             return
         await ask_role_privately(ctx, session, group, user_id, title, force=True)
 
@@ -236,6 +241,101 @@ async def _wait_for_admin_promotion(
     logger.info("bot_waiting_for_admin", chat_id=message.chat.id, adder_id=adder_id)
 
 
+def looks_like_withheld_content(message: Message) -> bool:
+    """True when Bale sent a group stub with no text, media, or service payload."""
+    if not message.is_group_message:
+        return False
+    if message.added_members() or message.left_chat_member or message.group_chat_created:
+        return False
+    if _is_service_message(message):
+        return False
+    return not _has_user_content(message)
+
+
+async def send_research_ready_notice(
+    ctx: BotContext,
+    session: AsyncSession,
+    group: Group,
+    user_id: int | None,
+    fallback: str,
+    *,
+    withheld: bool = False,
+) -> bool:
+    """DM the user: either the optimistic ready text, or why Bale is silent."""
+    if user_id is None:
+        return False
+    report = await inspect_research_delivery(ctx.api, group.bale_chat_id, ctx.bot_user_id)
+    explain = withheld or report.at_risk
+    if explain:
+        last_at = 0.0
+        last = group.settings.get("delivery_notice_at")
+        if last is not None:
+            with contextlib.suppress(TypeError, ValueError):
+                last_at = float(str(last))
+        now = time.time()
+        if last_at and now - last_at < _DELIVERY_NOTICE_COOLDOWN_SECONDS:
+            return False
+        text = fa.research_delivery_gap(
+            group.title or fa.fa_digits(group.bale_chat_id),
+            member_count=report.member_count,
+            admin_count=report.admin_count,
+            bot_is_admin=report.bot_is_admin,
+            almost_all_admins=report.almost_all_admins,
+            withheld=withheld,
+        )
+    else:
+        text = fallback
+    try:
+        await ctx.api.send_message(user_id, text)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning(
+            "research_ready_notice_failed",
+            chat_id=group.bale_chat_id,
+            user_id=user_id,
+            error=str(exc),
+        )
+        return False
+    if explain:
+        patch_settings(group, delivery_notice_at=time.time())
+    return True
+
+
+async def handle_withheld_group_content(ctx: BotContext, message: Message) -> None:
+    """When Bale delivers an empty stub, tell the sender instead of staying silent."""
+    extra = message.model_extra or {}
+    logger.info(
+        "group_update_without_text",
+        chat_id=message.chat.id,
+        message_id=message.message_id,
+        from_id=message.from_user.id if message.from_user else None,
+        extra_keys=sorted(extra.keys()),
+        raw_keys=sorted(message.raw().keys()),
+    )
+    user_id = message.from_user.id if message.from_user is not None else None
+    if user_id is None:
+        return
+    async with ctx.db.session() as session:
+        groups = GroupRepository(session)
+        group = await groups.get_by_bale_id(message.chat.id)
+        if group is None:
+            group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
+        if group.settings.get("pending_admin"):
+            return
+        if is_archive_destination(group, ctx.archive_chat_id) or group_role(group) == ROLE_ARCHIVE:
+            return
+        title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+        if group.title != title:
+            group.title = title
+        await send_research_ready_notice(
+            ctx,
+            session,
+            group,
+            user_id,
+            fa.research_admin_setup_done(title),
+            withheld=True,
+        )
+
+
 async def _activate_pending_group(
     ctx: BotContext,
     session: AsyncSession,
@@ -284,15 +384,10 @@ async def _activate_pending_group(
     await delete_group_prompt(ctx.api, group)
     title = group.title or fa.fa_digits(group.bale_chat_id)
     if not app_admin and needs_role(group):
-        await persist_research_chat(session, group.bale_chat_id, title=group.title)
-        try:
-            await ctx.api.send_message(adder_id, fa.research_admin_setup_done(title))
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning(
-                "pending_research_setup_dm_failed",
-                chat_id=group.bale_chat_id,
-                error=str(exc),
-            )
+        group = await persist_research_chat(session, group.bale_chat_id, title=group.title)
+        await send_research_ready_notice(
+            ctx, session, group, adder_id, fa.research_admin_setup_done(title)
+        )
     elif app_admin and needs_role(group):
         await ask_role_privately(ctx, session, group, adder_id, title, force=True)
         return False
@@ -334,9 +429,7 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
                 elif role == ROLE_ARCHIVE:
                     await ctx.api.send_message(adder_id, fa.archive_already_set(title))
                 else:
-                    await ask_role_privately(
-                        ctx, session, group, adder_id, title, force=True
-                    )
+                    await ask_role_privately(ctx, session, group, adder_id, title, force=True)
             return
         adder_status = (
             await _chat_member_status(ctx, message.chat.id, adder_id)
@@ -355,36 +448,24 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         if not app_admin:
             from app.handlers.admin import persist_research_chat
 
-            await persist_research_chat(
+            group = await persist_research_chat(
                 session, message.chat.id, title=message.chat.title or group.title
             )
-            try:
-                await ctx.api.send_message(adder_id, fa.research_admin_setup_done(title))
-            except (BaleAPIError, NetworkError) as exc:
-                logger.warning(
-                    "research_admin_setup_dm_failed",
-                    chat_id=message.chat.id,
-                    error=str(exc),
-                )
+            await send_research_ready_notice(
+                ctx, session, group, adder_id, fa.research_admin_setup_done(title)
+            )
             return
         role = group_role(group)
         if role == ROLE_RESEARCH:
-            try:
-                await ctx.api.send_message(
-                    adder_id, fa.research_rejoined(title, ctx.bot_username)
-                )
-            except (BaleAPIError, NetworkError) as exc:
-                logger.warning(
-                    "research_rejoin_dm_failed", chat_id=message.chat.id, error=str(exc)
-                )
+            await send_research_ready_notice(
+                ctx, session, group, adder_id, fa.research_rejoined(title, ctx.bot_username)
+            )
             return
         if role == ROLE_ARCHIVE:
             try:
                 await ctx.api.send_message(adder_id, fa.archive_already_set(title))
             except (BaleAPIError, NetworkError) as exc:
-                logger.warning(
-                    "archive_rejoin_dm_failed", chat_id=message.chat.id, error=str(exc)
-                )
+                logger.warning("archive_rejoin_dm_failed", chat_id=message.chat.id, error=str(exc))
             return
         await ask_role_privately(ctx, session, group, adder_id, title)
 
@@ -468,6 +549,8 @@ def _should_ignore(ctx: BotContext, message: Message) -> bool:
     if classified.content_type is ContentType.STICKER:
         return True
     if _is_gif(classified):
+        return True
+    if not _has_user_content(message):
         return True
     return classified.content_type is ContentType.TEXT and not (message.text or "").strip()
 

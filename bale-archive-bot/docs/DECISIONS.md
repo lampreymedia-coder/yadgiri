@@ -104,3 +104,13 @@ No Docker, Redis, Caddy, or cloud object storage. Media is written under
 behind `STORAGE_BACKEND=s3`). The process is an NSSM Windows service.
 `PYTHONUTF8=1` and `tzdata` keep Persian text and Jalali dates correct.
 
+## D-16: Bale may withhold ordinary research-group messages
+The Bot HTTP API does not expose `can_read_all_group_messages` or group
+privacy. Live polling shows that an admin bot still receives ordinary texts
+and forwards in groups that keep regular members (e.g. cyber Economy), but
+only join/service events and `@bot` mentions in groups where nearly every
+member is an administrator. When member/admin counts look like that, or when
+Bale delivers an empty group stub, the bot DMs the sender/admin with the
+concrete blocker and the private-first fallback instead of staying silent.
+The dispatcher cannot invent updates Bale never sent.
+

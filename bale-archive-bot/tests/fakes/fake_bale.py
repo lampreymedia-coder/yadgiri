@@ -38,6 +38,7 @@ class FakeBaleServer:
     fail_methods: dict[str, dict[str, Any]] = field(default_factory=dict)
     forbidden_private_chats: set[int] = field(default_factory=set)
     chat_member_statuses: dict[tuple[int, int], str] = field(default_factory=dict)
+    member_counts: dict[int, int] = field(default_factory=dict)
     _message_seq: itertools.count[int] = field(default_factory=lambda: itertools.count(1000))
 
     last_request: httpx.Request | None = None
@@ -274,7 +275,15 @@ class FakeBaleServer:
                 "title": f"chat-{chat_id}",
             }
         if method == "getChatMembersCount":
-            return 5
+            chat_id = int(params.get("chat_id", 0))
+            if chat_id in self.member_counts:
+                return self.member_counts[chat_id]
+            known = {
+                user_id
+                for (stored_chat_id, user_id) in self.chat_member_statuses
+                if stored_chat_id == chat_id
+            }
+            return max(len(known), 5)
         if method == "answerCallbackQuery":
             return True
         if method in (

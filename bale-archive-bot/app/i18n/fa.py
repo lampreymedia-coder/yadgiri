@@ -549,6 +549,43 @@ def research_rejoined(group_title: str, bot_username: str | None = None) -> str:
     )
 
 
+def research_delivery_gap(
+    group_title: str,
+    *,
+    member_count: int,
+    admin_count: int,
+    bot_is_admin: bool,
+    almost_all_admins: bool,
+    withheld: bool,
+) -> str:
+    """Explain why the hashtag question did not arrive for a research group."""
+    parts = [f"گروه «{group_title}»."]
+    if withheld:
+        parts.append(
+            "بله متن عادی این گروه را برای ربات نفرستاد؛ " "برای همین سؤال هشتگ در خصوصی نیامد."
+        )
+    if not bot_is_admin:
+        parts.append("بازو هنوز مدیر گروه نیست. از فهرست اعضا آن را به مدیر (ادمین) ارتقا دهید.")
+    if almost_all_admins:
+        parts.append(
+            f"الان {fa_digits(admin_count)} مدیر از {fa_digits(member_count)} عضو "
+            "در این گروه هستند. در بله وقتی تقریباً همه مدیر باشند، "
+            "بازو پیام عادی و فوروارد را نمی‌گیرد."
+        )
+        parts.append(
+            "تنظیم «همه اعضا مدیر هستند» را خاموش کنید و چند نفر را "
+            "از مدیر بودن درآورید تا حداقل دو عضو عادی بماند."
+        )
+    parts.append(
+        "اگر سازنده گروه ربات را مسدود کرده، تا رفع مسدود، پیام گروه به بازو نمی‌رسد. "
+        "یک گروه رصد تازه بسازید که خودتان سازنده‌اش باشید و همه را مدیر نکنید."
+    )
+    parts.append(
+        "تا آن وقت همان محتوا را همین‌جا در خصوصی برای ربات بفرستید " "و گروه رصد را انتخاب کنید."
+    )
+    return "\n\n".join(parts)
+
+
 ARCHIVE_SET_DONE = "این گروه به‌عنوان آرشیو خصوصی ثبت شد."
 ARCHIVE_SET_NEED_PRIVATE = (
     "اول در پیام خصوصی ربات /start را بزنید تا مدیر شوید، بعد دوباره /archive را بفرستید."

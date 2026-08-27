@@ -85,6 +85,24 @@ def test_research_copy_requires_admin() -> None:
     assert "رصد تازه" in fa.admin_unauthorized_add("رصد تازه", "علی")
 
 
+def test_research_delivery_gap_explains_all_admins_and_private_fallback() -> None:
+    text = fa.research_delivery_gap(
+        "تست ربات",
+        member_count=7,
+        admin_count=6,
+        bot_is_admin=True,
+        almost_all_admins=True,
+        withheld=True,
+    )
+    assert "تست ربات" in text
+    assert "نفرستاد" in text
+    assert "۶" in text
+    assert "۷" in text
+    assert "همه" in text
+    assert "خصوصی" in text
+    assert "سازنده" in text
+
+
 def test_missing_archive_howto_tells_admin_to_rebind() -> None:
     text = fa.missing_archive_howto(["#محتوایی"])
     assert "#محتوایی" in text

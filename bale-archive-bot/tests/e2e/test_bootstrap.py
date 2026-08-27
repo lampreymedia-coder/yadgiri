@@ -924,9 +924,83 @@ async def test_mention_with_content_opens_wizard_without_archiving_mention(
     assert fake_bale.last_markup(12346) is not None
     async with ctx.db.session() as session:
         submission = (
-            await session.execute(
-                select(Submission).where(Submission.original_message_id == 46)
-            )
+            await session.execute(select(Submission).where(Submission.original_message_id == 46))
         ).scalar_one()
         assert submission.text_content == "متن مسیر جایگزین"
         assert fake_bale.bot_username not in submission.text_content
+
+
+async def test_empty_group_stub_notifies_sender_when_bale_withholds_text(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    from app.handlers.admin import persist_research_chat
+
+    chat_id = -100200910
+    sender_id = 4242
+    async with ctx.db.session() as session:
+        await persist_research_chat(session, chat_id, title="تست ربات")
+    fake_bale.member_counts[chat_id] = 7
+    fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "administrator")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900047,
+                "message": {
+                    "message_id": 0,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "تست ربات"},
+                    "from": {
+                        "id": sender_id,
+                        "is_bot": False,
+                        "first_name": "فاطمه",
+                    },
+                },
+            }
+        )
+    )
+    texts = "\n".join(fake_bale.sent_texts(sender_id))
+    assert "تست ربات" in texts
+    assert "نفرستاد" in texts
+    assert fake_bale.last_markup(sender_id) is None
+
+
+async def test_almost_all_admins_warns_instead_of_claiming_plain_text_works(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    chat_id = -100200911
+    adder_id = 7777
+    fake_bale.member_counts[chat_id] = 7
+    fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "administrator")
+    fake_bale.set_chat_member_status(chat_id, adder_id, "administrator")
+    for extra_admin in (11, 12, 13, 14):
+        fake_bale.set_chat_member_status(chat_id, extra_admin, "administrator")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900048,
+                "message": {
+                    "message_id": 48,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "تست ربات"},
+                    "from": {
+                        "id": adder_id,
+                        "is_bot": False,
+                        "first_name": "مدیر گروه",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    texts = "\n".join(fake_bale.sent_texts(adder_id))
+    assert "تست ربات" in texts
+    assert "۶" in texts or "۷" in texts
+    assert "همه" in texts
+    assert "خصوصی" in texts
+    assert "بدون منشن، سؤال هشتگ را در خصوصی فرستنده باز می‌کند" not in texts

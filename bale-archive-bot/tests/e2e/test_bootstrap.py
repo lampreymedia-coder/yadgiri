@@ -324,7 +324,7 @@ async def test_admin_add_keeps_bot_and_asks_role(
     assert "ادمین" in "\n".join(fake_bale.sent_texts(111))
 
 
-async def test_non_owner_admin_readd_is_rejected_to_avoid_silent_message_filtering(
+async def test_non_owner_group_admin_can_add_and_choose_role(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     ctx.bot_user_id = fake_bale.bot_id
@@ -354,13 +354,46 @@ async def test_non_owner_admin_readd_is_rejected_to_avoid_silent_message_filteri
             }
         )
     )
-    assert fake_bale.calls_for("leaveChat")
+    assert fake_bale.calls_for("leaveChat") == []
     text = "\n".join(fake_bale.sent_texts(111))
-    assert "مالک گروه" in text
-    assert "همه پیام" in text
+    assert "نقش این گروه" in text
+    assert "مالک‌بودن" not in text
 
 
-async def test_group_owner_add_auto_registers_research_and_accepts_ordinary_forward(
+async def test_bot_admin_who_is_not_group_admin_cannot_add(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    chat_id = -100200404
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900028,
+                "message": {
+                    "message_id": 28,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "بدون مدیر گروه"},
+                    "from": {
+                        "id": 111,
+                        "is_bot": False,
+                        "first_name": "مدیر ربات",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat")
+    assert "نقش این گروه" not in "\n".join(fake_bale.sent_texts(111))
+
+
+async def test_group_admin_add_auto_registers_research_and_accepts_ordinary_forward(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     import asyncio
@@ -372,8 +405,8 @@ async def test_group_owner_add_auto_registers_research_and_accepts_ordinary_forw
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
     chat_id = -100200401
-    owner_id = 777
-    fake_bale.set_chat_member_status(chat_id, owner_id, "creator")
+    admin_id = 777
+    fake_bale.set_chat_member_status(chat_id, admin_id, "administrator")
     dispatcher = Dispatcher(ctx)
     await dispatcher.dispatch(
         Update.model_validate(
@@ -384,9 +417,9 @@ async def test_group_owner_add_auto_registers_research_and_accepts_ordinary_forw
                     "date": 1,
                     "chat": {"id": chat_id, "type": "group", "title": "رصد مالک"},
                     "from": {
-                        "id": owner_id,
+                        "id": admin_id,
                         "is_bot": False,
-                        "first_name": "مالک",
+                        "first_name": "مدیر",
                     },
                     "new_chat_member": {
                         "id": fake_bale.bot_id,
@@ -398,9 +431,9 @@ async def test_group_owner_add_auto_registers_research_and_accepts_ordinary_forw
         )
     )
     assert fake_bale.calls_for("leaveChat") == []
-    owner_text = "\n".join(fake_bale.sent_texts(owner_id))
-    assert "رصد فعال شد" in owner_text
-    assert "بدون منشن" in owner_text
+    admin_text = "\n".join(fake_bale.sent_texts(admin_id))
+    assert "رصد فعال شد" in admin_text
+    assert "بدون منشن" in admin_text
 
     for update_id, message_id, user_id, payload in (
         (900024, 24, 778, {"text": "متن عادی گروه مالک"}),

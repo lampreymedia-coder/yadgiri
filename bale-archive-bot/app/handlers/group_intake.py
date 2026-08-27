@@ -246,40 +246,36 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         logger.info("bot_added_to_group", chat_id=message.chat.id)
         from app.handlers.admin import is_admin, promote_first_owner
 
-        if message.from_user is not None:
-            await promote_first_owner(ctx, session, message.from_user)
         adder_id = message.from_user.id if message.from_user is not None else None
         bot_status = await _chat_member_status(ctx, message.chat.id, ctx.bot_user_id)
         if bot_status not in {"administrator", "creator"}:
             await _leave_without_message_access(ctx, session, message, group)
             return
-        app_admin = adder_id is not None and await is_admin(ctx, session, adder_id)
         adder_status = (
             await _chat_member_status(ctx, message.chat.id, adder_id)
             if adder_id is not None
             else None
         )
         group_admin = adder_status in {"administrator", "creator"}
-        allowed = app_admin or group_admin
-        if not allowed:
+        if not group_admin:
             await _leave_unauthorized_group(ctx, session, message, group)
             return
-        if adder_status != "creator":
-            await _leave_without_message_access(ctx, session, message, group)
-            return
+        if message.from_user is not None:
+            await promote_first_owner(ctx, session, message.from_user)
+        app_admin = adder_id is not None and await is_admin(ctx, session, adder_id)
         await groups.set_active(group.id, True)
         title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
-        if not app_admin and group_admin:
+        if not app_admin:
             from app.handlers.admin import persist_research_chat
 
             await persist_research_chat(
                 session, message.chat.id, title=message.chat.title or group.title
             )
             try:
-                await ctx.api.send_message(adder_id, fa.research_owner_setup_done(title))
+                await ctx.api.send_message(adder_id, fa.research_admin_setup_done(title))
             except (BaleAPIError, NetworkError) as exc:
                 logger.warning(
-                    "research_owner_setup_dm_failed",
+                    "research_admin_setup_dm_failed",
                     chat_id=message.chat.id,
                     error=str(exc),
                 )

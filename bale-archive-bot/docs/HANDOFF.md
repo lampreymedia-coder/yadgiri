@@ -137,7 +137,7 @@ archive_chat:network_source  = 4738899236
 1. گروه «همه اعضا مدیر» / تقریباً همه مدیر → بله مثل Privacy Mode تلگرام فقط command/mention/service می‌دهد؛ ادمین‌کردن بازو در این گروه کافی نیست
 2. سازنده گروه ربات را بلاک کرده → تحویل پیام گروه قطع می‌شود
 3. فقط وقتی **سازنده** بازو را اضافه/ادمین کند، متن عادی می‌رسد (cyber Economy این‌طور است)
-4. تنظیم حریم خصوصی BotFather بله اگر وجود داشته باشد (مستند رسمی HTTP معادل `/setprivacy` ندارد؛ `getMe` هم فلگ ندارد)
+4. تنظیم حریم خصوصی BotFather بله اگر وجود داشته باشد (مستند رسمی HTTP معادل `/setprivacy` ندارد؛ `getMe` هم فلگ ندارد). راهنمای گام‌به‌گام: `docs/BOTFATHER.md`
 
 کد **نمی‌تواند** پیام‌هایی را که بله نفرستاده اختراع کند. `getChatHistory` در فهرست متدهای تأییدشده نیست.
 
@@ -333,6 +333,7 @@ app/bale/models.py          pydantic Update/Message (extra=allow)
 app/db/models.py            ORM
 alembic/                    اسکیما Postgres
 docs/DECISIONS.md           D-01 … D-16
+docs/BOTFATHER.md           دستورهای @BotFather بله (حریم خصوصی + منو)
 docs/DEPLOY_WINDOWS.md      NSSM
 docs/ADMIN_GUIDE.md         راهنمای فارسی ادمین
 docs/RUNBOOK.md             عملیات ویندوز

@@ -118,6 +118,8 @@ async def handle_group_hello(ctx: BotContext, message: Message) -> None:
         groups = GroupRepository(session)
         group = await groups.upsert(message.chat.id, message.chat.title, message.chat.type)
         await groups.set_active(group.id, True)
+        if not await _activate_pending_group(ctx, session, group):
+            return
         from app.handlers.admin import is_admin, promote_first_owner
 
         if message.from_user is not None:
@@ -192,7 +194,7 @@ async def _chat_member_status(ctx: BotContext, chat_id: int, user_id: int) -> st
     return str(status).lower() if status is not None else None
 
 
-async def _leave_without_message_access(
+async def _wait_for_admin_promotion(
     ctx: BotContext,
     session: AsyncSession,
     message: Message,
@@ -200,30 +202,102 @@ async def _leave_without_message_access(
 ) -> None:
     groups = GroupRepository(session)
     title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
-    notice = fa.bot_join_needs_direct_admin(title)
+    adder_id = message.from_user.id if message.from_user is not None else None
+    patch_settings(group, pending_admin=True, pending_adder_id=adder_id)
+    await groups.set_active(group.id, True)
+    notice = fa.bot_join_waiting_for_admin(title)
+    dm_sent = False
+    if adder_id is not None:
+        try:
+            await ctx.api.send_message(adder_id, notice)
+            dm_sent = True
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning(
+                "pending_admin_private_notice_failed",
+                chat_id=adder_id,
+                error=str(exc),
+            )
+    if dm_sent:
+        logger.info("bot_waiting_for_admin", chat_id=message.chat.id, adder_id=adder_id)
+        return
     try:
-        await ctx.api.send_message(message.chat.id, notice, is_group=True)
+        sent = await ctx.api.send_message(message.chat.id, notice, is_group=True)
+        patch_settings(
+            group,
+            prompt_chat_id=message.chat.id,
+            prompt_message_id=sent.message_id,
+        )
     except (BaleAPIError, NetworkError) as exc:
         logger.warning(
-            "missing_access_group_notice_failed",
+            "pending_admin_group_notice_failed",
             chat_id=message.chat.id,
             error=str(exc),
         )
-    if message.from_user is not None:
+    logger.info("bot_waiting_for_admin", chat_id=message.chat.id, adder_id=adder_id)
+
+
+async def _activate_pending_group(
+    ctx: BotContext,
+    session: AsyncSession,
+    group: Group,
+) -> bool:
+    """Validate the adder after promotion. Return whether content may proceed."""
+    if not group.settings.get("pending_admin"):
+        return True
+    bot_status = await _chat_member_status(ctx, group.bale_chat_id, ctx.bot_user_id)
+    if bot_status not in {"administrator", "creator"}:
+        return False
+    raw_adder_id = group.settings.get("pending_adder_id")
+    try:
+        adder_id = int(raw_adder_id)
+    except (TypeError, ValueError):
+        return False
+    adder_status = await _chat_member_status(ctx, group.bale_chat_id, adder_id)
+    if adder_status not in {"administrator", "creator"}:
         try:
-            await ctx.api.send_message(message.from_user.id, notice)
+            await ctx.api.leave_chat(group.bale_chat_id)
         except (BaleAPIError, NetworkError) as exc:
             logger.warning(
-                "missing_access_private_notice_failed",
-                chat_id=message.from_user.id,
+                "unauthorized_pending_leave_failed",
+                chat_id=group.bale_chat_id,
                 error=str(exc),
             )
-    try:
-        await ctx.api.leave_chat(message.chat.id)
-    except (BaleAPIError, NetworkError) as exc:
-        logger.warning("missing_access_leave_failed", chat_id=message.chat.id, error=str(exc))
-    await groups.set_active(group.id, False)
-    logger.info("bot_left_without_message_access", chat_id=message.chat.id)
+        await GroupRepository(session).set_active(group.id, False)
+        return False
+
+    from app.handlers.admin import (
+        delete_group_prompt,
+        is_admin,
+        persist_research_chat,
+        promote_first_owner,
+    )
+
+    app_admin = await is_admin(ctx, session, adder_id)
+    if not app_admin:
+        member = await ctx.api.get_chat_member(group.bale_chat_id, adder_id)
+        user_data = member.get("user") or {}
+        from app.bale.models import User
+
+        await promote_first_owner(ctx, session, User.model_validate(user_data))
+        app_admin = await is_admin(ctx, session, adder_id)
+    patch_settings(group, pending_admin=False, pending_adder_id=None)
+    await delete_group_prompt(ctx.api, group)
+    title = group.title or fa.fa_digits(group.bale_chat_id)
+    if not app_admin and needs_role(group):
+        await persist_research_chat(session, group.bale_chat_id, title=group.title)
+        try:
+            await ctx.api.send_message(adder_id, fa.research_admin_setup_done(title))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning(
+                "pending_research_setup_dm_failed",
+                chat_id=group.bale_chat_id,
+                error=str(exc),
+            )
+    elif app_admin and needs_role(group):
+        await ask_role_privately(ctx, session, group, adder_id, title, force=True)
+        return False
+    logger.info("pending_group_activated", chat_id=group.bale_chat_id, adder_id=adder_id)
+    return True
 
 
 async def register_group_events(ctx: BotContext, message: Message) -> None:
@@ -249,7 +323,20 @@ async def register_group_events(ctx: BotContext, message: Message) -> None:
         adder_id = message.from_user.id if message.from_user is not None else None
         bot_status = await _chat_member_status(ctx, message.chat.id, ctx.bot_user_id)
         if bot_status not in {"administrator", "creator"}:
-            await _leave_without_message_access(ctx, session, message, group)
+            await _wait_for_admin_promotion(ctx, session, message, group)
+            if adder_id is not None and await is_admin(ctx, session, adder_id):
+                title = message.chat.title or group.title or fa.fa_digits(message.chat.id)
+                role = group_role(group)
+                if role == ROLE_RESEARCH:
+                    await ctx.api.send_message(
+                        adder_id, fa.research_need_admin(title, ctx.bot_username)
+                    )
+                elif role == ROLE_ARCHIVE:
+                    await ctx.api.send_message(adder_id, fa.archive_already_set(title))
+                else:
+                    await ask_role_privately(
+                        ctx, session, group, adder_id, title, force=True
+                    )
             return
         adder_status = (
             await _chat_member_status(ctx, message.chat.id, adder_id)
@@ -397,6 +484,8 @@ async def process_group_batch(ctx: BotContext, messages: list[Message]) -> None:
         groups = GroupRepository(session)
         group = await groups.upsert(primary.chat.id, primary.chat.title, primary.chat.type)
         await groups.set_active(group.id, True)
+        if not await _activate_pending_group(ctx, session, group):
+            return
 
         if is_archive_destination(group, ctx.archive_chat_id):
             return

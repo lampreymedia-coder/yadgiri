@@ -497,9 +497,11 @@ async def test_group_admin_add_auto_registers_research_and_accepts_ordinary_forw
         assert [item.is_forwarded for item in submissions] == [False, True]
 
 
-async def test_bot_added_without_admin_access_leaves_for_clean_readd(
+async def test_bot_added_as_member_waits_for_admin_promotion_without_leaving(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
+    from app.db.repositories.groups import GroupRepository
+
     ctx.bot_user_id = fake_bale.bot_id
     ctx.runtime_admin_ids = {111}
     chat_id = -100200402
@@ -527,10 +529,81 @@ async def test_bot_added_without_admin_access_leaves_for_clean_readd(
             }
         )
     )
-    assert fake_bale.calls_for("leaveChat")
+    assert fake_bale.calls_for("leaveChat") == []
     texts = "\n".join(fake_bale.sent_texts(111))
-    assert "دسترسی دریافت همه پیام" in texts
-    assert "افزودن مدیر" in texts
+    assert "خارج نمی‌شود" in texts
+    assert "ارتقا" in texts
+    async with ctx.db.session() as session:
+        group = await GroupRepository(session).get_by_bale_id(chat_id)
+        assert group is not None
+        assert group.is_active is True
+        assert group.settings.get("pending_admin") is True
+
+
+async def test_group_admin_can_add_then_promote_and_first_plain_text_is_processed(
+    ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    import asyncio
+
+    from app.db.repositories.groups import GroupRepository
+
+    ctx.bot_user_id = fake_bale.bot_id
+    ctx.runtime_admin_ids = {111}
+    chat_id = -100200405
+    admin_id = 777
+    fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "member")
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900029,
+                "message": {
+                    "message_id": 29,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "افزودن سپس مدیر"},
+                    "from": {
+                        "id": admin_id,
+                        "is_bot": False,
+                        "first_name": "مدیر گروه",
+                    },
+                    "new_chat_member": {
+                        "id": fake_bale.bot_id,
+                        "is_bot": True,
+                        "first_name": "Archive",
+                    },
+                },
+            }
+        )
+    )
+    assert fake_bale.calls_for("leaveChat") == []
+
+    fake_bale.set_chat_member_status(chat_id, fake_bale.bot_id, "administrator")
+    fake_bale.set_chat_member_status(chat_id, admin_id, "administrator")
+    await dispatcher.dispatch(
+        Update.model_validate(
+            {
+                "update_id": 900030,
+                "message": {
+                    "message_id": 30,
+                    "date": 1,
+                    "chat": {"id": chat_id, "type": "group", "title": "افزودن سپس مدیر"},
+                    "from": {
+                        "id": 778,
+                        "is_bot": False,
+                        "first_name": "عضو",
+                    },
+                    "text": "اولین متن عادی بعد از مدیرشدن",
+                },
+            }
+        )
+    )
+    await asyncio.sleep(0.2)
+    assert fake_bale.last_markup(778) is not None
+    async with ctx.db.session() as session:
+        group = await GroupRepository(session).get_by_bale_id(chat_id)
+        assert group is not None
+        assert group.settings.get("pending_admin") is False
+        assert group.settings.get("role") == "research"
 
 
 async def test_member_start_has_no_add_to_group_button(

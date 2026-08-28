@@ -30,6 +30,8 @@ def test_roundtrip() -> None:
         "1|ok|k7f2qa|",
         "1|no|k7f2qa|",
         "1|cx|k7f2qa|",
+        "1|imy|k7f2qa|",
+        "1|imn|k7f2qa|",
     ],
 )
 def test_spec_examples_fit_24_bytes(example: str) -> None:

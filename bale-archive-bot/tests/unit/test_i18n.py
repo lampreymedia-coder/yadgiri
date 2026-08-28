@@ -124,3 +124,25 @@ def test_user_saved_mentions_missing_archive() -> None:
     assert "شبکه و منبع" in text
     assert "محتوایی" in text
     assert "دو نفره" in text
+
+
+def test_image_keep_copy_and_preview_line() -> None:
+    assert "تصویر هم ذخیره شود" in fa.IMAGE_KEEP_PROMPT
+    assert "تزئینی" in fa.IMAGE_KEEP_PROMPT
+    text = fa.preview_prompt(
+        "علی",
+        "ali",
+        "رصد",
+        "image",
+        "",
+        "نامشخص",
+        "#یادگیری",
+        "توضیح",
+        datetime(2026, 8, 22, 12, 0, tzinfo=UTC),
+        "ab12cd",
+        image_line=fa.PREVIEW_IMAGE_TEXT_ONLY,
+    )
+    assert "ذخیره نمی‌شود" in text
+    assert "فقط متن" in fa.BTN_IMAGE_NO
+    assert "متن و تصویر" in fa.BTN_IMAGE_YES
+    assert "تصویر هم ذخیره شود" in fa.HELP_MESSAGE

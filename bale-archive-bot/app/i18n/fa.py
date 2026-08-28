@@ -114,6 +114,18 @@ BTN_SAVE_YES = "بله، انتخاب هشتگ"
 BTN_SAVE_NO = "خیر، فقط در گروه بماند"
 BTN_CANCEL_DELETE = "انصراف"
 
+IMAGE_KEEP_PROMPT = (
+    "این پیام هم متن دارد هم تصویر.\n"
+    "خیلی از تصویرها تزئینی‌اند و آرشیو کردنشان لازم نیست.\n"
+    "\n"
+    "تصویر هم ذخیره شود؟"
+)
+BTN_IMAGE_YES = "بله، متن و تصویر"
+BTN_IMAGE_NO = "فقط متن، بدون تصویر"
+
+PREVIEW_IMAGE_INCLUDED = "تصویر: ذخیره می‌شود"
+PREVIEW_IMAGE_TEXT_ONLY = "تصویر: ذخیره نمی‌شود (فقط متن)"
+
 # ─── گام ۲: تعداد هشتگ ───
 
 TAG_COUNT_PROMPT = "کدام هشتگ؟ می‌توانید یک یا چند مورد را با هم انتخاب کنید."
@@ -184,8 +196,10 @@ def preview_prompt(
     excerpt: str,
     dt: datetime,
     short_id: str,
+    image_line: str = "",
 ) -> str:
     username_part = f" (@{username})" if username else ""
+    extra = f"{image_line}\n" if image_line else ""
     return (
         "پیش‌نمایش ثبت\n"
         "\n"
@@ -194,6 +208,7 @@ def preview_prompt(
         f"نوع: {content_type_name(content_type)} {details}\n"
         f"حجم: {size_text}\n"
         f"هشتگ‌ها: {hashtags}\n"
+        f"{extra}"
         f"متن: «{excerpt}»\n"
         f"زمان: {jalali_date(dt)}  {jalali_time(dt)}\n"
         f"کد: {short_id}\n"
@@ -602,8 +617,9 @@ HELP_MESSAGE = (
     "────────────────\n"
     "۱. محتوا را در گروه رصد بفرستید (متن، عکس، کلیپ، صوت، سند و هر فایل دیگر).\n"
     "۲. ربات در خصوصی می‌پرسد هشتگ بخورد یا نه.\n"
-    "۳. اگر بله، همان‌جا چهار هشتگ نشان داده می‌شود: یادگیری، شبکه و منبع، محتوایی، سند.\n"
-    "۴. یک یا چند هشتگ را بزنید؛ قبل از تأیید نهایی می‌توانید اصلاح کنید.\n"
+    "۳. اگر پیام هم متن دارد هم تصویر، جداگانه می‌پرسد تصویر هم ذخیره شود یا نه.\n"
+    "۴. اگر بله، همان‌جا چهار هشتگ نشان داده می‌شود: یادگیری، شبکه و منبع، محتوایی، سند.\n"
+    "۵. یک یا چند هشتگ را بزنید؛ قبل از تأیید نهایی می‌توانید اصلاح کنید.\n"
     "\n"
     "استیکر و گیف بایگانی نمی‌شوند.\n"
     "\n"
@@ -626,7 +642,7 @@ def my_item_line(short_id: str, content_type: str, status_fa: str, dt: datetime)
 STATUS_NAMES: dict[str, str] = {
     "draft": "پیش‌نویس",
     "awaiting_decision": "در انتظار تصمیم",
-    "awaiting_tag_count": "در انتظار تعداد هشتگ",
+    "awaiting_tag_count": "در انتظار تصمیم تصویر",
     "awaiting_tags": "در انتظار انتخاب هشتگ",
     "awaiting_confirm": "در انتظار تایید",
     "completed": "ثبت‌شده",

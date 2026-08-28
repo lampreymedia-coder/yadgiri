@@ -126,3 +126,12 @@ to bind a per-hashtag archive. Anyone may add the bot; it does not leave
 because the adder is not a group administrator. After it is promoted, the
 next ordinary message opens the private wizard.
 
+## D-18: Text+image posts ask whether to archive the picture
+A photo with a caption (or an image document that also has text) often
+carries a decorative picture. After the sender chooses to archive, the
+wizard asks whether to keep the image. Choosing text-only stores only the
+caption via ``sendMessage`` and marks media as ``skipped_too_large`` so
+the worker does not download it. Image-only posts skip the extra question.
+The conversation state is ``awaiting_image_keep``; the SQL status reuses
+``awaiting_tag_count`` to avoid a Postgres enum migration.
+

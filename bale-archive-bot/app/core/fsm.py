@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 class WizardState(enum.StrEnum):
     IDLE = "idle"
     AWAITING_DECISION = "awaiting_decision"
+    AWAITING_IMAGE_KEEP = "awaiting_image_keep"
     AWAITING_TAG_COUNT = "awaiting_tag_count"
     AWAITING_TAGS = "awaiting_tags"
     AWAITING_CONFIRM = "awaiting_confirm"

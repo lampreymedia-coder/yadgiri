@@ -18,7 +18,14 @@ from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.methods import BaleAPI
 from app.bale.models import Message
 from app.config import Settings
-from app.db.models import ContentType, Group, Submission, SubmissionStatus, User
+from app.db.models import (
+    IN_PROGRESS_STATUSES,
+    ContentType,
+    Group,
+    Submission,
+    SubmissionStatus,
+    User,
+)
 from app.db.repositories.groups import GroupRepository
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.submissions import SubmissionRepository
@@ -34,6 +41,55 @@ logger = get_logger(__name__)
 CAPTION_LIMIT = 1024
 TEXT_LIMIT = 4096
 _SEND_STORED_TEXT = {ContentType.TEXT, ContentType.LINK}
+_IMAGE_CONTENT_TYPES = {ContentType.IMAGE, ContentType.ALBUM}
+
+
+def has_text_and_image(submission: Submission) -> bool:
+    """True when the item has both a caption/text and a still image.
+
+    Those posts get a second wizard question so decorative pictures can stay
+    out of the archive and off disk.
+    """
+    text = (submission.text_content or submission.caption or "").strip()
+    if not text:
+        return False
+    if submission.content_type in _IMAGE_CONTENT_TYPES:
+        return True
+    if (
+        submission.content_type is ContentType.DOCUMENT
+        and submission.content_subtype == "image_file"
+    ):
+        return True
+    return any(
+        (item.mime_type or "").lower().startswith("image/") for item in submission.media_files
+    )
+
+
+def archives_image(submission: Submission) -> bool:
+    """Whether confirmed archive copies should include the picture."""
+    if not has_text_and_image(submission):
+        return True
+    flag = submission.meta.get("include_image") if isinstance(submission.meta, dict) else None
+    return flag is not False
+
+
+def image_storage_action(submission: Submission) -> str:
+    """Whether the media worker should download, skip, or wait for a choice.
+
+    Decorative pictures are left on disk only after the sender says yes.
+    ``skip`` is for an explicit no; ``wait`` keeps the file pending so a later
+    yes can still store it, without blocking other backlog items.
+    """
+    if not has_text_and_image(submission):
+        return "download"
+    flag = submission.meta.get("include_image") if isinstance(submission.meta, dict) else None
+    if flag is False:
+        return "skip"
+    if flag is True:
+        return "download"
+    if submission.status in IN_PROGRESS_STATUSES:
+        return "wait"
+    return "download"
 
 
 @dataclass(slots=True)
@@ -274,8 +330,8 @@ class SubmissionService:
         sender_name: str,
     ) -> list[int]:
         copied: list[int] = []
-        use_stored_text = submission.content_type in _SEND_STORED_TEXT
-        if use_stored_text:
+        text_only = submission.content_type in _SEND_STORED_TEXT or not archives_image(submission)
+        if text_only:
             fallback_id = await self._send_archive_fallback(dest_chat_id, submission, sender_name)
             if fallback_id is not None:
                 copied.append(fallback_id)
@@ -349,7 +405,7 @@ class SubmissionService:
             ContentType.LINK,
             ContentType.CONTACT,
             ContentType.LOCATION,
-        )
+        ) or not archives_image(submission)
         limit = TEXT_LIMIT if is_text_only else CAPTION_LIMIT
         combined = f"{header}\n\n{body}" if body else header
         if len(combined) <= limit:

@@ -78,6 +78,7 @@ async def test_caption_over_1024_splits_into_reply(
     sid = submission.short_id
     msg_id = wizard_message_id(fake_bale, USER_ID)
     await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|imy|{sid}|", USER_ID, msg_id))
     markup = fake_bale.last_markup(USER_ID)
     assert markup is not None
     tag_cb = next(

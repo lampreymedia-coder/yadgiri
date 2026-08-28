@@ -13,6 +13,7 @@ from app.core.context import BotContext
 from app.db.models import StorageStatus
 from app.db.repositories.misc import MediaRepository
 from app.domain.media import LocalStorage, S3Storage, Storage, process_media_file
+from app.domain.submission import image_storage_action
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,8 +45,28 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
     handled = 0
     async with ctx.db.session() as session:
         repo = MediaRepository(session)
-        backlog = await repo.backlog(limit=5)
+        # Look past files waiting for the image-keep answer so they do not
+        # starve later voice/document downloads.
+        backlog = await repo.backlog(limit=20)
         for media in backlog:
+            action = (
+                image_storage_action(media.submission)
+                if media.submission is not None
+                else "download"
+            )
+            if action == "wait":
+                continue
+            if action == "skip":
+                await repo.update_status(
+                    media.id,
+                    StorageStatus.SKIPPED_TOO_LARGE,
+                    error="user_skipped_image",
+                    increment_attempts=False,
+                )
+                handled += 1
+                if handled >= 5:
+                    break
+                continue
             await repo.update_status(media.id, StorageStatus.DOWNLOADING, increment_attempts=False)
             result = await process_media_file(
                 ctx.api,
@@ -64,6 +85,8 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
                         storage_key=existing.storage_key,
                     )
                     handled += 1
+                    if handled >= 5:
+                        break
                     continue
             bucket = None
             if result.storage_key and ctx.settings.storage_backend is StorageBackend.S3:
@@ -77,4 +100,6 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
                 error=result.error,
             )
             handled += 1
+            if handled >= 5:
+                break
     return handled

@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.models import AppSetting, AuditLog, MediaFile, ProcessedUpdate, StorageStatus
 
@@ -99,6 +100,7 @@ class MediaRepository:
     async def backlog(self, limit: int = 10) -> list[MediaFile]:
         result = await self._session.execute(
             select(MediaFile)
+            .options(selectinload(MediaFile.submission))
             .where(MediaFile.storage_status.in_([StorageStatus.PENDING, StorageStatus.FAILED]))
             .where(MediaFile.storage_attempts < 5)
             .order_by(MediaFile.created_at)

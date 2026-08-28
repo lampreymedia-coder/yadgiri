@@ -13,7 +13,7 @@ import pytest
 from app.bale.models import Update
 from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
-from app.db.models import Submission, SubmissionStatus
+from app.db.models import StorageStatus, Submission, SubmissionStatus
 from app.db.repositories.outbox import OutboxRepository
 from app.db.repositories.submissions import SubmissionRepository
 from tests.fakes.fake_bale import FakeBaleServer
@@ -521,3 +521,112 @@ async def test_edit_after_complete_rewrites_archive(
         if int(call.get("chat_id", 0)) == ARCHIVE_ID
     ]
     assert any(later in text for text in archive_texts)
+
+
+async def _intake_image(dispatcher: Dispatcher, caption: str | None) -> None:
+    update = load_update("image")
+    if caption is None:
+        update["message"].pop("caption", None)
+    else:
+        update["message"]["caption"] = caption
+    await dispatcher.dispatch(Update.model_validate(update))
+    await asyncio.sleep(0.2)
+
+
+async def test_photo_with_caption_asks_whether_to_keep_image(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await _intake_image(dispatcher, "توضیح تزئینی")
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    assert any("|imy|" in cb for cb in buttons.values())
+    assert any("|imn|" in cb for cb in buttons.values())
+    assert not any("|tg|" in cb for cb in buttons.values())
+    assert "تصویر هم ذخیره شود" in "\n".join(fake_bale.sent_texts(USER_ID))
+
+
+async def test_photo_without_caption_skips_image_keep_question(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await _intake_image(dispatcher, None)
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    assert any("|tg|" in cb for cb in buttons.values())
+    assert not any("|imy|" in cb for cb in buttons.values())
+
+
+async def test_text_only_archive_sends_caption_without_copying_photo(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await bind_archives(ctx)
+    await _intake_image(dispatcher, "فقط همین متن مهم است")
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|imn|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    tag_cb = next(cb for cb in buttons.values() if "|tg|" in cb)
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    preview = "\n".join(fake_bale.sent_texts(USER_ID))
+    assert "ذخیره نمی‌شود" in preview
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+
+    submission = await get_submission(ctx)
+    assert submission.status is SubmissionStatus.COMPLETED
+    assert submission.meta.get("include_image") is False
+    assert all(
+        media.storage_status is StorageStatus.SKIPPED_TOO_LARGE for media in submission.media_files
+    )
+    copies = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
+    assert copies == []
+    archive_texts = [
+        str(c.get("text") or "")
+        for c in fake_bale.calls_for("sendMessage")
+        if int(c.get("chat_id", 0)) == ARCHIVE_ID
+    ]
+    assert any("فقط همین متن مهم است" in text for text in archive_texts)
+
+
+async def test_keep_image_copies_photo_into_archive(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await bind_archives(ctx)
+    await _intake_image(dispatcher, "توضیح تصویر")
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|imy|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    tag_cb = next(cb for cb in buttons.values() if "|tg|" in cb)
+    await dispatcher.dispatch(callback_update(tag_cb, USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|ok|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|fin|{sid}|", USER_ID, msg_id))
+    copies = [c for c in fake_bale.calls_for("copyMessage") if int(c["chat_id"]) == ARCHIVE_ID]
+    assert copies
+
+
+async def test_back_from_tags_returns_to_image_keep(
+    dispatcher: Dispatcher, ctx: BotContext, fake_bale: FakeBaleServer
+) -> None:
+    await _intake_image(dispatcher, "توضیح تصویر")
+    submission = await get_submission(ctx)
+    sid = submission.short_id
+    msg_id = wizard_message_id(fake_bale, USER_ID)
+    await dispatcher.dispatch(callback_update(f"1|yes|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|imn|{sid}|", USER_ID, msg_id))
+    await dispatcher.dispatch(callback_update(f"1|bk|{sid}|", USER_ID, msg_id))
+    buttons = wizard_buttons(fake_bale, USER_ID)
+    assert any("|imy|" in cb for cb in buttons.values())
+    await dispatcher.dispatch(callback_update(f"1|imy|{sid}|", USER_ID, msg_id))
+    submission = await get_submission(ctx)
+    assert submission.meta.get("include_image") is True
+    assert all(media.storage_status is StorageStatus.PENDING for media in submission.media_files)

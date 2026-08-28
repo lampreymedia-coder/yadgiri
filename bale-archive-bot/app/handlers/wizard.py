@@ -1,4 +1,4 @@
-"""The tagging wizard: decision → hashtag multi-select → preview → done.
+"""The tagging wizard: decision → optional image-keep → hashtag multi-select → preview → done.
 
 All keyboard updates go through ``safe_edit`` (text + keyboard together).
 State lives in Postgres (conversation_states), never in process memory; the back button
@@ -20,6 +20,7 @@ from app.core.locks import advisory_xact_lock
 from app.db.models import (
     TERMINAL_STATUSES,
     Group,
+    StorageStatus,
     Submission,
     SubmissionStatus,
     Tag,
@@ -29,7 +30,7 @@ from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
 from app.domain.group_roles import try_delete_message
 from app.domain.private_chat import META_SUBJECT, settle_private_chat
-from app.domain.submission import SubmissionService
+from app.domain.submission import SubmissionService, archives_image, has_text_and_image
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -39,6 +40,8 @@ logger = get_logger(__name__)
 ACT_DECISION_YES = "yes"
 ACT_DECISION_NO = "no"
 ACT_CANCEL = "cx"
+ACT_IMAGE_YES = "imy"
+ACT_IMAGE_NO = "imn"
 ACT_TAG_COUNT = "cnt"
 ACT_TOGGLE_TAG = "tg"
 ACT_TAGS_CONTINUE = "ok"
@@ -54,6 +57,8 @@ WIZARD_ACTIONS = {
     ACT_DECISION_YES,
     ACT_DECISION_NO,
     ACT_CANCEL,
+    ACT_IMAGE_YES,
+    ACT_IMAGE_NO,
     ACT_TAG_COUNT,
     ACT_TOGGLE_TAG,
     ACT_TAGS_CONTINUE,
@@ -109,6 +114,8 @@ def _persist_wizard_payload(submission: Submission, conversation: Conversation) 
     meta["note"] = conversation.payload.get("note")
     meta["page"] = conversation.payload.get("page", 1)
     meta["wizard_history"] = list(conversation.history)
+    if "include_image" in conversation.payload:
+        meta["include_image"] = bool(conversation.payload["include_image"])
     submission.meta = meta
 
 
@@ -134,6 +141,16 @@ def render_decision(
         text = f"{text}\n\n{fa.group_fallback_hint(bot_username)}"
         rows = [[url_button(fa.BTN_OPEN_PRIVATE, f"https://ble.ir/{bot_username}")]]
     return text, keyboard(rows)
+
+
+def render_image_keep(sid: str) -> tuple[str, InlineKeyboardMarkup]:
+    rows = [
+        [button(fa.BTN_IMAGE_YES, ACT_IMAGE_YES, sid)],
+        [button(fa.BTN_IMAGE_NO, ACT_IMAGE_NO, sid)],
+        [button(fa.BTN_BACK, ACT_BACK, sid)],
+        [button(fa.BTN_CANCEL, ACT_CANCEL, sid)],
+    ]
+    return fa.IMAGE_KEEP_PROMPT, keyboard(rows)
 
 
 def render_group_choice(groups: list[Group], sid: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -229,6 +246,15 @@ def render_preview(
         excerpt=excerpt,
         dt=datetime.now(UTC),
         short_id=submission.short_id,
+        image_line=(
+            (
+                fa.PREVIEW_IMAGE_INCLUDED
+                if archives_image(submission)
+                else fa.PREVIEW_IMAGE_TEXT_ONLY
+            )
+            if has_text_and_image(submission)
+            else ""
+        ),
     )
     sid = submission.short_id
     rows = [
@@ -528,7 +554,7 @@ def _rebuild_conversation(submission: Submission, chat_id: int, user_id: int) ->
     """Rebuild state after a restart from the submission row alone."""
     status_to_state = {
         SubmissionStatus.AWAITING_DECISION: WizardState.AWAITING_DECISION,
-        SubmissionStatus.AWAITING_TAG_COUNT: WizardState.AWAITING_TAG_COUNT,
+        SubmissionStatus.AWAITING_TAG_COUNT: WizardState.AWAITING_IMAGE_KEEP,
         SubmissionStatus.AWAITING_TAGS: WizardState.AWAITING_TAGS,
         SubmissionStatus.AWAITING_CONFIRM: WizardState.AWAITING_CONFIRM,
         SubmissionStatus.DRAFT: WizardState.AWAITING_DECISION,
@@ -549,7 +575,27 @@ def _rebuild_conversation(submission: Submission, chat_id: int, user_id: int) ->
         "note": meta.get("note"),
         "page": meta.get("page", 1),
     }
+    if "include_image" in meta:
+        conversation.payload["include_image"] = bool(meta["include_image"])
     return conversation
+
+
+async def _show_tag_picker(
+    ctx: BotContext,
+    service: SubmissionService,
+    tags_repo: TagRepository,
+    submission: Submission,
+    group: Group | None,
+    conversation: Conversation,
+    selected: list[int],
+) -> None:
+    await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
+    conversation.transition(WizardState.AWAITING_TAGS)
+    active = await tags_repo.list_active()
+    text, markup = render_tags(
+        active, selected, None, submission.short_id, group_title=_group_title(group)
+    )
+    await _edit_wizard(ctx, submission, text, markup)
 
 
 async def _edit_wizard(
@@ -594,13 +640,33 @@ async def _dispatch_action(
     if action == ACT_DECISION_YES:
         conversation.payload["target"] = None
         submission.meta = {**submission.meta, "target_count": None}
-        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
-        conversation.transition(WizardState.AWAITING_TAGS)
-        active = await tags_repo.list_active()
-        text, markup = render_tags(
-            active, selected, None, submission.short_id, group_title=_group_title(group)
-        )
-        await _edit_wizard(ctx, submission, text, markup)
+        if has_text_and_image(submission):
+            await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAG_COUNT)
+            conversation.transition(WizardState.AWAITING_IMAGE_KEEP)
+            text, markup = render_image_keep(submission.short_id)
+            await _edit_wizard(ctx, submission, text, markup)
+            await _answer(ctx, cq)
+            return True
+        await _show_tag_picker(ctx, service, tags_repo, submission, group, conversation, selected)
+        await _answer(ctx, cq)
+        return True
+
+    if action in (ACT_IMAGE_YES, ACT_IMAGE_NO):
+        keep_image = action == ACT_IMAGE_YES
+        conversation.payload["include_image"] = keep_image
+        submission.meta = {**submission.meta, "include_image": keep_image}
+        for media in submission.media_files:
+            if keep_image:
+                if (
+                    media.storage_status == StorageStatus.SKIPPED_TOO_LARGE
+                    and media.last_error == "user_skipped_image"
+                ):
+                    media.storage_status = StorageStatus.PENDING
+                    media.last_error = None
+            else:
+                media.storage_status = StorageStatus.SKIPPED_TOO_LARGE
+                media.last_error = "user_skipped_image"
+        await _show_tag_picker(ctx, service, tags_repo, submission, group, conversation, selected)
         await _answer(ctx, cq)
         return True
 
@@ -630,13 +696,7 @@ async def _dispatch_action(
         # Older keyboards still send a count; ignore it and show all hashtags.
         conversation.payload["target"] = None
         submission.meta = {**submission.meta, "target_count": None}
-        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)
-        conversation.transition(WizardState.AWAITING_TAGS)
-        active = await tags_repo.list_active()
-        text, markup = render_tags(
-            active, selected, None, submission.short_id, group_title=_group_title(group)
-        )
-        await _edit_wizard(ctx, submission, text, markup)
+        await _show_tag_picker(ctx, service, tags_repo, submission, group, conversation, selected)
         await _answer(ctx, cq)
         return True
 
@@ -728,6 +788,11 @@ async def _dispatch_action(
 
     if action == ACT_FINAL_CONFIRM:
         note = conversation.payload.get("note")
+        if "include_image" in conversation.payload:
+            submission.meta = {
+                **submission.meta,
+                "include_image": bool(conversation.payload["include_image"]),
+            }
         if note:
             submission.meta = {**submission.meta, "note": note}
             if submission.caption:
@@ -776,6 +841,10 @@ async def _render_state(
     if state is WizardState.AWAITING_DECISION:
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_DECISION)
         text, markup = render_decision(submission, owner, group, ctx.bot_username, False)
+    elif state is WizardState.AWAITING_IMAGE_KEEP:
+        await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAG_COUNT)
+        conversation.state = WizardState.AWAITING_IMAGE_KEEP
+        text, markup = render_image_keep(submission.short_id)
     elif state is WizardState.AWAITING_TAGS or state is WizardState.AWAITING_TAG_COUNT:
         conversation.payload["target"] = None
         await service.submissions.set_status(submission, SubmissionStatus.AWAITING_TAGS)

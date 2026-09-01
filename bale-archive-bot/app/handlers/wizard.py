@@ -898,19 +898,30 @@ async def handle_note_input(
     await ctx.state_store(session).save(conversation, ctx.settings.submission_ttl_minutes)
 
 
-async def resume_wizard(ctx: BotContext, session: AsyncSession, message: Message) -> bool:
+async def resume_wizard(
+    ctx: BotContext,
+    session: AsyncSession,
+    message: Message,
+    *,
+    user_id: int | None = None,
+) -> bool:
     """Rebuild the wizard message after /resume; True when something resumed."""
-    if message.from_user is None:
+    actor_id = (
+        user_id
+        if user_id is not None
+        else (message.from_user.id if message.from_user is not None else None)
+    )
+    if actor_id is None:
         return False
     store = ctx.state_store(session)
-    conversation = await store.load(message.chat.id, message.from_user.id)
+    conversation = await store.load(message.chat.id, actor_id)
     if conversation is None or conversation.state is WizardState.IDLE:
         return False
     sid = str(conversation.payload.get("sid", ""))
     service = ctx.submission_service(session)
     submission = await service.submissions.get_by_short_id(sid)
     if submission is None or submission.status in TERMINAL_STATUSES:
-        await store.clear(message.chat.id, message.from_user.id)
+        await store.clear(message.chat.id, actor_id)
         return False
     owner = await service.users.get_by_id(submission.user_id)
     if owner is None:

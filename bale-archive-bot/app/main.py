@@ -220,15 +220,10 @@ class Application:
             )
         except (BaleAPIError, NetworkError) as exc:
             logger.warning("webhook_info_failed", error=str(exc))
+        from app.i18n import fa
+
         try:
-            ok = await self.api.set_my_commands(
-                [
-                    {"command": "start", "description": "فعال‌سازی ربات"},
-                    {"command": "archive", "description": "این گروه آرشیو خصوصی شود"},
-                    {"command": "help", "description": "راهنما"},
-                    {"command": "panel", "description": "منوی مدیریت"},
-                ]
-            )
+            ok = await self.api.set_my_commands(fa.bot_commands_payload())
             logger.info("commands_registered", ok=ok)
         except (BaleAPIError, NetworkError) as exc:
             logger.warning("commands_register_failed", error=str(exc))

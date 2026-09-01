@@ -355,7 +355,17 @@ ERR_SERVER = (
     "❗️ ارتباط با سرور برقرار نشد. محتوای شما از بین نرفته و تا لحظاتی دیگر دوباره تلاش می‌کنیم."
 )
 ERR_DEGRADED = "⚠️ سیستم موقتاً در دسترس نیست. محتوای شما نگه داشته شده و به‌زودی پردازش می‌شود."
-ERR_UNKNOWN_COMMAND = "دستور نامعتبر است. برای راهنما /help را بزنید."
+ERR_UNKNOWN_COMMAND = (
+    "این دستور را ندارم.\n"
+    "\n"
+    "دستورهای اصلی:\n"
+    "/help — نحوه کار\n"
+    "/menu — منوی دکمه‌ای\n"
+    "/tags — هشتگ‌ها\n"
+    "/my — ثبت‌های من\n"
+    "/status — وضعیت ربات\n"
+    "/id — شناسه من و این گفتگو"
+)
 ERR_SPAM_LIMIT = "⚠️ سقف ارسال ساعتی شما پر شده است. کمی بعد دوباره تلاش کنید."
 ERR_GENERIC = "😔 مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
 ERR_UNDO_NOT_FOUND = "کدی با این مشخصات پیدا نشد یا متعلق به شما نیست."
@@ -417,28 +427,28 @@ def onboard_message(bot_username: str) -> str:
 
 
 def start_message(name: str) -> str:
+    who = name or "دوست"
     return (
-        f"سلام {name}\n"
+        f"سلام {who}\n"
         "\n"
-        "من ربات آرشیو هستم. وقتی در گروه رصد محتوا بفرستید، "
-        "اینجا از شما می‌پرسم در کدام هشتگ ذخیره شود.\n"
+        "من ربات آرشیو هستم. محتوا را در گروه رصد بفرستید؛ "
+        "اینجا از شما می‌پرسم با کدام هشتگ ذخیره شود.\n"
         "\n"
-        "/my — ثبت‌های شما\n"
-        "/undo کد — لغو ثبت\n"
-        "/resume — ادامه گفتگوی نیمه‌کاره\n"
-        "/help — راهنما"
+        "از دکمه‌ها یا دستورها استفاده کنید. خالی نمی‌مانند."
     )
 
 
 def start_owner_setup(name: str) -> str:
+    who = name or "مدیر"
     return (
-        f"سلام {name}\n"
+        f"سلام {who}\n"
         "\n"
         "ربات روشن است و شما مدیر آن هستید.\n"
+        "دکمه‌های زیر کار می‌کنند؛ برای راه‌اندازی گروه‌های آرشیو هم همین‌جا راهنما هست.\n"
         "\n"
         f"{archive_group_setup()}\n"
         "\n"
-        "منوی مدیریت: /panel"
+        "پنل مدیریت: /panel"
     )
 
 
@@ -613,23 +623,174 @@ ALREADY_OWNER = "شما از قبل مدیر ربات هستید."
 
 
 HELP_MESSAGE = (
-    "راهنمای ربات آرشیو\n"
+    "نحوه کار با ربات آرشیو\n"
     "────────────────\n"
-    "۱. محتوا را در گروه رصد بفرستید (متن، عکس، کلیپ، صوت، سند و هر فایل دیگر).\n"
-    "۲. ربات در خصوصی می‌پرسد هشتگ بخورد یا نه.\n"
-    "۳. اگر پیام هم متن دارد هم تصویر، جداگانه می‌پرسد تصویر هم ذخیره شود یا نه.\n"
-    "۴. اگر بله، همان‌جا چهار هشتگ نشان داده می‌شود: یادگیری، شبکه و منبع، محتوایی، سند.\n"
-    "۵. یک یا چند هشتگ را بزنید؛ قبل از تأیید نهایی می‌توانید اصلاح کنید.\n"
+    "این ربات محتوای گروه رصد را نگه می‌دارد و نسخه تأییدشده را "
+    "در گروه خصوصی همان هشتگ ذخیره می‌کند.\n"
+    "\n"
+    "۱) ربات را در گروه رصد ادمین کنید. همه را مدیر نگذارید.\n"
+    "۲) متن، عکس، فایل، صوت یا کلیپ را در گروه رصد بفرستید. منشن لازم نیست.\n"
+    "۳) در پیام خصوصی از شما می‌پرسد آرشیو شود یا نه.\n"
+    "۴) اگر پیام هم متن دارد هم تصویر، جداگانه می‌پرسد تصویر هم ذخیره شود. "
+    "تصویر تزئینی را رد کنید تا آرشیو سنگین نشود.\n"
+    "۵) یک یا چند هشتگ بزنید، پیش‌نمایش را ببینید، تأیید کنید. "
+    "همان پیام به گروه آرشیو آن هشتگ کپی می‌شود.\n"
     "\n"
     "استیکر و گیف بایگانی نمی‌شوند.\n"
     "\n"
-    "/my — آخرین ثبت‌ها\n"
-    "/undo کد — لغو ثبت\n"
+    "دستورها\n"
+    "/start — شروع و منو\n"
+    "/help — همین راهنما\n"
+    "/menu — دکمه‌های میانبر\n"
+    "/tags — معنی هشتگ‌ها\n"
+    "/my — ثبت‌های شما\n"
+    "/undo کد — لغو ثبت تا ده دقیقه\n"
     "/resume — ادامه گفتگوی نیمه‌کاره\n"
+    "/status — وضعیت ربات و گروه‌ها\n"
+    "/id — شناسه عددی شما و این گفتگو\n"
+    "\n"
+    "در گروه آرشیو بنویسید /archive تا آن گروه به یک هشتگ وصل شود."
 )
 
-MY_EMPTY = "هنوز هیچ ثبتی ندارید."
-MY_HEADER = "🗂 آخرین ثبت‌های شما:"
+
+HELP_ADMIN_FOOTER = (
+    "\n\nدستورهای مدیر\n"
+    "/panel — آمار، گروه‌ها، سلامت، خروجی\n"
+    "/stats — آمار بازه\n"
+    "/groups — فهرست گروه‌ها\n"
+    "/health — سلامت سیستم\n"
+    "/search عبارت — جست‌وجو"
+)
+
+MY_EMPTY = (
+    "هنوز هیچ ثبتی ندارید.\n"
+    "\n"
+    "در گروه رصد یک متن، عکس یا فایل بفرستید. "
+    "اینجا از شما می‌پرسم با کدام هشتگ آرشیو شود. بعد همان‌ها در /my می‌آید."
+)
+MY_HEADER = "آخرین ثبت‌های شما"
+
+UNDO_USAGE = (
+    "برای لغو، کد ثبت را بفرستید. مثال:\n"
+    "/undo ab12cd\n"
+    "\n"
+    "کد را در /my یا پایین پیش‌نمایش می‌بینید. مهلت لغو محدود است."
+)
+UNDO_NONE_RECENT = "ثبتی برای لغو در این فهرست نیست. اول /my را ببینید."
+RESUME_NOTHING = "گفت‌وگوی نیمه‌کاره‌ای نیست. در گروه رصد یک پیام بفرستید تا سؤال هشتگ باز شود."
+
+TAGS_PUBLIC_HEADER = "هشتگ‌های آرشیو"
+TAGS_INTRO = (
+    "هر محتوا بعد از تأیید نهایی به گروه خصوصی همان هشتگ می‌رود. "
+    "می‌توانید چند هشتگ را با هم بزنید."
+)
+TAGS_EMPTY = "هنوز هشتگی تعریف نشده. مدیر از /panel هشتگ می‌سازد."
+SEED_TAG_HINTS: dict[str, str] = {
+    "learning": "نکته، دوره و چیزی که باید یاد گرفته شود",
+    "network_source": "لینک، کانال، فرد یا منبع قابل ارجاع",
+    "content": "ایده و محتوای قابل استفاده دوباره",
+    "document": "فایل، گزارش، سند و مدرک",
+}
+
+STATUS_HEADER = "وضعیت ربات"
+STATUS_ONLINE = "روشن است و پیام می‌گیرد."
+STATUS_NO_USERNAME = "شناسه کاربری ربات هنوز معلوم نیست."
+GROUPS_EMPTY = (
+    "هنوز گروهی ثبت نشده.\n"
+    "ربات را به گروه رصد اضافه کنید و ادمین کنید. "
+    "برای هر هشتگ یک گروه دو نفره بسازید و داخلش /archive بزنید."
+)
+
+ID_HEADER = "شناسه‌ها"
+
+
+def id_card(
+    user_id: int,
+    name: str,
+    username: str | None,
+    chat_id: int,
+    chat_title: str,
+    is_private: bool,
+) -> str:
+    kind = "پیام خصوصی" if is_private else f"گروه «{chat_title or 'بدون عنوان'}»"
+    user_line = f"@{username}" if username else name or "—"
+    return (
+        f"{ID_HEADER}\n"
+        f"{REPORT_DIVIDER}\n"
+        f"شما: {user_line}\n"
+        f"شناسه شما: {fa_digits(user_id)}\n"
+        f"این گفتگو: {kind}\n"
+        f"شناسه گفتگو: {fa_digits(chat_id)}"
+    )
+
+
+def status_report(
+    bot_username: str | None,
+    research_count: int,
+    archive_bound: int,
+    archive_total: int,
+    missing: list[str],
+    pending: int,
+) -> str:
+    handle = f"@{bot_username}" if bot_username else STATUS_NO_USERNAME
+    missing_line = ""
+    if missing:
+        missing_line = "\nهشتگ بدون گروه آرشیو: " + " ".join(missing)
+    return (
+        f"{STATUS_HEADER}\n"
+        f"{REPORT_DIVIDER}\n"
+        f"{STATUS_ONLINE}\n"
+        f"ربات: {handle}\n"
+        f"گروه رصد: {fa_digits(research_count)}\n"
+        f"گروه آرشیو وصل‌شده: {fa_digits(archive_bound)} از {fa_digits(archive_total)}"
+        f"{missing_line}\n"
+        f"ثبت در جریان: {fa_digits(pending)}\n"
+        "\n"
+        "در گروه رصد محتوا بفرستید؛ سؤال هشتگ در خصوصی می‌آید."
+    )
+
+
+def public_tag_line(title_fa: str, hashtag: str, hint: str) -> str:
+    extra = f"\n  {hint}" if hint else ""
+    return f"• {title_fa}  {hashtag}{extra}"
+
+
+def help_message(*, is_admin: bool) -> str:
+    if is_admin:
+        return HELP_MESSAGE + HELP_ADMIN_FOOTER
+    return HELP_MESSAGE
+
+
+BTN_MENU_HOW = "نحوه کار"
+BTN_MENU_TAGS = "هشتگ‌ها"
+BTN_MENU_MY = "ثبت‌های من"
+BTN_MENU_RESUME = "ادامه گفتگو"
+BTN_MENU_STATUS = "وضعیت ربات"
+BTN_MENU_ID = "شناسه من"
+BTN_MENU_PANEL = "پنل مدیریت"
+MENU_HEADER = "منوی ربات آرشیو. هر دکمه همان لحظه جواب می‌دهد."
+
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "شروع و منوی اصلی"),
+    ("help", "نحوه کار با ربات"),
+    ("menu", "منوی دکمه‌ای"),
+    ("tags", "فهرست هشتگ‌ها"),
+    ("my", "ثبت‌های من"),
+    ("undo", "لغو ثبت با کد"),
+    ("resume", "ادامه گفتگوی نیمه‌کاره"),
+    ("status", "وضعیت ربات و گروه‌ها"),
+    ("id", "شناسه من و این گفتگو"),
+    ("archive", "این گروه آرشیو یک هشتگ شود"),
+    ("panel", "پنل مدیریت"),
+)
+
+
+def bot_commands_payload() -> list[dict[str, str]]:
+    return [{"command": name, "description": desc} for name, desc in BOT_COMMANDS]
+
+
+def command_list_block() -> str:
+    return "\n".join(f"/{name} — {desc}" for name, desc in BOT_COMMANDS if name != "panel")
 
 
 def my_item_line(short_id: str, content_type: str, status_fa: str, dt: datetime) -> str:
@@ -657,7 +818,6 @@ def status_name(status: str) -> str:
     return STATUS_NAMES.get(status, status)
 
 
-RESUME_NOTHING = "گفت‌وگوی نیمه‌کاره‌ای پیدا نشد."
 RESUME_HEADER = "🔄 ادامه‌ی گفت‌وگوی قبلی:"
 
 # ─── پنل ادمین ───
@@ -673,6 +833,7 @@ BTN_PANEL_SETTINGS = "⚙️ تنظیمات"
 BTN_PANEL_EXPORT = "📤 خروجی اکسل"
 
 REPORT_DIVIDER = "──────────────────────────"
+EMPTY_REPORT = "هنوز داده‌ای ثبت نشده."
 
 
 def stats_report(

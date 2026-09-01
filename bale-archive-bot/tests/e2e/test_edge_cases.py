@@ -44,6 +44,10 @@ def test_parse_command() -> None:
     assert parse_command("plain text") is None
     assert parse_command("آرشیو") == ("archive", [])
     assert parse_command("ارشیوم") == ("archive", [])
+    assert parse_command("راهنما") == ("help", [])
+    assert parse_command("منو") == ("menu", [])
+    assert parse_command("وضعیت") == ("status", [])
+    assert parse_command("/id") == ("id", [])
 
 
 async def test_empty_and_whitespace_message_ignored(
@@ -269,7 +273,7 @@ async def test_my_command_lists_items(
     my_update["message"]["text"] = "/my"
     await dispatcher.dispatch(Update.model_validate(my_update))
     texts = fake_bale.sent_texts(USER_ID)
-    assert any("🗂" in t for t in texts)
+    assert any("آخرین ثبت" in t for t in texts)
 
 
 async def test_admin_command_hidden_from_non_admin(
@@ -281,7 +285,8 @@ async def test_admin_command_hidden_from_non_admin(
     await dispatcher.dispatch(Update.model_validate(stats_update))
     texts = fake_bale.sent_texts(USER_ID)
     # Generic invalid-command reply — no admin info leaked.
-    assert any("دستور نامعتبر" in t for t in texts)
+    assert any("این دستور را ندارم" in t for t in texts)
+    assert not any("مجموع امروز" in t for t in texts)
 
 
 async def test_malformed_callback_answered_gracefully(

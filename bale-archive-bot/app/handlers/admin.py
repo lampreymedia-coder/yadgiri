@@ -220,6 +220,8 @@ async def send_top_users(
         fa.ranked_user_line(i, u.display_name or u.username or str(u.bale_user_id), u.items)
         for i, u in enumerate(stats, start=1)
     )
+    if len(lines) == 2:
+        lines.append(fa.EMPTY_REPORT)
     await ctx.api.send_message(chat_id, "\n".join(lines))
 
 
@@ -241,6 +243,8 @@ async def send_top_tags(
         )
         for i, t in enumerate(stats, start=1)
     )
+    if len(lines) == 2:
+        lines.append(fa.EMPTY_REPORT)
     await ctx.api.send_message(chat_id, "\n".join(lines))
 
 
@@ -450,6 +454,8 @@ async def send_tags_list(ctx: BotContext, session: AsyncSession, chat_id: int) -
     all_tags = await tags.list_all()
     lines = [fa.TAGS_HEADER]
     lines.extend(fa.tag_line(t.title_fa, t.hashtag, t.slug, t.is_active) for t in all_tags)
+    if len(lines) == 1:
+        lines.append(fa.TAGS_EMPTY)
     await ctx.api.send_message(chat_id, "\n".join(lines))
 
 
@@ -594,6 +600,8 @@ async def send_groups(ctx: BotContext, session: AsyncSession, chat_id: int) -> N
                 tag=tag_slug_of(group),
             )
         )
+    if len(lines) == 1:
+        lines.append(fa.GROUPS_EMPTY)
     await ctx.api.send_message(chat_id, "\n".join(lines))
 
 

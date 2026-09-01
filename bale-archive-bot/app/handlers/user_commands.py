@@ -1,32 +1,14 @@
-"""Non-admin commands: /start /help /my /undo /resume."""
+"""Non-admin commands: start, help, menu, tags, my, undo, resume, status, id."""
 
 from __future__ import annotations
 
-from app.bale.keyboards import keyboard, url_button
-from app.bale.models import InlineKeyboardMarkup, Message
+from app.bale.models import Message
 from app.core.context import BotContext
 from app.db.models import Group
 from app.db.repositories.users import UserRepository
+from app.handlers import menu
 from app.handlers.wizard import _delete_group_hint, open_wizard, resume_wizard
 from app.i18n import fa
-from app.observability.logging import get_logger
-
-logger = get_logger(__name__)
-
-
-def _add_to_group_markup(ctx: BotContext) -> InlineKeyboardMarkup | None:
-    if not ctx.bot_username:
-        return None
-    return keyboard(
-        [
-            [
-                url_button(
-                    fa.BTN_ADD_TO_GROUP,
-                    f"https://ble.ir/{ctx.bot_username}?startgroup=start",
-                )
-            ]
-        ]
-    )
 
 
 async def handle_start(ctx: BotContext, message: Message) -> None:
@@ -60,44 +42,47 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
             text = fa.start_owner_setup(name)
         else:
             text = fa.start_message(name)
-        show_add = promoted or ctx.is_runtime_admin(message.from_user.id) or bool(user.is_admin)
-    markup = _add_to_group_markup(ctx) if show_add else None
-    await ctx.api.send_message(message.chat.id, text, markup)
+        show_admin = promoted or ctx.is_runtime_admin(message.from_user.id) or bool(user.is_admin)
+    await ctx.api.send_message(
+        message.chat.id, text, menu.main_menu_keyboard(ctx, is_admin=show_admin)
+    )
 
 
 async def handle_help(ctx: BotContext, message: Message) -> None:
-    await ctx.api.send_message(message.chat.id, fa.HELP_MESSAGE)
+    if message.from_user is None:
+        return
+    await menu.send_help(ctx, message.chat.id, message.from_user.id)
+
+
+async def handle_menu(ctx: BotContext, message: Message) -> None:
+    if message.from_user is None:
+        return
+    await menu.send_menu(ctx, message.chat.id, message.from_user.id)
+
+
+async def handle_tags(ctx: BotContext, message: Message) -> None:
+    await menu.send_public_tags(ctx, message.chat.id)
+
+
+async def handle_status(ctx: BotContext, message: Message) -> None:
+    await menu.send_status(ctx, message.chat.id)
+
+
+async def handle_id(ctx: BotContext, message: Message) -> None:
+    await menu.send_id_card(ctx, message)
 
 
 async def handle_my(ctx: BotContext, message: Message) -> None:
     if message.from_user is None:
         return
-    async with ctx.db.session() as session:
-        users = UserRepository(session)
-        user = await users.get_by_bale_id(message.from_user.id)
-        if user is None:
-            await ctx.api.send_message(message.chat.id, fa.MY_EMPTY)
-            return
-        service = ctx.submission_service(session)
-        items = await service.submissions.list_recent_by_user(user.id, limit=10)
-        if not items:
-            await ctx.api.send_message(message.chat.id, fa.MY_EMPTY)
-            return
-        lines = [fa.MY_HEADER]
-        lines.extend(
-            fa.my_item_line(
-                s.short_id, s.content_type.value, fa.status_name(s.status.value), s.created_at
-            )
-            for s in items
-        )
-    await ctx.api.send_message(message.chat.id, "\n".join(lines))
+    await menu.send_my_list(ctx, message.chat.id, message.from_user.id)
 
 
 async def handle_undo(ctx: BotContext, message: Message, args: list[str]) -> None:
     if message.from_user is None:
         return
     if not args:
-        await ctx.api.send_message(message.chat.id, fa.ERR_UNDO_NOT_FOUND)
+        await menu.send_undo_help(ctx, message.chat.id, message.from_user.id)
         return
     short_id = args[0].strip().lower()
     async with ctx.db.session() as session:

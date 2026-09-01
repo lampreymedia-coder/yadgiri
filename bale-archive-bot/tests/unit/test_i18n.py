@@ -146,3 +146,6 @@ def test_image_keep_copy_and_preview_line() -> None:
     assert "فقط متن" in fa.BTN_IMAGE_NO
     assert "متن و تصویر" in fa.BTN_IMAGE_YES
     assert "تصویر هم ذخیره شود" in fa.HELP_MESSAGE
+    assert "نحوه کار" in fa.HELP_MESSAGE
+    assert fa.BTN_MENU_HOW == "نحوه کار"
+    assert any(name == "help" for name, _desc in fa.BOT_COMMANDS)

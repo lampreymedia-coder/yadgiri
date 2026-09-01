@@ -183,7 +183,13 @@ async def test_group_start_activates_research(ctx: BotContext, fake_bale: FakeBa
     assert "رصد" in texts
     assert "نقش این گروه" not in texts
     assert fake_bale.last_markup(OWNER_ID) is None
-    assert fake_bale.last_markup(-100200300) is None
+    group_markup = fake_bale.last_markup(-100200300)
+    assert group_markup is not None
+    assert any(
+        "|mn|" in (btn.get("callback_data") or "")
+        for row in group_markup["inline_keyboard"]
+        for btn in row
+    )
 
 
 async def test_group_start_without_chat_type_still_asks_role(
@@ -212,7 +218,13 @@ async def test_group_start_without_chat_type_still_asks_role(
     texts = "\n".join(fake_bale.sent_texts(OWNER_ID))
     assert "رصد بدون نوع" in texts
     assert "نقش این گروه" not in texts
-    assert fake_bale.last_markup(-100200302) is None
+    group_markup = fake_bale.last_markup(-100200302)
+    assert group_markup is not None
+    assert any(
+        "|mn|" in (btn.get("callback_data") or "")
+        for row in group_markup["inline_keyboard"]
+        for btn in row
+    )
 
 
 async def test_bot_added_singular_member_asks_role(

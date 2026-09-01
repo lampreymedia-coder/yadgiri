@@ -18,7 +18,7 @@ from app.core.context import BotContext
 from app.core.fsm import WizardState
 from app.core.idempotency import claim_update
 from app.domain.classify import normalize_fa
-from app.handlers import admin, group_intake, user_commands, wizard
+from app.handlers import admin, group_intake, menu, user_commands, wizard
 from app.handlers.errors import handle_update_error
 from app.i18n import fa
 from app.observability import metrics
@@ -32,6 +32,13 @@ _PERSIAN_COMMANDS = {
     "ارشیوم": "archive",
     "بایگانی": "archive",
     "بایگانیخصوصی": "archive",
+    "راهنما": "help",
+    "منو": "menu",
+    "هشتگ": "tags",
+    "هشتگها": "tags",
+    "وضعیت": "status",
+    "شناسه": "id",
+    "شروع": "start",
 }
 
 
@@ -266,17 +273,30 @@ class Dispatcher:
                 await user_commands.handle_start(self.ctx, message)
             else:
                 await group_intake.handle_group_hello(self.ctx, message)
+                await user_commands.handle_menu(self.ctx, message)
             return
-        if command == "help":
+        if command in {"help", "howto", "how", "guide"}:
             await user_commands.handle_help(self.ctx, message)
             return
-        if command == "my" and message.is_private_message:
+        if command == "menu":
+            await user_commands.handle_menu(self.ctx, message)
+            return
+        if command == "tags":
+            await user_commands.handle_tags(self.ctx, message)
+            return
+        if command == "status":
+            await user_commands.handle_status(self.ctx, message)
+            return
+        if command == "id":
+            await user_commands.handle_id(self.ctx, message)
+            return
+        if command == "my":
             await user_commands.handle_my(self.ctx, message)
             return
         if command == "undo":
             await user_commands.handle_undo(self.ctx, message, args)
             return
-        if command == "resume" and message.is_private_message:
+        if command == "resume":
             await user_commands.handle_resume(self.ctx, message)
             return
 
@@ -301,8 +321,7 @@ class Dispatcher:
                         logger.info("archive_need_private_dm_failed", error=str(exc))
                 return
             if not authorized or not admin.admin_chat_allowed(self.ctx, message):
-                if message.is_private_message:
-                    await self.ctx.api.send_message(message.chat.id, fa.ERR_UNKNOWN_COMMAND)
+                await self.ctx.api.send_message(message.chat.id, fa.ERR_UNKNOWN_COMMAND)
                 return
             await self._on_admin_command(session, message, command, args)
 
@@ -385,6 +404,8 @@ class Dispatcher:
         async with lock, self.ctx.db.session() as session:
             if data.action in admin.ADMIN_ACTIONS:
                 await admin.handle_admin_callback(self.ctx, session, cq)
+            elif data.action in menu.MENU_ACTIONS:
+                await menu.handle_menu_callback(self.ctx, cq)
             else:
                 await wizard.handle_wizard_callback(self.ctx, session, cq)
 

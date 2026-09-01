@@ -44,20 +44,28 @@ async def handle_start(ctx: BotContext, message: Message) -> None:
             text = fa.start_message(name)
         show_admin = promoted or ctx.is_runtime_admin(message.from_user.id) or bool(user.is_admin)
     await ctx.api.send_message(
-        message.chat.id, text, menu.main_menu_keyboard(ctx, is_admin=show_admin)
+        message.chat.id, text, menu.persistent_reply_keyboard(ctx, is_admin=show_admin)
     )
 
 
 async def handle_help(ctx: BotContext, message: Message) -> None:
     if message.from_user is None:
         return
-    await menu.send_help(ctx, message.chat.id, message.from_user.id)
+    await menu.send_help(
+        ctx, message.chat.id, message.from_user.id, private=message.is_private_message
+    )
 
 
 async def handle_menu(ctx: BotContext, message: Message) -> None:
     if message.from_user is None:
         return
-    await menu.send_menu(ctx, message.chat.id, message.from_user.id)
+    await menu.send_menu(
+        ctx, message.chat.id, message.from_user.id, private=message.is_private_message
+    )
+
+
+async def handle_add_to_group(ctx: BotContext, message: Message) -> None:
+    await menu.send_add_to_group(ctx, message.chat.id)
 
 
 async def handle_tags(ctx: BotContext, message: Message) -> None:

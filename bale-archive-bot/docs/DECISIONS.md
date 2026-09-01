@@ -135,3 +135,14 @@ the worker does not download it. Image-only posts skip the extra question.
 The conversation state is ``awaiting_image_keep``; the SQL status reuses
 ``awaiting_tag_count`` to avoid a Postgres enum migration.
 
+## D-19: Persistent reply keyboard is the private-chat command chrome
+Bale `sendMessage.reply_markup` may be `InlineKeyboardMarkup` **or**
+`ReplyKeyboardMarkup`, not both on one message. Private `/start`, `/menu`,
+and `/help` attach a compact two-column reply keyboard so commands sit in
+the bar under the composer (the same place a leftover «شروع مجدد» used to
+appear). Tapping a button sends that label as ordinary text; `parse_command`
+maps the exact label. Groups keep the inline menu so a reply keyboard is
+never installed for every member. Wizard steps stay inline: a later inline
+message does not remove the private bar. Add-to-group stays a URL button on
+its own follow-up message because a reply-keyboard tap cannot open a URL.
+

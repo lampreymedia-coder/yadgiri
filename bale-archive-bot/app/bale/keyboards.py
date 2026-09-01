@@ -14,7 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.bale.models import InlineKeyboardButton, InlineKeyboardMarkup
+from app.bale.models import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
 
 CALLBACK_VERSION = "1"
 MAX_CALLBACK_BYTES = 64
@@ -78,6 +83,10 @@ def url_button(text: str, url: str) -> InlineKeyboardButton:
 
 def keyboard(rows: list[list[InlineKeyboardButton]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def reply_keyboard(rows: list[list[KeyboardButton]], *, resize: bool = True) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=resize)
 
 
 def grid(buttons: list[InlineKeyboardButton], columns: int) -> list[list[InlineKeyboardButton]]:

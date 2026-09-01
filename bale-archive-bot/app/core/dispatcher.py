@@ -42,8 +42,26 @@ _PERSIAN_COMMANDS = {
 }
 
 
+def _command_key(text: str) -> str:
+    return normalize_fa(text).replace(" ", "")
+
+
+# Exact labels of the persistent reply keyboard (and leftover «شروع مجدد»).
+_REPLY_BUTTON_COMMANDS = {
+    _command_key(fa.BTN_MENU_HOW): "help",
+    _command_key(fa.BTN_MENU_TAGS): "tags",
+    _command_key(fa.BTN_MENU_MY): "my",
+    _command_key(fa.BTN_MENU_RESUME): "resume",
+    _command_key(fa.BTN_MENU_STATUS): "status",
+    _command_key(fa.BTN_MENU_ID): "id",
+    _command_key(fa.BTN_MENU_PANEL): "panel",
+    _command_key(fa.BTN_ADD_TO_GROUP): "addgroup",
+    _command_key(fa.BTN_RESTART): "start",
+}
+
+
 def parse_command(text: str) -> tuple[str, list[str]] | None:
-    """Parse '/cmd arg1 arg2' or a Persian alias such as «آرشیو»."""
+    """Parse '/cmd arg1 arg2', a reply-keyboard label, or a Persian alias."""
     stripped = (text or "").strip()
     if not stripped:
         return None
@@ -51,7 +69,10 @@ def parse_command(text: str) -> tuple[str, list[str]] | None:
         parts = stripped.split()
         command = parts[0][1:].split("@")[0].lower()
         return command, parts[1:]
-    first = normalize_fa(stripped.split()[0]).replace(" ", "")
+    mapped = _REPLY_BUTTON_COMMANDS.get(_command_key(stripped))
+    if mapped is not None:
+        return mapped, []
+    first = _command_key(stripped.split()[0])
     mapped = _PERSIAN_COMMANDS.get(first)
     if mapped is not None:
         return mapped, stripped.split()[1:]
@@ -298,6 +319,9 @@ class Dispatcher:
             return
         if command == "resume":
             await user_commands.handle_resume(self.ctx, message)
+            return
+        if command == "addgroup":
+            await user_commands.handle_add_to_group(self.ctx, message)
             return
 
         async with self.ctx.db.session() as session:

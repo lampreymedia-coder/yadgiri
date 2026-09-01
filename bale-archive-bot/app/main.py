@@ -231,7 +231,7 @@ class Application:
     async def _notify_owner_ready(self) -> None:
         """Tell the owner the process is live — also proves private sendMessage works."""
         assert self.ctx is not None
-        from app.bale.keyboards import keyboard, url_button
+        from app.handlers.menu import persistent_reply_keyboard
         from app.i18n import fa
 
         owner_id = next(iter(self.ctx.runtime_admin_ids), None)
@@ -239,18 +239,7 @@ class Application:
             owner_id = self.ctx.admin_notify_chat_id
         if owner_id is None:
             return
-        markup = None
-        if self.ctx.bot_username:
-            markup = keyboard(
-                [
-                    [
-                        url_button(
-                            fa.BTN_ADD_TO_GROUP,
-                            f"https://ble.ir/{self.ctx.bot_username}?startgroup=start",
-                        )
-                    ]
-                ]
-            )
+        markup = persistent_reply_keyboard(self.ctx, is_admin=True)
         try:
             await self.api.send_message(owner_id, fa.BOT_READY_PING, markup)
             logger.info("owner_ready_ping_sent", chat_id=owner_id)

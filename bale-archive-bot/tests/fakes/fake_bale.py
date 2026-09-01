@@ -89,6 +89,13 @@ class FakeBaleServer:
                 return message.reply_markup
         return None
 
+    @staticmethod
+    def markup_labels(markup: dict[str, Any] | None) -> list[str]:
+        if not markup:
+            return []
+        rows = markup.get("keyboard") or markup.get("inline_keyboard") or []
+        return [btn["text"] for row in rows for btn in row]
+
     def calls_for(self, method: str) -> list[dict[str, Any]]:
         return [params for name, params in self.calls if name == method]
 

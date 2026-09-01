@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 
-from app.bale.keyboards import button, keyboard, parse_callback, url_button
-from app.bale.models import CallbackQuery, InlineKeyboardMarkup, Message
+from app.bale.keyboards import button, keyboard, parse_callback, reply_keyboard, url_button
+from app.bale.models import (
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyMarkup,
+)
 from app.core.context import BotContext
 from app.db.models import IN_PROGRESS_STATUSES, Submission, SubmissionStatus
 from app.db.repositories.groups import GroupRepository
@@ -57,6 +64,51 @@ def main_menu_keyboard(ctx: BotContext, *, is_admin: bool) -> InlineKeyboardMark
     return keyboard(rows)
 
 
+def persistent_reply_keyboard(ctx: BotContext, *, is_admin: bool) -> ReplyKeyboardMarkup:
+    """Bottom-of-chat command bar for private conversations only."""
+    rows: list[list[KeyboardButton]] = [
+        [
+            KeyboardButton(text=fa.BTN_MENU_HOW),
+            KeyboardButton(text=fa.BTN_MENU_TAGS),
+        ],
+        [
+            KeyboardButton(text=fa.BTN_MENU_MY),
+            KeyboardButton(text=fa.BTN_MENU_RESUME),
+        ],
+        [
+            KeyboardButton(text=fa.BTN_MENU_STATUS),
+            KeyboardButton(text=fa.BTN_MENU_ID),
+        ],
+    ]
+    if is_admin:
+        if ctx.bot_username:
+            rows.append([KeyboardButton(text=fa.BTN_ADD_TO_GROUP)])
+        rows.append([KeyboardButton(text=fa.BTN_MENU_PANEL)])
+    return reply_keyboard(rows)
+
+
+def chrome_markup(ctx: BotContext, *, is_admin: bool, private: bool) -> ReplyMarkup:
+    """Private chats get the persistent bar; groups keep an inline menu."""
+    if private:
+        return persistent_reply_keyboard(ctx, is_admin=is_admin)
+    return main_menu_keyboard(ctx, is_admin=is_admin)
+
+
+def add_to_group_markup(ctx: BotContext) -> InlineKeyboardMarkup | None:
+    if not ctx.bot_username:
+        return None
+    return keyboard(
+        [
+            [
+                url_button(
+                    fa.BTN_ADD_TO_GROUP,
+                    f"https://ble.ir/{ctx.bot_username}?startgroup=start",
+                )
+            ]
+        ]
+    )
+
+
 async def _is_admin(ctx: BotContext, bale_user_id: int) -> bool:
     if ctx.is_runtime_admin(bale_user_id):
         return True
@@ -65,16 +117,29 @@ async def _is_admin(ctx: BotContext, bale_user_id: int) -> bool:
     return bool(user is not None and user.is_admin)
 
 
-async def send_menu(ctx: BotContext, chat_id: int, user_id: int) -> None:
-    admin = await _is_admin(ctx, user_id)
-    await ctx.api.send_message(chat_id, fa.MENU_HEADER, main_menu_keyboard(ctx, is_admin=admin))
-
-
-async def send_help(ctx: BotContext, chat_id: int, user_id: int) -> None:
+async def send_menu(ctx: BotContext, chat_id: int, user_id: int, *, private: bool) -> None:
     admin = await _is_admin(ctx, user_id)
     await ctx.api.send_message(
-        chat_id, fa.help_message(is_admin=admin), main_menu_keyboard(ctx, is_admin=admin)
+        chat_id, fa.MENU_HEADER, chrome_markup(ctx, is_admin=admin, private=private)
     )
+
+
+async def send_help(ctx: BotContext, chat_id: int, user_id: int, *, private: bool) -> None:
+    admin = await _is_admin(ctx, user_id)
+    await ctx.api.send_message(
+        chat_id,
+        fa.help_message(is_admin=admin),
+        chrome_markup(ctx, is_admin=admin, private=private),
+    )
+
+
+async def send_add_to_group(ctx: BotContext, chat_id: int) -> None:
+    markup = add_to_group_markup(ctx)
+    if markup is None:
+        await ctx.api.send_message(chat_id, fa.ADD_TO_GROUP_UNAVAILABLE)
+        return
+    url = f"https://ble.ir/{ctx.bot_username}?startgroup=start"
+    await ctx.api.send_message(chat_id, fa.add_to_group_invite(url), markup)
 
 
 async def send_public_tags(ctx: BotContext, chat_id: int) -> None:
@@ -190,8 +255,9 @@ async def handle_menu_callback(ctx: BotContext, cq: CallbackQuery) -> None:
     data = parse_callback(cq.data or "")
     chat_id = cq.message.chat.id if cq.message is not None else cq.from_user.id
     user_id = cq.from_user.id
+    private = cq.message.is_private_message if cq.message is not None else True
     if data.arg == ACT_HOW:
-        await send_help(ctx, chat_id, user_id)
+        await send_help(ctx, chat_id, user_id, private=private)
     elif data.arg == ACT_TAGS:
         await send_public_tags(ctx, chat_id)
     elif data.arg == ACT_MY:
@@ -224,7 +290,7 @@ async def handle_menu_callback(ctx: BotContext, cq: CallbackQuery) -> None:
                 ),
             )
         else:
-            await send_menu(ctx, chat_id, user_id)
+            await send_menu(ctx, chat_id, user_id, private=private)
     elif data.arg == ACT_PANEL:
         if await _is_admin(ctx, user_id):
             from app.handlers.admin import send_panel
@@ -233,7 +299,7 @@ async def handle_menu_callback(ctx: BotContext, cq: CallbackQuery) -> None:
         else:
             await ctx.api.send_message(chat_id, fa.ERR_NOT_YOURS)
     else:
-        await send_menu(ctx, chat_id, user_id)
+        await send_menu(ctx, chat_id, user_id, private=private)
 
     if ctx.caps.has("answerCallbackQuery"):
         from app.bale.errors import BaleAPIError, NetworkError

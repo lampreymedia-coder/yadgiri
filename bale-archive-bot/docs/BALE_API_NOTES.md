@@ -15,7 +15,7 @@
 | `getChatMember` and `getChatAdministrators` exist | group joiners can be verified against their live Bale group role |
 | `editMessageText` accepts `reply_markup`; no `editMessageReplyMarkup` | all keyboard updates send text+keyboard together via `safe_edit()` |
 | `callback_data` ≤ 64 bytes | ASCII scheme `<v>|<act>|<sid>|<arg>` (`app/bale/keyboards.py`) |
-| `sendMessage` has no `parse_mode` | plain-text messages only; `FORMATTING_ENABLED=false` |
+| `sendMessage.reply_markup` may be inline **or** reply keyboard | private command chrome is `ReplyKeyboardMarkup`; wizard/URL actions stay inline |
 | `Message` has no `entities` / `media_group_id` | regex hashtag extraction; time-window album buffer (`ALBUM_WINDOW_MS`) |
 | `deleteMessage`: < 48h, needs can_delete_messages | `groups.bot_can_delete` tracked; failure degrades gracefully |
 | download ≤ 20MB; upload 10MB photo / 50MB other; `file_path` valid 1h | archive channel is the retention layer for 20–50MB files |

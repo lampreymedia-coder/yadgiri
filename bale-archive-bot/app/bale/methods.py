@@ -15,6 +15,7 @@ from app.bale.models import (
     File,
     InlineKeyboardMarkup,
     Message,
+    ReplyMarkup,
     Update,
     User,
     WebhookInfo,
@@ -94,7 +95,7 @@ class BaleAPI:
         self,
         chat_id: int,
         text: str,
-        reply_markup: InlineKeyboardMarkup | None = None,
+        reply_markup: ReplyMarkup | None = None,
         reply_to_message_id: int | None = None,
         is_group: bool = False,
     ) -> Message:

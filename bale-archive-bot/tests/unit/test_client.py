@@ -120,6 +120,29 @@ async def test_send_payload_matches_bale_libraries() -> None:
     await client.close()
 
 
+async def test_reply_keyboard_is_json_string_like_inline() -> None:
+    from app.bale.methods import BaleAPI
+    from app.bale.models import KeyboardButton, ReplyKeyboardMarkup
+    from app.i18n import fa
+
+    server = FakeBaleServer()
+    client = await make_client(server)
+    api = BaleAPI(client)
+    await api.send_message(
+        99,
+        "hi",
+        ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text=fa.BTN_MENU_HOW), KeyboardButton(text=fa.BTN_MENU_TAGS)]]
+        ),
+    )
+    sent = server.calls_for("sendMessage")[0]
+    assert isinstance(sent["reply_markup"], str)
+    decoded = json.loads(sent["reply_markup"])
+    assert decoded["keyboard"][0][0]["text"] == fa.BTN_MENU_HOW
+    assert decoded["resize_keyboard"] is True
+    await client.close()
+
+
 async def test_read_methods_use_get_like_official_library() -> None:
     server = FakeBaleServer()
     client = await make_client(server)

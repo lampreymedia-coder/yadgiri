@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from app.bale.models import Message, Update
+from app.bale.models import KeyboardButton, Message, ReplyKeyboardMarkup, Update
+from app.i18n import fa
 
 
 def test_chat_and_user_ids_accept_numeric_strings() -> None:
@@ -74,3 +75,19 @@ def test_voice_float_duration_parses() -> None:
     assert update.message.voice is not None
     assert update.message.voice.duration == 12
     assert update.message.voice.file_size == 3000
+
+
+def test_reply_keyboard_payload_is_compact() -> None:
+    markup = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=fa.BTN_MENU_HOW), KeyboardButton(text=fa.BTN_MENU_TAGS)],
+            [KeyboardButton(text=fa.BTN_MENU_MY)],
+        ]
+    )
+    payload = markup.to_payload()
+    assert payload["resize_keyboard"] is True
+    assert payload["keyboard"] == [
+        [{"text": fa.BTN_MENU_HOW}, {"text": fa.BTN_MENU_TAGS}],
+        [{"text": fa.BTN_MENU_MY}],
+    ]
+    assert "inline_keyboard" not in payload

@@ -17,6 +17,7 @@ from app.core.dispatcher import Dispatcher, parse_command
 from app.db.models import Submission, SubmissionStatus
 from app.db.repositories.outbox import OutboxRepository
 from app.domain.submission import SubmissionService
+from app.i18n import fa
 from app.workers.outbox import run_outbox_once
 from app.workers.ttl_sweeper import run_expiry_once, run_reminders_once
 from tests.e2e.test_wizard_flow import (
@@ -48,6 +49,14 @@ def test_parse_command() -> None:
     assert parse_command("منو") == ("menu", [])
     assert parse_command("وضعیت") == ("status", [])
     assert parse_command("/id") == ("id", [])
+    assert parse_command(fa.BTN_MENU_HOW) == ("help", [])
+    assert parse_command(fa.BTN_MENU_MY) == ("my", [])
+    assert parse_command(fa.BTN_MENU_RESUME) == ("resume", [])
+    assert parse_command(fa.BTN_MENU_STATUS) == ("status", [])
+    assert parse_command(fa.BTN_MENU_ID) == ("id", [])
+    assert parse_command(fa.BTN_RESTART) == ("start", [])
+    assert parse_command(fa.BTN_MENU_PANEL) == ("panel", [])
+    assert parse_command(fa.BTN_ADD_TO_GROUP) == ("addgroup", [])
 
 
 async def test_empty_and_whitespace_message_ignored(

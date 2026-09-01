@@ -357,6 +357,38 @@ class InlineKeyboardMarkup(_BaleModel):
         return self.model_dump(mode="json", exclude_none=True)
 
 
+class KeyboardButton(_BaleModel):
+    """Reply-keyboard button. Bale documents only ``text``."""
+
+    text: str
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"text": self.text}
+
+
+class ReplyKeyboardMarkup(_BaleModel):
+    """Persistent bottom-of-chat keyboard (the bar under the composer).
+
+    ``sendMessage`` accepts this *or* :class:`InlineKeyboardMarkup`, never
+    both on the same message. ``resize_keyboard`` is the one extra field
+    Bale bot libraries already send so the bar stays compact.
+    """
+
+    keyboard: list[list[KeyboardButton]]
+    resize_keyboard: bool = True
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "keyboard": [[btn.to_payload() for btn in row] for row in self.keyboard]
+        }
+        if self.resize_keyboard:
+            payload["resize_keyboard"] = True
+        return payload
+
+
+ReplyMarkup = InlineKeyboardMarkup | ReplyKeyboardMarkup
+
+
 class WebhookInfo(_BaleModel):
     url: str = ""
     pending_update_count: int | None = None

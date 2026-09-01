@@ -646,10 +646,10 @@ async def test_member_start_has_no_add_to_group_button(
         )
     )
     markup = fake_bale.last_markup(55555)
-    labels = []
-    if markup:
-        labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
+    labels = FakeBaleServer.markup_labels(markup)
     assert fa.BTN_ADD_TO_GROUP not in labels
+    assert fa.BTN_MENU_PANEL not in labels
+    assert fa.BTN_MENU_HOW in labels
 
 
 async def test_admin_start_has_add_to_group_button(
@@ -677,8 +677,10 @@ async def test_admin_start_has_add_to_group_button(
     )
     markup = fake_bale.last_markup(111)
     assert markup is not None
-    labels = [btn["text"] for row in markup["inline_keyboard"] for btn in row]
+    labels = FakeBaleServer.markup_labels(markup)
+    assert "keyboard" in markup
     assert fa.BTN_ADD_TO_GROUP in labels
+    assert fa.BTN_MENU_PANEL in labels
 
 
 async def test_group_content_opens_wizard_in_private(

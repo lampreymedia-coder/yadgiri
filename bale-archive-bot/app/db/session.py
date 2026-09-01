@@ -7,6 +7,7 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+from sqlalchemy import event
 from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -20,14 +21,50 @@ from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
+_SQLITE_BUSY_MARKERS = ("database is locked", "database table is locked", "sqlite_busy")
+
+
+def is_sqlite_busy(exc: BaseException) -> bool:
+    """True for a transient SQLite writer conflict, not a down database."""
+    text = str(exc).lower()
+    if any(marker in text for marker in _SQLITE_BUSY_MARKERS):
+        return True
+    origin = getattr(exc, "orig", None)
+    if origin is not None and origin is not exc:
+        return is_sqlite_busy(origin)
+    cause = exc.__cause__
+    if cause is not None and cause is not exc:
+        return is_sqlite_busy(cause)
+    return False
+
 
 def is_connectivity_error(exc: BaseException) -> bool:
     """True for errors that indicate the database itself is unreachable."""
+    if is_sqlite_busy(exc):
+        return False
     if isinstance(exc, ConnectionError | OSError | TimeoutError):
         return True
     if isinstance(exc, OperationalError | InterfaceError):
         return True
     return bool(isinstance(exc, DBAPIError) and exc.connection_invalidated)
+
+
+def _apply_sqlite_pragmas(dbapi_connection: object, _record: object) -> None:
+    """WAL + busy timeout so readers do not fail writers immediately.
+
+    File SQLite in DELETE journal mode serialises the whole file. Workers that
+    used to hold a transaction open while calling the Bale API made ordinary
+    button taps raise ``database is locked``, which was then shown to the user
+    as a system outage.
+    """
+    cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+    try:
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        cursor.close()
 
 
 _FAILURE_THRESHOLD = 5
@@ -108,8 +145,10 @@ class Database:
                 db_path = make_url(url).database
                 if db_path:
                     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-                engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30}})
+                engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30.0}})
         self.engine: AsyncEngine = create_async_engine(url, **engine_kwargs)
+        if url.startswith("sqlite"):
+            event.listen(self.engine.sync_engine, "connect", _apply_sqlite_pragmas)
         self.session_factory = async_sessionmaker(
             self.engine, expire_on_commit=False, class_=AsyncSession
         )
@@ -127,7 +166,7 @@ class Database:
                 raise
             except Exception as exc:
                 # Only connectivity-class failures feed the breaker; logic
-                # errors (integrity, programming) must not open it.
+                # errors and SQLite BUSY must not open it.
                 if is_connectivity_error(exc):
                     await self.breaker.record_failure()
                 raise

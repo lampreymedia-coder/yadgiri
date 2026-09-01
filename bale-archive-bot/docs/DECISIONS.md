@@ -44,7 +44,9 @@ so interleaved albums from the same user cannot merge.
 `OperationalError`/`InterfaceError`/socket errors open the breaker and spool
 updates to disk. Integrity or programming errors do NOT: they indicate a logic
 bug, not an unavailable database, and spooling them would hide the bug and
-delay the user for no benefit.
+delay the user for no benefit. SQLite ``database is locked`` is also **not**
+connectivity: it is a writer conflict. The dispatcher retries, then spools
+silently; it does not tell the user the system is down.
 
 ## D-08: Load-test latency is asserted with bounded concurrency on SQLite
 The no-network test suite runs the 200-update load test against SQLite, which
@@ -145,4 +147,13 @@ maps the exact label. Groups keep the inline menu so a reply keyboard is
 never installed for every member. Wizard steps stay inline: a later inline
 message does not remove the private bar. Add-to-group stays a URL button on
 its own follow-up message because a reply-keyboard tap cannot open a URL.
+
+## D-20: SQLite must not hold a transaction across Bale HTTP
+File SQLite allows one writer. The media worker, outbox, reminder, and
+private-cleanup loops used to call `sendMessage` / `deleteMessage` /
+`getFile` inside `session.begin()`, which kept `bot.db-journal` open and
+made the next user tap fail with `database is locked`. That error is an
+`OperationalError`, so the dispatcher treated it as an outage and sent
+«سیستم موقتاً در دسترس نیست». Fix: WAL + 30s busy_timeout, HTTP outside
+the transaction, retry on BUSY, and no degraded user message for a lock.
 

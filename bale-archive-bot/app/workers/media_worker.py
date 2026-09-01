@@ -10,7 +10,7 @@ from pathlib import Path
 
 from app.config import StorageBackend
 from app.core.context import BotContext
-from app.db.models import StorageStatus
+from app.db.models import MediaFile, StorageStatus
 from app.db.repositories.misc import MediaRepository
 from app.domain.media import LocalStorage, S3Storage, Storage, process_media_file
 from app.domain.submission import image_storage_action
@@ -43,6 +43,7 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
     if not ctx.settings.media_download_enabled:
         return 0
     handled = 0
+    to_download: list[MediaFile] = []
     async with ctx.db.session() as session:
         repo = MediaRepository(session)
         # Look past files waiting for the image-keep answer so they do not
@@ -68,12 +69,21 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
                     break
                 continue
             await repo.update_status(media.id, StorageStatus.DOWNLOADING, increment_attempts=False)
-            result = await process_media_file(
-                ctx.api,
-                storage,
-                media,
-                max_download_bytes=ctx.settings.max_download_bytes,
-            )
+            to_download.append(media)
+            if handled + len(to_download) >= 5:
+                break
+
+    for media in to_download:
+        if handled >= 5:
+            break
+        result = await process_media_file(
+            ctx.api,
+            storage,
+            media,
+            max_download_bytes=ctx.settings.max_download_bytes,
+        )
+        async with ctx.db.session() as session:
+            repo = MediaRepository(session)
             if result.sha256 is not None and result.status is StorageStatus.STORED:
                 existing = await repo.find_by_sha(result.sha256)
                 if existing is not None and existing.id != media.id:
@@ -85,8 +95,6 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
                         storage_key=existing.storage_key,
                     )
                     handled += 1
-                    if handled >= 5:
-                        break
                     continue
             bucket = None
             if result.storage_key and ctx.settings.storage_backend is StorageBackend.S3:
@@ -100,6 +108,4 @@ async def run_media_once(ctx: BotContext, storage: Storage | None) -> int:
                 error=result.error,
             )
             handled += 1
-            if handled >= 5:
-                break
     return handled

@@ -96,6 +96,9 @@ class Application:
         self.dispatcher = Dispatcher(self.ctx)
         self._register_jobs()
         self.scheduler.start()
+        replayed = await self.dispatcher.process_spool()
+        if replayed:
+            logger.info("startup_spool_replayed", count=replayed)
 
         if self.ctx.archive_chat_id is not None:
             try:

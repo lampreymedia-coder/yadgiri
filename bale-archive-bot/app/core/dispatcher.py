@@ -6,6 +6,7 @@ webhook endpoint stay alive no matter what a handler does.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from pathlib import Path
@@ -25,6 +26,9 @@ from app.observability import metrics
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
+
+_SQLITE_BUSY_ATTEMPTS = 5
+
 
 # Whole-message Persian aliases so non-technical users need not type /archive.
 _PERSIAN_COMMANDS = {
@@ -94,22 +98,31 @@ class Dispatcher:
         try:
             await self._dispatch_inner(update)
         except Exception as exc:
-            from app.db.session import is_connectivity_error
+            from app.db.session import is_connectivity_error, is_sqlite_busy
 
-            if is_connectivity_error(exc):
+            if is_sqlite_busy(exc):
+                await self._spool_update(update, exc, notify_user=False)
+            elif is_connectivity_error(exc):
                 await self._handle_infra_failure(update, exc)
             else:
                 await handle_update_error(self.ctx, update, exc)
 
-    async def _handle_infra_failure(self, update: Update, exc: Exception) -> None:
-        """Database unavailable: spool the raw update to disk, tell the user."""
-        logger.error("infra_failure_spooling", update_id=update.update_id, error=str(exc))
+    async def _spool_update(self, update: Update, exc: Exception, *, notify_user: bool) -> None:
+        """Persist the raw update so it can be replayed when SQLite is free."""
+        logger.error(
+            "infra_failure_spooling",
+            update_id=update.update_id,
+            error=str(exc),
+            notify_user=notify_user,
+        )
         try:
             self._spool_dir.mkdir(parents=True, exist_ok=True)
             path = self._spool_dir / f"{update.update_id}_{int(time.time())}.json"
             path.write_text(json.dumps(update.raw(), ensure_ascii=False), encoding="utf-8")
         except OSError as spool_error:
             logger.error("spool_write_failed", error=str(spool_error))
+        if not notify_user:
+            return
         chat_id: int | None = None
         if update.message is not None:
             chat_id = update.message.chat.id
@@ -120,6 +133,10 @@ class Dispatcher:
                 await self.ctx.api.send_message(chat_id, fa.ERR_DEGRADED)
             except (BaleAPIError, NetworkError) as send_error:
                 logger.warning("degraded_notice_failed", error=str(send_error))
+
+    async def _handle_infra_failure(self, update: Update, exc: Exception) -> None:
+        """Database unreachable: spool the update and tell the user."""
+        await self._spool_update(update, exc, notify_user=True)
 
     async def _dispatch_inner(self, update: Update) -> None:
         if update.message is not None:
@@ -174,18 +191,53 @@ class Dispatcher:
                 extra_keys=sorted((update.model_extra or {}).keys()),
             )
 
-        async with self.ctx.db.session() as session:
-            if not await claim_update(session, update.update_id):
-                return
+        if not await self._claim_update(update.update_id):
+            return
+        await self._route_update(update)
 
-        if update.message is not None:
-            await self._on_message(update.message)
-        elif update.edited_message is not None:
-            await self._on_edited_message(update.edited_message)
-        elif update.callback_query is not None:
-            await self._on_callback(update.callback_query)
-        elif update.my_chat_member is not None or update.chat_member is not None:
-            await self._on_membership_update(update)
+    async def _claim_update(self, update_id: int) -> bool:
+        from app.db.session import is_sqlite_busy
+
+        for attempt in range(1, _SQLITE_BUSY_ATTEMPTS + 1):
+            try:
+                async with self.ctx.db.session() as session:
+                    return await claim_update(session, update_id)
+            except Exception as exc:
+                if not is_sqlite_busy(exc) or attempt >= _SQLITE_BUSY_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "sqlite_busy_retry_claim",
+                    update_id=update_id,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
+        return False
+
+    async def _route_update(self, update: Update) -> None:
+        from app.db.session import is_sqlite_busy
+
+        for attempt in range(1, _SQLITE_BUSY_ATTEMPTS + 1):
+            try:
+                if update.message is not None:
+                    await self._on_message(update.message)
+                elif update.edited_message is not None:
+                    await self._on_edited_message(update.edited_message)
+                elif update.callback_query is not None:
+                    await self._on_callback(update.callback_query)
+                elif update.my_chat_member is not None or update.chat_member is not None:
+                    await self._on_membership_update(update)
+                return
+            except Exception as exc:
+                if not is_sqlite_busy(exc) or attempt >= _SQLITE_BUSY_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "sqlite_busy_retry_route",
+                    update_id=update.update_id,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
 
     async def _on_membership_update(self, update: Update) -> None:
         payload = update.my_chat_member or update.chat_member

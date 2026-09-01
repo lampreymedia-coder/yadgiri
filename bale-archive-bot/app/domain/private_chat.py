@@ -143,9 +143,11 @@ async def sweep_private_ephemeral(ctx: BotContext, *, max_submissions: int = 5) 
     """Delete due summaries and leftover private messages of decided items.
 
     Bounded per run so a large backlog cannot occupy the process for minutes.
+    Bale API calls run *after* the DB transaction commits so SQLite is not
+    locked while deleteMessage round-trips.
     """
-    deleted = 0
     now = datetime.now(UTC)
+    jobs: list[tuple[int, int | None, list[int], list[int], bool]] = []
     async with ctx.db.session() as session:
         service = ctx.submission_service(session)
         rows = await service.submissions.list_terminal_private_residue()
@@ -156,17 +158,30 @@ async def sweep_private_ephemeral(ctx: BotContext, *, max_submissions: int = 5) 
             ephemeral_ids = _as_int_list(meta.get(META_EPHEMERAL_IDS))
             residue = private_residue_ids(submission)
             leftover = [mid for mid in residue if mid not in set(ephemeral_ids)]
+            due = bool(ephemeral_ids and (due_at is None or due_at <= now))
+            if leftover or due:
+                jobs.append((submission.id, chat_id, leftover, ephemeral_ids, due))
+
+    deleted = 0
+    for submission_id, chat_id, leftover, ephemeral_ids, due in jobs:
+        if leftover:
+            await delete_private_ids(ctx, chat_id, leftover)
+            deleted += len(leftover)
+        if due:
+            await delete_private_ids(ctx, chat_id, ephemeral_ids)
+            deleted += len(ephemeral_ids)
+        async with ctx.db.session() as session:
+            submission = await session.get(Submission, submission_id)
+            if submission is None:
+                continue
+            meta = meta_of(submission)
             if leftover:
-                await delete_private_ids(ctx, chat_id, leftover)
-                deleted += len(leftover)
                 meta = clear_private_message_meta(submission)
                 meta[META_EPHEMERAL_CHAT] = meta.get(META_EPHEMERAL_CHAT) or chat_id
                 meta[META_EPHEMERAL_IDS] = ephemeral_ids
                 meta[META_EPHEMERAL_AT] = meta.get(META_EPHEMERAL_AT)
                 submission.meta = meta
-            if ephemeral_ids and (due_at is None or due_at <= now):
-                await delete_private_ids(ctx, chat_id, ephemeral_ids)
-                deleted += len(ephemeral_ids)
+            if due:
                 meta = meta_of(submission)
                 meta[META_EPHEMERAL_CHAT] = None
                 meta[META_EPHEMERAL_IDS] = []

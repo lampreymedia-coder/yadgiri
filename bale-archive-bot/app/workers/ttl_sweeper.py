@@ -14,7 +14,7 @@ from app.bale.errors import BaleAPIError, NetworkError
 from app.config import ExpiredPolicy
 from app.core.context import BotContext
 from app.core.idempotency import purge_old_records
-from app.db.models import Group, SubmissionStatus
+from app.db.models import Group, Submission, SubmissionStatus
 from app.db.repositories.tags import TagRepository
 from app.domain.private_chat import META_REMINDER, settle_private_chat, sweep_private_ephemeral
 from app.i18n import fa
@@ -26,24 +26,30 @@ logger = get_logger(__name__)
 async def run_reminders_once(ctx: BotContext) -> int:
     """Send the minute-10 reminder for stale in-progress submissions."""
     sent = 0
+    jobs: list[tuple[int, int, str]] = []
     async with ctx.db.session() as session:
         service = ctx.submission_service(session)
         stale = await service.submissions.list_needing_reminder(
             timedelta(minutes=ctx.settings.reminder_after_minutes), datetime.now(UTC)
         )
+        now = datetime.now(UTC)
         for submission in stale:
-            submission.reminded_at = datetime.now(UTC)
+            submission.reminded_at = now
             if submission.wizard_chat_id is None:
                 continue
-            try:
-                posted = await ctx.api.send_message(
-                    submission.wizard_chat_id,
-                    fa.reminder_message(submission.content_type.value),
-                )
-                submission.meta = {**submission.meta, META_REMINDER: posted.message_id}
-                sent += 1
-            except (BaleAPIError, NetworkError) as exc:
-                logger.info("reminder_send_failed", short_id=submission.short_id, error=str(exc))
+            jobs.append((submission.id, submission.wizard_chat_id, submission.content_type.value))
+    for submission_id, chat_id, content_type in jobs:
+        try:
+            posted = await ctx.api.send_message(chat_id, fa.reminder_message(content_type))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("reminder_send_failed", submission_id=submission_id, error=str(exc))
+            continue
+        sent += 1
+        async with ctx.db.session() as session:
+            submission = await session.get(Submission, submission_id)
+            if submission is None:
+                continue
+            submission.meta = {**submission.meta, META_REMINDER: posted.message_id}
     return sent
 
 

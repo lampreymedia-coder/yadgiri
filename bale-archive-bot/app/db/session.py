@@ -57,7 +57,9 @@ def _apply_sqlite_pragmas(dbapi_connection: object, _record: object) -> None:
     button taps raise ``database is locked``, which was then shown to the user
     as a system outage.
     """
-    cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+    raw = getattr(dbapi_connection, "_connection", dbapi_connection)
+    sqlite_conn = getattr(raw, "_conn", raw)
+    cursor = sqlite_conn.cursor()  # type: ignore[attr-defined]
     try:
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=30000")

@@ -436,7 +436,22 @@ async def send_export(
         workbook.save(stream)
         data = stream.getvalue()
         file_name = "archive-export.xlsx"
-    await ctx.api.send_document(chat_id, data, file_name=file_name)
+    try:
+        await ctx.api.send_document(chat_id, data, file_name=file_name)
+    except (BaleAPIError, NetworkError) as exc:
+        logger.warning("export_document_failed", error=str(exc), file_name=file_name)
+        if file_format == "csv":
+            raise
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow([_cell(row[h]) for h in headers])
+        await ctx.api.send_document(
+            chat_id,
+            buffer.getvalue().encode("utf-8-sig"),
+            file_name="archive-export.csv",
+        )
 
 
 def _cell(value: Any) -> Any:
@@ -766,24 +781,41 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
                 logger.info("admin_denied_answer_failed", error=str(exc))
         return
     chat_id = cq.message.chat.id if cq.message is not None else cq.from_user.id
+    # Dismiss the spinner before slow work (Excel build, report SQL). Otherwise
+    # Bale shows the button as dead while the handler is still running.
+    if ctx.caps.has("answerCallbackQuery"):
+        try:
+            await ctx.api.answer_callback_query(cq.id)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("admin_answer_callback_failed", error=str(exc))
 
     if data.action == "ap":
-        if data.arg == "stats":
-            await send_stats(ctx, session, chat_id, [])
-        elif data.arg == "users":
-            await send_top_users(ctx, session, chat_id, [])
-        elif data.arg == "toptags":
-            await send_top_tags(ctx, session, chat_id, [])
-        elif data.arg == "tags":
-            await send_tags_list(ctx, session, chat_id)
-        elif data.arg == "groups":
-            await send_groups(ctx, session, chat_id)
-        elif data.arg == "health":
-            await send_health(ctx, session, chat_id)
-        elif data.arg == "settings":
-            await handle_settings(ctx, session, chat_id, [], cq.from_user.id)
-        elif data.arg == "export":
-            await send_export(ctx, session, chat_id, [])
+        logger.info("admin_panel_action", arg=data.arg, user_id=cq.from_user.id)
+        try:
+            if data.arg == "stats":
+                await send_stats(ctx, session, chat_id, [])
+            elif data.arg == "users":
+                await send_top_users(ctx, session, chat_id, [])
+            elif data.arg == "toptags":
+                await send_top_tags(ctx, session, chat_id, [])
+            elif data.arg == "tags":
+                await send_tags_list(ctx, session, chat_id)
+            elif data.arg == "groups":
+                await send_groups(ctx, session, chat_id)
+            elif data.arg == "health":
+                await send_health(ctx, session, chat_id)
+            elif data.arg == "settings":
+                await handle_settings(ctx, session, chat_id, [], cq.from_user.id)
+            elif data.arg == "export":
+                await send_export(ctx, session, chat_id, [])
+            else:
+                await send_panel(ctx, chat_id)
+        except (BaleAPIError, NetworkError) as exc:
+            logger.warning("admin_panel_send_failed", arg=data.arg, error=str(exc))
+            try:
+                await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+            except (BaleAPIError, NetworkError) as send_exc:
+                logger.warning("admin_panel_error_notice_failed", error=str(send_exc))
     elif data.action == "apg":
         slug, _, page = data.arg.partition(":")
         await send_tag_browse(ctx, session, chat_id, [slug, page or "1"])
@@ -870,12 +902,6 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
             await send_research_ready_notice(
                 ctx, session, group, cq.from_user.id, fa.research_set_done(title, ctx.bot_username)
             )
-
-    if ctx.caps.has("answerCallbackQuery"):
-        try:
-            await ctx.api.answer_callback_query(cq.id)
-        except (BaleAPIError, NetworkError) as exc:
-            logger.info("admin_answer_callback_failed", error=str(exc))
 
 
 async def _handle_flow_confirm(

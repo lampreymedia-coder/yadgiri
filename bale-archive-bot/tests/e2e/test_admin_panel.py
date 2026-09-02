@@ -93,6 +93,15 @@ async def test_admin_panel_buttons_return_content(
     assert "علی احمدی" in texts
     assert "یادگیری" in texts
     assert fake_bale.calls_for("sendDocument")
+    answers = fake_bale.calls_for("answerCallbackQuery")
+    assert answers
+    document_at = next(
+        i for i, (method, _params) in enumerate(fake_bale.calls) if method == "sendDocument"
+    )
+    answer_at = next(
+        i for i, (method, _params) in enumerate(fake_bale.calls) if method == "answerCallbackQuery"
+    )
+    assert answer_at < document_at
 
 
 async def test_admin_slash_health_and_export(ctx: BotContext, fake_bale: FakeBaleServer) -> None:

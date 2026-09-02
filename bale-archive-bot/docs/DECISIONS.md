@@ -19,10 +19,12 @@ text. Seed tag titles, however, are display strings and therefore live in
 
 ## D-03: `users.display_name` generated column is Postgres-only
 The mandated schema uses `GENERATED ALWAYS AS (btrim(...)) STORED`, which the
-Alembic migration creates verbatim on PostgreSQL. SQLite (used for fast tests)
-lacks `btrim`, so the ORM computes `display_name` as a Python property and the
-report SQL uses `coalesce(u.display_name, '')`. Production behaviour is
-identical to the spec.
+Alembic migration creates verbatim on PostgreSQL. SQLite lacks `btrim` and that
+generated column, so the ORM computes `display_name` as a Python property.
+Postgres report SQL still uses `coalesce(u.display_name, '')`. SQLite report
+SQL concatenates `first_name`/`last_name` with the same trim rule so the admin
+panel (Excel export, top users) works on this host. Postgres production
+behaviour stays identical to the spec.
 
 ## D-04: Conversation state lives only in Postgres
 Redis is not installed and is not a dependency. `STATE_BACKEND` is forced to
@@ -46,7 +48,9 @@ updates to disk. Integrity or programming errors do NOT: they indicate a logic
 bug, not an unavailable database, and spooling them would hide the bug and
 delay the user for no benefit. SQLite ``database is locked`` is also **not**
 connectivity: it is a writer conflict. The dispatcher retries, then spools
-silently; it does not tell the user the system is down.
+silently; it does not tell the user the system is down. SQLite also raises
+`OperationalError` for ``no such column`` / ``no such function``; those are
+programming errors and must not be shown as «سیستم موقتاً در دسترس نیست».
 
 ## D-08: Load-test latency is asserted with bounded concurrency on SQLite
 The no-network test suite runs the 200-update load test against SQLite, which
@@ -156,4 +160,14 @@ made the next user tap fail with `database is locked`. That error is an
 `OperationalError`, so the dispatcher treated it as an outage and sent
 «سیستم موقتاً در دسترس نیست». Fix: WAL + 30s busy_timeout, HTTP outside
 the transaction, retry on BUSY, and no degraded user message for a lock.
+
+## D-21: Admin report SQL is dialect-aware
+The spec's FILTER/LATERAL/pg_trgm/`pg_database_size` queries stay verbatim for
+PostgreSQL. SQLite (tests and this host) runs equivalent bound-parameter
+queries: CASE instead of FILTER, a media subquery instead of LATERAL, LIKE
+instead of trigram, `group_concat` instead of `string_agg`, and
+`PRAGMA page_count * page_size` instead of `pg_size_pretty`. Without that
+split, panel buttons (Excel export, system health, stats) raised
+`no such column: u.display_name` / `no such function: current_database` and
+the dispatcher spooled them as an outage.
 

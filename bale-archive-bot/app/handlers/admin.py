@@ -352,8 +352,7 @@ async def send_search(
     from app.domain.classify import normalize_fa
 
     service = reports.ReportService(session)
-    use_trigram = session.bind is not None and session.bind.dialect.name == "postgresql"
-    hits = await service.search(normalize_fa(query), use_trigram=use_trigram)
+    hits = await service.search(normalize_fa(query), use_trigram=reports.is_postgres(session))
     if not hits:
         await ctx.api.send_message(chat_id, fa.SEARCH_EMPTY)
         return

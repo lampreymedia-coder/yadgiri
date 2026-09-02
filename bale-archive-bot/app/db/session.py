@@ -23,24 +23,56 @@ logger = get_logger(__name__)
 
 _SQLITE_BUSY_MARKERS = ("database is locked", "database table is locked", "sqlite_busy")
 
+# SQLite raises OperationalError for both "disk I/O" and "no such column".
+# The latter is a programming bug (D-07), not an unreachable database.
+_SQL_PROGRAMMING_MARKERS = (
+    "no such column",
+    "no such function",
+    "no such table",
+    "no such index",
+    "no such view",
+    "syntax error",
+    "unrecognized token",
+    "ambiguous column name",
+    "has no column named",
+    "unknown column",
+    "undefined column",
+    "undefined function",
+    "undefined table",
+    "undefined_column",
+    "undefined_function",
+    "undefined_table",
+)
 
-def is_sqlite_busy(exc: BaseException) -> bool:
-    """True for a transient SQLite writer conflict, not a down database."""
+
+def _exception_text_matches(exc: BaseException, markers: tuple[str, ...]) -> bool:
     text = str(exc).lower()
-    if any(marker in text for marker in _SQLITE_BUSY_MARKERS):
+    if any(marker in text for marker in markers):
         return True
     origin = getattr(exc, "orig", None)
     if origin is not None and origin is not exc:
-        return is_sqlite_busy(origin)
+        return _exception_text_matches(origin, markers)
     cause = exc.__cause__
     if cause is not None and cause is not exc:
-        return is_sqlite_busy(cause)
+        return _exception_text_matches(cause, markers)
     return False
+
+
+def is_sqlite_busy(exc: BaseException) -> bool:
+    """True for a transient SQLite writer conflict, not a down database."""
+    return _exception_text_matches(exc, _SQLITE_BUSY_MARKERS)
+
+
+def is_sql_programming_error(exc: BaseException) -> bool:
+    """True for SQL that the engine rejected (missing column/function, syntax)."""
+    return _exception_text_matches(exc, _SQL_PROGRAMMING_MARKERS)
 
 
 def is_connectivity_error(exc: BaseException) -> bool:
     """True for errors that indicate the database itself is unreachable."""
     if is_sqlite_busy(exc):
+        return False
+    if is_sql_programming_error(exc):
         return False
     if isinstance(exc, ConnectionError | OSError | TimeoutError):
         return True

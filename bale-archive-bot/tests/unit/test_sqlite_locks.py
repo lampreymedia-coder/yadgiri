@@ -11,7 +11,12 @@ from sqlalchemy.exc import OperationalError
 
 from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
-from app.db.session import Database, is_connectivity_error, is_sqlite_busy
+from app.db.session import (
+    Database,
+    is_connectivity_error,
+    is_sql_programming_error,
+    is_sqlite_busy,
+)
 from app.i18n import fa
 from tests.e2e.test_commands import _private
 from tests.fakes.fake_bale import FakeBaleServer
@@ -28,10 +33,28 @@ def test_sqlite_busy_is_not_a_connectivity_outage() -> None:
     assert is_connectivity_error(exc) is False
 
 
+def test_sql_programming_error_is_not_a_connectivity_outage() -> None:
+    orig = sqlite3.OperationalError("no such column: u.display_name")
+    exc = OperationalError("(sqlite3.OperationalError) no such column: u.display_name", {}, orig)
+    assert is_sql_programming_error(exc) is True
+    assert is_sqlite_busy(exc) is False
+    assert is_connectivity_error(exc) is False
+
+
+def test_missing_sqlite_function_is_not_connectivity() -> None:
+    orig = sqlite3.OperationalError("no such function: current_database")
+    exc = OperationalError(
+        "(sqlite3.OperationalError) no such function: current_database", {}, orig
+    )
+    assert is_sql_programming_error(exc) is True
+    assert is_connectivity_error(exc) is False
+
+
 def test_unable_to_open_sqlite_file_is_connectivity() -> None:
     orig = sqlite3.OperationalError("unable to open database file")
     exc = OperationalError("(sqlite3.OperationalError) unable to open database file", {}, orig)
     assert is_sqlite_busy(exc) is False
+    assert is_sql_programming_error(exc) is False
     assert is_connectivity_error(exc) is True
 
 

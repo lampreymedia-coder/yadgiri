@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.bale.keyboards import pack_callback
 from app.bale.models import Update
 from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
@@ -11,8 +12,8 @@ from app.db.repositories.submissions import SubmissionRepository
 from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
 from app.i18n import fa
-from tests.e2e.test_commands import _private
-from tests.e2e.test_wizard_flow import USER_ID, callback_update, wizard_buttons
+from tests.e2e.test_commands import _private, _reply_labels
+from tests.e2e.test_wizard_flow import USER_ID, callback_update
 from tests.fakes.fake_bale import FakeBaleServer
 
 
@@ -44,11 +45,11 @@ async def _seed_completed_item(ctx: BotContext) -> None:
         await subs.set_status(submission, SubmissionStatus.COMPLETED)
 
 
-def _tap(buttons: dict[str, str], label: str) -> Update:
-    return callback_update(buttons[label], USER_ID, 1)
+def _tap_arg(arg: str) -> Update:
+    return callback_update(pack_callback("ap", "", arg), USER_ID, 1)
 
 
-async def test_admin_panel_buttons_return_content(
+async def test_admin_panel_reply_bar_and_callbacks(
     ctx: BotContext, fake_bale: FakeBaleServer
 ) -> None:
     ctx.runtime_admin_ids = {USER_ID}
@@ -56,8 +57,10 @@ async def test_admin_panel_buttons_return_content(
     dispatcher = Dispatcher(ctx)
 
     await dispatcher.dispatch(_private("/panel"))
-    assert fa.PANEL_HEADER in "\n".join(fake_bale.sent_texts(USER_ID))
-    buttons = wizard_buttons(fake_bale, USER_ID)
+    texts = "\n".join(fake_bale.sent_texts(USER_ID))
+    assert fa.PANEL_HEADER in texts
+    assert fa.PANEL_BAR_HINT in texts
+    labels = _reply_labels(fake_bale.last_markup(USER_ID))
     for label in (
         fa.BTN_PANEL_STATS,
         fa.BTN_PANEL_TOP_USERS,
@@ -67,17 +70,18 @@ async def test_admin_panel_buttons_return_content(
         fa.BTN_PANEL_HEALTH,
         fa.BTN_PANEL_SETTINGS,
         fa.BTN_PANEL_EXPORT,
+        fa.BTN_PANEL_BACK,
     ):
-        assert label in buttons
+        assert label in labels
 
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_STATS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_TOP_USERS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_TOP_TAGS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_TAGS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_GROUPS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_HEALTH))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_SETTINGS))
-    await dispatcher.dispatch(_tap(buttons, fa.BTN_PANEL_EXPORT))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_STATS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_TOP_USERS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_TOP_TAGS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_TAGS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_GROUPS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_HEALTH))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_SETTINGS))
+    await dispatcher.dispatch(_private(fa.BTN_PANEL_EXPORT))
 
     texts = "\n".join(fake_bale.sent_texts(USER_ID))
     assert fa.ERR_DEGRADED not in texts
@@ -93,15 +97,13 @@ async def test_admin_panel_buttons_return_content(
     assert "علی احمدی" in texts
     assert "یادگیری" in texts
     assert fake_bale.calls_for("sendDocument")
-    answers = fake_bale.calls_for("answerCallbackQuery")
-    assert answers
-    document_at = next(
-        i for i, (method, _params) in enumerate(fake_bale.calls) if method == "sendDocument"
-    )
-    answer_at = next(
-        i for i, (method, _params) in enumerate(fake_bale.calls) if method == "answerCallbackQuery"
-    )
-    assert answer_at < document_at
+
+    docs_before = len(fake_bale.calls_for("sendDocument"))
+    await dispatcher.dispatch(_tap_arg("health"))
+    await dispatcher.dispatch(_tap_arg("export"))
+    assert fa.HEALTH_HEADER in "\n".join(fake_bale.sent_texts(USER_ID))
+    assert len(fake_bale.calls_for("sendDocument")) > docs_before
+    assert fake_bale.calls_for("answerCallbackQuery")
 
 
 async def test_admin_slash_health_and_export(ctx: BotContext, fake_bale: FakeBaleServer) -> None:

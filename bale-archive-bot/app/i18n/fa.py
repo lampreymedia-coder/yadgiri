@@ -844,6 +844,10 @@ BTN_PANEL_GROUPS = "👥 گروه‌ها"
 BTN_PANEL_HEALTH = "❤️ سلامت سیستم"
 BTN_PANEL_SETTINGS = "⚙️ تنظیمات"
 BTN_PANEL_EXPORT = "📤 خروجی اکسل"
+BTN_PANEL_BACK = "بازگشت به منو"
+PANEL_BAR_HINT = (
+    "همین گزینه‌ها روی نوار پایین صفحه هم هستند؛" " اکسل و سلامت سیستم را از آنجا هم بزنید."
+)
 
 REPORT_DIVIDER = "──────────────────────────"
 EMPTY_REPORT = "هنوز داده‌ای ثبت نشده."

@@ -61,6 +61,15 @@ _REPLY_BUTTON_COMMANDS = {
     _command_key(fa.BTN_MENU_PANEL): "panel",
     _command_key(fa.BTN_ADD_TO_GROUP): "addgroup",
     _command_key(fa.BTN_RESTART): "start",
+    _command_key(fa.BTN_PANEL_STATS): "stats",
+    _command_key(fa.BTN_PANEL_TOP_USERS): "top_users",
+    _command_key(fa.BTN_PANEL_TOP_TAGS): "top_tags",
+    _command_key(fa.BTN_PANEL_TAGS): "admintags",
+    _command_key(fa.BTN_PANEL_GROUPS): "groups",
+    _command_key(fa.BTN_PANEL_HEALTH): "health",
+    _command_key(fa.BTN_PANEL_SETTINGS): "settings",
+    _command_key(fa.BTN_PANEL_EXPORT): "export",
+    _command_key(fa.BTN_PANEL_BACK): "menu",
 }
 
 
@@ -432,7 +441,7 @@ class Dispatcher:
             await admin.send_get(ctx, session, chat_id, args)
         elif command == "export":
             await admin.send_export(ctx, session, chat_id, args)
-        elif command == "tags":
+        elif command == "admintags" or command == "tags":
             await admin.send_tags_list(ctx, session, chat_id)
         elif command == "addtag":
             await admin.start_addtag_flow(ctx, session, message)

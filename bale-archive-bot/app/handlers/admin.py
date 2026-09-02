@@ -16,8 +16,8 @@ import jdatetime
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bale.errors import BaleAPIError, NetworkError
-from app.bale.keyboards import button, keyboard, parse_callback
-from app.bale.models import CallbackQuery, Message
+from app.bale.keyboards import button, keyboard, parse_callback, reply_keyboard
+from app.bale.models import CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup
 from app.core.context import BotContext
 from app.core.fsm import Conversation, WizardState
 from app.db.models import ContentType, Group
@@ -749,6 +749,31 @@ async def handle_onboard(ctx: BotContext, message: Message) -> None:
 # ─── Panel ───
 
 
+def panel_reply_keyboard() -> ReplyKeyboardMarkup:
+    """Bottom bar while the admin panel is open — taps arrive as ordinary text."""
+    return reply_keyboard(
+        [
+            [
+                KeyboardButton(text=fa.BTN_PANEL_STATS),
+                KeyboardButton(text=fa.BTN_PANEL_TOP_USERS),
+            ],
+            [
+                KeyboardButton(text=fa.BTN_PANEL_TOP_TAGS),
+                KeyboardButton(text=fa.BTN_PANEL_TAGS),
+            ],
+            [
+                KeyboardButton(text=fa.BTN_PANEL_GROUPS),
+                KeyboardButton(text=fa.BTN_PANEL_HEALTH),
+            ],
+            [
+                KeyboardButton(text=fa.BTN_PANEL_SETTINGS),
+                KeyboardButton(text=fa.BTN_PANEL_EXPORT),
+            ],
+            [KeyboardButton(text=fa.BTN_PANEL_BACK)],
+        ]
+    )
+
+
 async def send_panel(ctx: BotContext, chat_id: int) -> None:
     rows = [
         [
@@ -769,6 +794,9 @@ async def send_panel(ctx: BotContext, chat_id: int) -> None:
         ],
     ]
     await ctx.api.send_message(chat_id, fa.PANEL_HEADER, keyboard(rows))
+    # Bale callback taps have been unreliable here; the persistent bar sends
+    # the same labels as ordinary text, which the dispatcher already routes.
+    await ctx.api.send_message(chat_id, fa.PANEL_BAR_HINT, panel_reply_keyboard())
 
 
 async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: CallbackQuery) -> None:

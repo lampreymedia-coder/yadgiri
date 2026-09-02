@@ -57,6 +57,11 @@ def test_parse_command() -> None:
     assert parse_command(fa.BTN_RESTART) == ("start", [])
     assert parse_command(fa.BTN_MENU_PANEL) == ("panel", [])
     assert parse_command(fa.BTN_ADD_TO_GROUP) == ("addgroup", [])
+    assert parse_command(fa.BTN_PANEL_HEALTH) == ("health", [])
+    assert parse_command(fa.BTN_PANEL_EXPORT) == ("export", [])
+    assert parse_command(fa.BTN_PANEL_STATS) == ("stats", [])
+    assert parse_command(fa.BTN_PANEL_TAGS) == ("admintags", [])
+    assert parse_command(fa.BTN_PANEL_BACK) == ("menu", [])
 
 
 async def test_empty_and_whitespace_message_ignored(

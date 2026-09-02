@@ -1,0 +1,515 @@
+"""Update routing: idempotency → lock → handler, with a global error net.
+
+No exception ever escapes :meth:`Dispatcher.dispatch`; the polling loop and
+webhook endpoint stay alive no matter what a handler does.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+
+from app.bale.errors import BaleAPIError, NetworkError
+from app.bale.keyboards import CallbackDataError, parse_callback
+from app.bale.models import CallbackQuery, Message, Update
+from app.core.albums import AlbumBuffer
+from app.core.context import BotContext
+from app.core.fsm import WizardState
+from app.core.idempotency import claim_update
+from app.domain.classify import normalize_fa
+from app.handlers import admin, group_intake, menu, user_commands, wizard
+from app.handlers.errors import handle_update_error
+from app.i18n import fa
+from app.observability import metrics
+from app.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
+_SQLITE_BUSY_ATTEMPTS = 5
+
+
+# Whole-message Persian aliases so non-technical users need not type /archive.
+_PERSIAN_COMMANDS = {
+    "ارشیو": "archive",
+    "ارشیوم": "archive",
+    "بایگانی": "archive",
+    "بایگانیخصوصی": "archive",
+    "راهنما": "help",
+    "منو": "menu",
+    "هشتگ": "tags",
+    "هشتگها": "tags",
+    "وضعیت": "status",
+    "شناسه": "id",
+    "شروع": "start",
+}
+
+
+def _command_key(text: str) -> str:
+    return normalize_fa(text).replace(" ", "")
+
+
+# Exact labels of the persistent reply keyboard (and leftover «شروع مجدد»).
+_REPLY_BUTTON_COMMANDS = {
+    _command_key(fa.BTN_MENU_HOW): "help",
+    _command_key(fa.BTN_MENU_TAGS): "tags",
+    _command_key(fa.BTN_MENU_MY): "my",
+    _command_key(fa.BTN_MENU_RESUME): "resume",
+    _command_key(fa.BTN_MENU_STATUS): "status",
+    _command_key(fa.BTN_MENU_ID): "id",
+    _command_key(fa.BTN_MENU_PANEL): "panel",
+    _command_key(fa.BTN_ADD_TO_GROUP): "addgroup",
+    _command_key(fa.BTN_RESTART): "start",
+    _command_key(fa.BTN_PANEL_STATS): "stats",
+    _command_key(fa.BTN_PANEL_TOP_USERS): "top_users",
+    _command_key(fa.BTN_PANEL_TOP_TAGS): "top_tags",
+    _command_key(fa.BTN_PANEL_TAGS): "admintags",
+    _command_key(fa.BTN_PANEL_GROUPS): "groups",
+    _command_key(fa.BTN_PANEL_HEALTH): "health",
+    _command_key(fa.BTN_PANEL_SETTINGS): "settings",
+    _command_key(fa.BTN_PANEL_EXPORT): "export",
+    _command_key(fa.BTN_PANEL_BACK): "menu",
+}
+
+
+def parse_command(text: str) -> tuple[str, list[str]] | None:
+    """Parse '/cmd arg1 arg2', a reply-keyboard label, or a Persian alias."""
+    stripped = (text or "").strip()
+    if not stripped:
+        return None
+    if stripped.startswith("/"):
+        parts = stripped.split()
+        command = parts[0][1:].split("@")[0].lower()
+        return command, parts[1:]
+    mapped = _REPLY_BUTTON_COMMANDS.get(_command_key(stripped))
+    if mapped is not None:
+        return mapped, []
+    first = _command_key(stripped.split()[0])
+    mapped = _PERSIAN_COMMANDS.get(first)
+    if mapped is not None:
+        return mapped, stripped.split()[1:]
+    return None
+
+
+class Dispatcher:
+    def __init__(self, ctx: BotContext) -> None:
+        self.ctx = ctx
+        self.albums = AlbumBuffer(self._flush_group_batch, window_ms=ctx.settings.album_window_ms)
+        self._spool_dir = Path(ctx.settings.spool_dir)
+
+    async def _flush_group_batch(self, messages: list[Message]) -> None:
+        await group_intake.process_group_batch(self.ctx, messages)
+
+    async def dispatch(self, update: Update) -> None:
+        """Process one update; never raises."""
+        metrics.updates_received.labels(kind=update.kind).inc()
+        try:
+            await self._dispatch_inner(update)
+        except Exception as exc:
+            from app.db.session import is_connectivity_error, is_sqlite_busy
+
+            if is_sqlite_busy(exc):
+                await self._spool_update(update, exc, notify_user=False)
+            elif is_connectivity_error(exc):
+                await self._handle_infra_failure(update, exc)
+            else:
+                await handle_update_error(self.ctx, update, exc)
+
+    async def _spool_update(self, update: Update, exc: Exception, *, notify_user: bool) -> None:
+        """Persist the raw update so it can be replayed when SQLite is free."""
+        logger.error(
+            "infra_failure_spooling",
+            update_id=update.update_id,
+            error=str(exc),
+            notify_user=notify_user,
+        )
+        try:
+            self._spool_dir.mkdir(parents=True, exist_ok=True)
+            path = self._spool_dir / f"{update.update_id}_{int(time.time())}.json"
+            path.write_text(json.dumps(update.raw(), ensure_ascii=False), encoding="utf-8")
+        except OSError as spool_error:
+            logger.error("spool_write_failed", error=str(spool_error))
+        if not notify_user:
+            return
+        chat_id: int | None = None
+        if update.message is not None:
+            chat_id = update.message.chat.id
+        elif update.callback_query is not None and update.callback_query.message is not None:
+            chat_id = update.callback_query.message.chat.id
+        if chat_id is not None:
+            try:
+                await self.ctx.api.send_message(chat_id, fa.ERR_DEGRADED)
+            except (BaleAPIError, NetworkError) as send_error:
+                logger.warning("degraded_notice_failed", error=str(send_error))
+
+    async def _handle_infra_failure(self, update: Update, exc: Exception) -> None:
+        """Database unreachable: spool the update and tell the user."""
+        await self._spool_update(update, exc, notify_user=True)
+
+    async def _dispatch_inner(self, update: Update) -> None:
+        if update.message is not None:
+            message = update.message
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                chat_id=message.chat.id,
+                chat_type=message.chat.type,
+                message_id=message.message_id,
+                from_id=message.from_user.id if message.from_user else None,
+                text_preview=(message.text or message.caption or "")[:80],
+                added_members=len(message.added_members()),
+                has_voice=message.voice is not None,
+                has_audio=message.audio is not None,
+                has_document=message.document is not None,
+                has_video_note=message.video_note is not None,
+            )
+            extra = message.model_extra or {}
+            if message.is_group_message and not (message.text or message.caption):
+                logger.info(
+                    "group_update_without_text",
+                    update_id=update.update_id,
+                    chat_id=message.chat.id,
+                    message_id=message.message_id,
+                    extra_keys=sorted(extra.keys()),
+                    raw_keys=sorted(message.raw().keys()),
+                )
+        elif update.callback_query is not None:
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                data=update.callback_query.data,
+            )
+        elif update.my_chat_member is not None or update.chat_member is not None:
+            payload = update.my_chat_member or update.chat_member or {}
+            chat = payload.get("chat") if isinstance(payload, dict) else None
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                chat_id=chat.get("id") if isinstance(chat, dict) else None,
+                extra_keys=sorted(payload.keys()) if isinstance(payload, dict) else [],
+            )
+        else:
+            logger.info(
+                "update_received",
+                update_id=update.update_id,
+                kind=update.kind,
+                extra_keys=sorted((update.model_extra or {}).keys()),
+            )
+
+        if not await self._claim_update(update.update_id):
+            return
+        await self._route_update(update)
+
+    async def _claim_update(self, update_id: int) -> bool:
+        from app.db.session import is_sqlite_busy
+
+        for attempt in range(1, _SQLITE_BUSY_ATTEMPTS + 1):
+            try:
+                async with self.ctx.db.session() as session:
+                    return await claim_update(session, update_id)
+            except Exception as exc:
+                if not is_sqlite_busy(exc) or attempt >= _SQLITE_BUSY_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "sqlite_busy_retry_claim",
+                    update_id=update_id,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
+        return False
+
+    async def _route_update(self, update: Update) -> None:
+        from app.db.session import is_sqlite_busy
+
+        for attempt in range(1, _SQLITE_BUSY_ATTEMPTS + 1):
+            try:
+                if update.message is not None:
+                    await self._on_message(update.message)
+                elif update.edited_message is not None:
+                    await self._on_edited_message(update.edited_message)
+                elif update.callback_query is not None:
+                    await self._on_callback(update.callback_query)
+                elif update.my_chat_member is not None or update.chat_member is not None:
+                    await self._on_membership_update(update)
+                return
+            except Exception as exc:
+                if not is_sqlite_busy(exc) or attempt >= _SQLITE_BUSY_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "sqlite_busy_retry_route",
+                    update_id=update.update_id,
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                await asyncio.sleep(0.05 * (2 ** (attempt - 1)))
+
+    async def _on_membership_update(self, update: Update) -> None:
+        payload = update.my_chat_member or update.chat_member
+        if not payload:
+            return
+        message = group_intake.membership_event_as_message(payload, self.ctx.bot_user_id)
+        if message is None:
+            logger.info(
+                "membership_update_ignored",
+                update_id=update.update_id,
+                kind=update.kind,
+            )
+            return
+        await group_intake.register_group_events(self.ctx, message)
+
+    async def _on_message(self, message: Message) -> None:
+        if message.added_members() or message.left_chat_member or message.group_chat_created:
+            await group_intake.register_group_events(self.ctx, message)
+            return
+        if message.from_user is not None and message.from_user.is_bot:
+            return
+
+        if message.from_user is None:
+            if not message.is_private_message:
+                await group_intake.process_group_batch(self.ctx, [message])
+            return
+
+        user_id = message.from_user.id
+        lock = self.ctx.locks.get(message.chat.id, user_id)
+        # Group content must not be dropped while another update holds the lock.
+        if (
+            message.is_private_message
+            and lock.locked()
+            and parse_command(message.text or "") is None
+        ):
+            try:
+                await self.ctx.api.send_message(message.chat.id, fa.ERR_BUSY)
+            except (BaleAPIError, NetworkError) as exc:
+                logger.info("busy_notice_failed", error=str(exc))
+            return
+
+        async with lock:
+            if message.is_private_message:
+                await self._on_private_message(message)
+            else:
+                await self._on_group_message(message)
+
+    async def _on_private_message(self, message: Message) -> None:
+        text = message.text or ""
+        command = parse_command(text)
+        if command is not None:
+            await self._on_command(message, command[0], command[1])
+            return
+
+        assert message.from_user is not None
+        async with self.ctx.db.session() as session:
+            store = self.ctx.state_store(session)
+            conversation = await store.load(message.chat.id, message.from_user.id)
+            if conversation is not None and conversation.state is WizardState.AWAITING_NOTE:
+                await wizard.handle_note_input(self.ctx, session, message, conversation)
+                return
+            if (
+                conversation is not None
+                and conversation.state is WizardState.ADMIN_INPUT
+                and await admin.is_admin(self.ctx, session, message.from_user.id)
+            ):
+                await admin.handle_admin_input(self.ctx, session, message, conversation)
+                return
+
+        await group_intake.process_private_content(self.ctx, message)
+
+    async def _on_group_message(self, message: Message) -> None:
+        text = message.text or ""
+        command = parse_command(text)
+        mention_tokens: set[str] = set()
+        if self.ctx.bot_username:
+            name = self.ctx.bot_username.lower()
+            mention_tokens = {f"@{name}", name}
+        if command is None and (text or "").strip().lower() in mention_tokens:
+            await group_intake.handle_group_hello(self.ctx, message)
+            return
+        if command is not None:
+            await self._on_command(message, command[0], command[1])
+            return
+        message = group_intake.strip_leading_bot_mention(message, self.ctx.bot_username)
+        if group_intake.looks_like_withheld_content(message):
+            await group_intake.handle_withheld_group_content(self.ctx, message)
+            return
+        if group_intake._should_ignore(self.ctx, message):
+            return
+        await self.albums.add(message)
+
+    async def _on_edited_message(self, message: Message) -> None:
+        if message.from_user is not None and message.from_user.is_bot:
+            return
+        user_id = message.from_user.id if message.from_user is not None else 0
+        lock = self.ctx.locks.get(message.chat.id, user_id)
+        async with lock:
+            await group_intake.handle_edited_message(self.ctx, message)
+
+    async def _on_command(self, message: Message, command: str, args: list[str]) -> None:
+        assert message.from_user is not None
+
+        if command == "start":
+            if message.is_private_message:
+                await user_commands.handle_start(self.ctx, message)
+            else:
+                await group_intake.handle_group_hello(self.ctx, message)
+                await user_commands.handle_menu(self.ctx, message)
+            return
+        if command in {"help", "howto", "how", "guide"}:
+            await user_commands.handle_help(self.ctx, message)
+            return
+        if command == "menu":
+            await user_commands.handle_menu(self.ctx, message)
+            return
+        if command == "tags":
+            await user_commands.handle_tags(self.ctx, message)
+            return
+        if command == "status":
+            await user_commands.handle_status(self.ctx, message)
+            return
+        if command == "id":
+            await user_commands.handle_id(self.ctx, message)
+            return
+        if command == "my":
+            await user_commands.handle_my(self.ctx, message)
+            return
+        if command == "undo":
+            await user_commands.handle_undo(self.ctx, message, args)
+            return
+        if command == "resume":
+            await user_commands.handle_resume(self.ctx, message)
+            return
+        if command == "addgroup":
+            await user_commands.handle_add_to_group(self.ctx, message)
+            return
+
+        async with self.ctx.db.session() as session:
+            authorized = await admin.is_admin(self.ctx, session, message.from_user.id)
+            if command in {"onboard", "archive"} and not message.is_private_message:
+                if not authorized:
+                    authorized = await admin.promote_first_owner(
+                        self.ctx, session, message.from_user
+                    )
+                if authorized:
+                    if command == "onboard":
+                        await admin.handle_onboard(self.ctx, message)
+                    else:
+                        await admin.handle_set_archive(self.ctx, session, message)
+                elif command == "archive":
+                    try:
+                        await self.ctx.api.send_message(
+                            message.from_user.id, fa.ARCHIVE_SET_NEED_PRIVATE
+                        )
+                    except (BaleAPIError, NetworkError) as exc:
+                        logger.info("archive_need_private_dm_failed", error=str(exc))
+                return
+            if not authorized or not admin.admin_chat_allowed(self.ctx, message):
+                await self.ctx.api.send_message(message.chat.id, fa.ERR_UNKNOWN_COMMAND)
+                return
+            await self._on_admin_command(session, message, command, args)
+
+    async def _on_admin_command(
+        self, session: object, message: Message, command: str, args: list[str]
+    ) -> None:
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        assert isinstance(session, AsyncSession)
+        assert message.from_user is not None
+        ctx = self.ctx
+        chat_id = message.chat.id
+        actor = message.from_user.id
+
+        if command == "panel":
+            await admin.send_panel(ctx, chat_id)
+        elif command == "stats":
+            await admin.send_stats(ctx, session, chat_id, args)
+        elif command == "top_users":
+            await admin.send_top_users(ctx, session, chat_id, args)
+        elif command == "top_tags":
+            await admin.send_top_tags(ctx, session, chat_id, args)
+        elif command == "tag":
+            await admin.send_tag_browse(ctx, session, chat_id, args)
+        elif command == "type":
+            await admin.send_type_report(ctx, session, chat_id, args)
+        elif command == "user":
+            await admin.send_user_report(ctx, session, chat_id, args)
+        elif command == "search":
+            await admin.send_search(ctx, session, chat_id, args)
+        elif command == "get":
+            await admin.send_get(ctx, session, chat_id, args)
+        elif command == "export":
+            await admin.send_export(ctx, session, chat_id, args)
+        elif command == "admintags" or command == "tags":
+            await admin.send_tags_list(ctx, session, chat_id)
+        elif command == "addtag":
+            await admin.start_addtag_flow(ctx, session, message)
+        elif command == "edittag":
+            await admin.handle_edittag(ctx, session, chat_id, args, actor)
+        elif command == "disabletag":
+            await admin.handle_disabletag(ctx, session, chat_id, args)
+        elif command == "reordertags":
+            await admin.handle_reordertags(ctx, session, chat_id, args, actor)
+        elif command == "groups":
+            await admin.send_groups(ctx, session, chat_id)
+        elif command == "health":
+            await admin.send_health(ctx, session, chat_id)
+        elif command == "settings":
+            await admin.handle_settings(ctx, session, chat_id, args, actor)
+        elif command == "broadcast":
+            await admin.start_broadcast_flow(ctx, session, message)
+        elif command == "forget":
+            await admin.handle_forget(ctx, session, chat_id, args, actor)
+        else:
+            await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
+
+    async def _on_callback(self, cq: CallbackQuery) -> None:
+        try:
+            data = parse_callback(cq.data or "")
+        except CallbackDataError:
+            logger.warning("malformed_callback", data=cq.data)
+            if self.ctx.caps.has("answerCallbackQuery"):
+                try:
+                    await self.ctx.api.answer_callback_query(cq.id, fa.ERR_EXPIRED)
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.info("callback_answer_failed", error=str(exc))
+            return
+
+        chat_id = cq.message.chat.id if cq.message is not None else cq.from_user.id
+        lock = self.ctx.locks.get(chat_id, cq.from_user.id)
+        if lock.locked():
+            if self.ctx.caps.has("answerCallbackQuery"):
+                try:
+                    await self.ctx.api.answer_callback_query(cq.id, fa.ERR_BUSY)
+                except (BaleAPIError, NetworkError) as exc:
+                    logger.info("callback_busy_answer_failed", error=str(exc))
+            return
+
+        async with lock, self.ctx.db.session() as session:
+            if data.action in admin.ADMIN_ACTIONS:
+                await admin.handle_admin_callback(self.ctx, session, cq)
+            elif data.action in menu.MENU_ACTIONS:
+                await menu.handle_menu_callback(self.ctx, cq)
+            else:
+                await wizard.handle_wizard_callback(self.ctx, session, cq)
+
+    async def process_spool(self) -> int:
+        """Replay spooled updates after the database comes back."""
+        if not self._spool_dir.exists():
+            return 0
+        processed = 0
+        for path in sorted(self._spool_dir.glob("*.json")):
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                update = Update.model_validate(raw)
+            except (OSError, ValueError):
+                logger.warning("spool_file_invalid", file=str(path))
+                path.unlink(missing_ok=True)
+                continue
+            await self.dispatch(update)
+            path.unlink(missing_ok=True)
+            processed += 1
+        if processed:
+            logger.info("spool_replayed", count=processed)
+        return processed

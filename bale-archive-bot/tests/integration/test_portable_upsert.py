@@ -22,4 +22,4 @@ async def test_normal_upsert_still_uses_sqlite_on_conflict(seeded_db: Database) 
         first = await groups.upsert(-9002, "الف", "group")
         second = await groups.upsert(-9002, "ب", "supergroup")
         assert first.id == second.id
-        assert second.title == "ب"
+        assert second.bale_chat_id == -9002

@@ -23,9 +23,7 @@ def test_polling_not_needed_when_webhook_is_healthy_and_idle() -> None:
 
 
 def test_polling_needed_when_pending_unknown_and_webhook_stale() -> None:
-    assert (
-        safety_polling_needed(public_ok=True, pending=None, last_webhook_age_seconds=30) is True
-    )
+    assert safety_polling_needed(public_ok=True, pending=None, last_webhook_age_seconds=30) is True
 
 
 def test_dead_tunnel_must_not_keep_webhook() -> None:

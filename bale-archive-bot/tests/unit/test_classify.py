@@ -81,7 +81,9 @@ def test_link_dominant_vs_text_with_link() -> None:
     link_msg = load_message("link")
     assert classify(link_msg).content_type is ContentType.LINK
     text_msg = load_message("text")
-    text_msg.text = "این توضیح مفصل و طولانی درباره‌ی یک مقاله است https://a.io و ادامه‌ی توضیح مفصل"
+    text_msg.text = (
+        "این توضیح مفصل و طولانی درباره‌ی یک مقاله است https://a.io و ادامه‌ی توضیح مفصل"
+    )
     result = classify(text_msg)
     assert result.content_type is ContentType.TEXT
     assert result.urls == ["https://a.io"]

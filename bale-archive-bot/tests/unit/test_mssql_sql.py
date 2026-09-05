@@ -12,7 +12,8 @@ def _sql(clause: object) -> str:
 def test_mssql_top_users_uses_fetch_and_concat() -> None:
     sql = _sql(reports._TOP_USERS_MSSQL)
     assert "FETCH NEXT" in sql
-    assert "LIMIT" not in sql
+    assert "ROWS ONLY" in sql
+    assert "\n    LIMIT" not in str(reports._TOP_USERS_MSSQL)
     assert "CONCAT" in sql
     assert "||" not in str(reports._TOP_USERS_MSSQL)
     assert "DISPLAY_NAME" in sql

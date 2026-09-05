@@ -42,6 +42,15 @@ _SQL_PROGRAMMING_MARKERS = (
     "undefined_column",
     "undefined_function",
     "undefined_table",
+    # Microsoft SQL Server (pyodbc / aioodbc)
+    "invalid column name",
+    "invalid object name",
+    "invalid object",
+    "must declare the scalar variable",
+    "incorrect syntax",
+    "cannot find the object",
+    "the multi-part identifier",
+    "conversion failed",
 )
 
 
@@ -178,6 +187,23 @@ class Database:
                 if db_path:
                     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
                 engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30.0}})
+        elif url.startswith("mssql"):
+            # aioodbc / ODBC Driver 17 or 18. TrustServerCertificate and the
+            # driver name live on the URL query string (see .env.example).
+            try:
+                import aioodbc  # noqa: F401
+            except ImportError as exc:
+                msg = "SQL Server support requires: pip install -e '.[mssql]'"
+                raise RuntimeError(msg) from exc
+            engine_kwargs.update(
+                {
+                    "pool_pre_ping": True,
+                    "pool_recycle": 1800,
+                    "pool_size": pool_size,
+                    "max_overflow": max_overflow,
+                    "connect_args": {"timeout": int(command_timeout)},
+                }
+            )
         self.engine: AsyncEngine = create_async_engine(url, **engine_kwargs)
         if url.startswith("sqlite"):
             event.listen(self.engine.sync_engine, "connect", _apply_sqlite_pragmas)

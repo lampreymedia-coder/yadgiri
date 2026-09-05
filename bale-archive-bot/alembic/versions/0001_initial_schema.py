@@ -29,9 +29,21 @@ STORAGE_STATUSES = (
 )
 
 
+def _now_sql(is_pg: bool, is_mssql: bool) -> sa.TextClause:
+    if is_pg:
+        return sa.text("now()")
+    if is_mssql:
+        return sa.text("SYSUTCDATETIME()")
+    return sa.text("CURRENT_TIMESTAMP")
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
+    is_mssql = bind.dialect.name == "mssql"
+    now_sql = _now_sql(is_pg, is_mssql)
+    json_empty = sa.text("N'{}'") if is_mssql else sa.text("'{}'")
+    json_array = sa.text("N'[]'") if is_mssql else sa.text("'[]'")
 
     if is_pg:
         # Extension for Persian trigram search. Requires appropriate rights;
@@ -59,11 +71,11 @@ def upgrade() -> None:
         sa.Column("locale", sa.Text(), nullable=False, server_default="fa"),
         sa.Column(
             "first_seen_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column(
             "last_seen_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
     if is_pg:
@@ -80,10 +92,10 @@ def upgrade() -> None:
         sa.Column("chat_type", sa.Text(), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("bot_can_delete", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("settings", json_type, nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("settings", json_type, nullable=False, server_default=json_empty),
         sa.Column(
             "joined_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -102,7 +114,7 @@ def upgrade() -> None:
         sa.Column("created_by", sa.BigInteger(), sa.ForeignKey("users.id")),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -120,7 +132,7 @@ def upgrade() -> None:
         sa.Column("caption", sa.Text()),
         sa.Column(
             "urls", urls_type, nullable=False,
-            server_default=sa.text("'{}'") if is_pg else sa.text("'[]'"),
+            server_default=sa.text("'{}'") if is_pg else json_array,
         ),
         sa.Column("is_forwarded", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("forward_source", sa.Text()),
@@ -132,16 +144,16 @@ def upgrade() -> None:
         sa.Column("wizard_message_id", sa.BigInteger()),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column(
             "updated_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column("completed_at", sa.DateTime(timezone=True)),
         sa.Column("expires_at", sa.DateTime(timezone=True)),
         sa.Column("reminded_at", sa.DateTime(timezone=True)),
-        sa.Column("meta", json_type, nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("meta", json_type, nullable=False, server_default=json_empty),
         sa.Column("raw_update", json_type),
     )
 
@@ -154,7 +166,7 @@ def upgrade() -> None:
         sa.Column("tag_id", sa.Integer(), sa.ForeignKey("tags.id"), primary_key=True),
         sa.Column(
             "tagged_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -182,7 +194,7 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text()),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column("stored_at", sa.DateTime(timezone=True)),
     )
@@ -192,11 +204,11 @@ def upgrade() -> None:
         sa.Column("chat_id", sa.BigInteger(), primary_key=True),
         sa.Column("user_id", sa.BigInteger(), primary_key=True),
         sa.Column("state", sa.Text(), nullable=False),
-        sa.Column("history", json_type, nullable=False, server_default=sa.text("'[]'")),
-        sa.Column("payload", json_type, nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("history", json_type, nullable=False, server_default=json_array),
+        sa.Column("payload", json_type, nullable=False, server_default=json_empty),
         sa.Column(
             "updated_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
     )
@@ -206,7 +218,7 @@ def upgrade() -> None:
         sa.Column("update_id", sa.BigInteger(), primary_key=True, autoincrement=False),
         sa.Column(
             "processed_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -221,11 +233,11 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text()),
         sa.Column(
             "next_retry_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -236,10 +248,10 @@ def upgrade() -> None:
         sa.Column("action", sa.Text(), nullable=False),
         sa.Column("entity_type", sa.Text()),
         sa.Column("entity_id", sa.Text()),
-        sa.Column("payload", json_type, nullable=False, server_default=sa.text("'{}'")),
+        sa.Column("payload", json_type, nullable=False, server_default=json_empty),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 
@@ -250,7 +262,7 @@ def upgrade() -> None:
         sa.Column("updated_by", sa.BigInteger()),
         sa.Column(
             "updated_at", sa.DateTime(timezone=True), nullable=False,
-            server_default=sa.text("now()") if is_pg else sa.text("CURRENT_TIMESTAMP"),
+            server_default=now_sql,
         ),
     )
 

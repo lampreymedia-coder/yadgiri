@@ -109,9 +109,11 @@ class Application:
         self.started_event.set()
 
     async def _prepare_store(self) -> None:
-        """Create tables (sqlite), seed tags, restore runtime settings."""
+        """Create tables (sqlite / mssql), seed tags, restore runtime settings."""
         assert self.ctx is not None
-        if self.settings.database_url.startswith("sqlite"):
+        from app.db.dialect import engine_kind_from_url
+
+        if engine_kind_from_url(self.settings.database_url) in {"sqlite", "mssql"}:
             from app.db.base import Base
 
             async with self.db.engine.begin() as conn:

@@ -1,7 +1,7 @@
 """Declarative base and portable column types.
 
-Models must run both on PostgreSQL (production) and SQLite (fast tests),
-so JSONB / ARRAY get dialect variants that behave identically from Python.
+Models must run on PostgreSQL, Microsoft SQL Server, and SQLite (tests),
+so JSONB / ARRAY stay PostgreSQL-only variants. Other engines get JSON.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ class Base(DeclarativeBase):
 
 
 def PortableJSON() -> Any:  # noqa: N802 - factory named like a type
-    """JSONB on PostgreSQL, plain JSON elsewhere."""
+    """JSONB on PostgreSQL; NVARCHAR JSON on SQL Server; JSON on SQLite."""
     return JSON().with_variant(JSONB(), "postgresql")
 
 

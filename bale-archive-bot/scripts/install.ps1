@@ -43,7 +43,7 @@ function Install-WithIranMirrors {
 }
 
 Install-WithIranMirrors @("install", "--upgrade", "pip")
-Install-WithIranMirrors @("install", "-e", ".[dev]")
+Install-WithIranMirrors @("install", "-e", ".[dev,mssql]")
 
 foreach ($Rel in @("data", "data\media", "data\backups", "data\spool")) {
     $Dir = Join-Path $Root $Rel
@@ -67,8 +67,21 @@ Get-Content -Path $EnvFile -Encoding UTF8 | ForEach-Object {
     Set-Item -Path ("Env:" + $Name) -Value $Value
 }
 
+$DatabaseUrl = $env:DATABASE_URL
+if ($DatabaseUrl -like "mssql*") {
+    $odbc = Get-OdbcDriver -ErrorAction SilentlyContinue | Where-Object {
+        $_.Name -match "ODBC Driver (17|18) for SQL Server"
+    }
+    if (-not $odbc) {
+        Write-Warning "Microsoft ODBC Driver 17 or 18 for SQL Server was not found. Install it, then re-run install.ps1."
+    }
+}
+
 Write-Host "Applying database migrations..."
 & $VenvPy -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Alembic failed. For SQL Server check ODBC Driver 18, DATABASE_URL, and that database bale_archive exists."
+}
 & $VenvPy scripts\seed_tags.py
 
 Write-Host "Install finished. Next: edit .env then run scripts\run.ps1"

@@ -26,10 +26,12 @@ SQL concatenates `first_name`/`last_name` with the same trim rule so the admin
 panel (Excel export, top users) works on this host. Postgres production
 behaviour stays identical to the spec.
 
-## D-04: Conversation state lives only in Postgres
+## D-04: Conversation state lives in the SQL table
 Redis is not installed and is not a dependency. `STATE_BACKEND` is forced to
-`postgres`. Wizard state is the `conversation_states` table; cross-process
-locks are `pg_advisory_xact_lock`.
+`postgres` (name kept for existing `.env` files). Wizard state is the
+`conversation_states` table on whichever engine `DATABASE_URL` points at.
+Cross-process locks are `pg_advisory_xact_lock` on PostgreSQL and
+`sp_getapplock` on SQL Server.
 
 ## D-05: private-first submissions with multiple groups get a group-choice step
 The spec doesn't say which group a private-first submission belongs to when
@@ -170,4 +172,20 @@ instead of trigram, `group_concat` instead of `string_agg`, and
 split, panel buttons (Excel export, system health, stats) raised
 `no such column: u.display_name` / `no such function: current_database` and
 the dispatcher spooled them as an outage.
+
+## D-22: Microsoft SQL Server is a supported production dialect
+The owner already runs SQL Server (SSMS 18) and asked the bot to connect
+there instead of installing PostgreSQL. The engine URL is
+`mssql+aioodbc://…` with ODBC Driver 17/18. Differences from Postgres:
+
+* no `ON CONFLICT` — group upsert is SELECT + INSERT/UPDATE
+* locks use `sp_getapplock` (transaction owner)
+* report SQL uses `CONCAT` / `STRING_AGG` / `FETCH NEXT` / `sys.database_files`
+* Alembic timestamps use `SYSUTCDATETIME()`; JSON is `NVARCHAR`
+* `aioodbc`/`pyodbc` are the optional extra `[mssql]` so Linux tests do
+  not need unixODBC
+
+SQLite remains the test dialect. PostgreSQL remains fully supported.
+A home Windows PC is still a poor 24/7 host (sleep, modem drops); SQL
+Server support only removes the Cursor-VM dependency.
 

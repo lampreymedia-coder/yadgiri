@@ -3,7 +3,8 @@
 Notes:
 
 * ``users.display_name`` is a Postgres generated column; it is created in
-  the Alembic migration and computed in Python here so SQLite tests work.
+  the Alembic migration and computed in Python here so SQLite and SQL
+  Server work without that column.
 * ``submissions.urls`` is ``TEXT[]`` on Postgres (see migration) and JSON
   on other dialects; both round-trip Python ``list[str]``.
 """

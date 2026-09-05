@@ -31,6 +31,9 @@ function Read-DotEnv {
 
 $EnvMap = Read-DotEnv (Join-Path $Root ".env")
 $DatabaseUrl = $EnvMap["DATABASE_URL"]
+if ($DatabaseUrl -like "mssql*") {
+    Write-Error "SQL Server restore is done in SSMS: right-click the database → Tasks → Restore → Database, and pick the .bak file."
+}
 if ($DatabaseUrl -notmatch "postgresql(?:\+asyncpg)?://([^:]+):([^@]+)@([^:]+):(\d+)/([^?]+)") {
     Write-Error "Could not parse DATABASE_URL"
 }

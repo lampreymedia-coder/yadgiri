@@ -36,6 +36,10 @@ dev = [
 s3 = [
     "aioboto3>=13.0",
 ]
+mssql = [
+    "aioodbc>=0.5.0",
+    "pyodbc>=5.1",
+]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -75,7 +79,7 @@ plugins = ["pydantic.mypy"]
 exclude = "alembic/"
 
 [[tool.mypy.overrides]]
-module = ["aioboto3.*", "apscheduler.*", "jdatetime.*", "botocore.*"]
+module = ["aioboto3.*", "apscheduler.*", "jdatetime.*", "botocore.*", "aioodbc.*", "pyodbc"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

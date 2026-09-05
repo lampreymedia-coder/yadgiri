@@ -238,7 +238,7 @@ python -m app.main
 Health: `GET http://127.0.0.1:8000/healthz`  
 پولینگ کوتاه‌فاصله (idle 2s، busy 0.3s)، POST `getUpdates` اول (مثل python-bale-bot داخل ایران).
 
-تولید ویندوز: Postgres محلی + NSSM — `docs/DEPLOY_WINDOWS.md`, `docs/RUNBOOK.md`, `docs/ADMIN_GUIDE.md`.  
+تولید ویندوز: SQL Server (یا Postgres) محلی + NSSM — `docs/SELF_HOST_WINDOWS.md`, `docs/DEPLOY_WINDOWS.md`, `docs/RUNBOOK.md`, `docs/ADMIN_GUIDE.md`.
 این محیط Cloud از SQLite استفاده می‌کند (فقط برای تست زنده).
 
 قبل از PR: `ruff` + `black` + `mypy --strict` + `pytest`.
@@ -276,7 +276,9 @@ WEBHOOK_SECRET_PATH=
 
 `data/` و `.env` در gitignoreاند. بک‌آپ SQLite زنده: `bale-archive-bot/data/bot.db` (روی همین VM؛ در گیت نیست).
 
-نمونه تولید: `DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/bale_archive`
+نمونه تولید SQL Server: `DATABASE_URL=mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes`
+
+نمونه تولید Postgres: `DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/bale_archive`
 
 ---
 

@@ -1,8 +1,9 @@
 # Bale Archive Bot
 
 Archive bot for [Bale messenger](https://docs.bale.ai) groups, built to run on
-**one Windows machine**: local PostgreSQL, local disk for media, NSSM as the
-Windows service. No Docker, Redis, or cloud object storage required.
+**one Windows machine**: Microsoft SQL Server or local PostgreSQL, local disk
+for media, NSSM as the Windows service. No Docker, Redis, or cloud object
+storage required.
 
 Every piece of content posted in a monitored group is archived first. The
 sender is then asked — **in the same group, as a reply** — whether it should
@@ -18,11 +19,19 @@ copy .env.example .env
 .\scripts\run.ps1
 ```
 
-`DATABASE_URL` example (Postgres on this PC):
+`DATABASE_URL` example (SQL Server on this PC):
+
+```
+mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes
+```
+
+PostgreSQL still works:
 
 ```
 postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/bale_archive
 ```
+
+Self-host steps (Persian): `docs/SELF_HOST_WINDOWS.md`
 
 Keep it running after logoff with NSSM: `.\scripts\install-service.ps1`
 
@@ -47,9 +56,10 @@ Workers: outbox · media → local MEDIA_ROOT · TTL sweeper · weekly digest
 Golden rule: **the original message is never deleted before both the archive
 copy and the database row exist.**
 
-Conversation state lives only in Postgres (`conversation_states`). Locks use
-`pg_advisory_xact_lock`. File storage goes through a `Storage` interface
-(`LocalStorage` now; `STORAGE_BACKEND=s3` later).
+Conversation state lives in the `conversation_states` table. Locks use
+`pg_advisory_xact_lock` on PostgreSQL and `sp_getapplock` on SQL Server.
+File storage goes through a `Storage` interface (`LocalStorage` now;
+`STORAGE_BACKEND=s3` later).
 
 ## Commands
 
@@ -75,6 +85,7 @@ Tests never touch the network (`tests/fakes/fake_bale.py`).
 
 ## Documentation
 
+- `docs/SELF_HOST_WINDOWS.md` — simple Windows + SQL Server runbook
 - `docs/DEPLOY_WINDOWS.md` — first-time setup
 - `docs/ADMIN_GUIDE.md` — Persian admin guide
 - `docs/RUNBOOK.md` — NSSM, backup, Defender, Windows Update

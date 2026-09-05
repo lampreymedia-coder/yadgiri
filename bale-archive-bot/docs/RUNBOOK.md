@@ -1,13 +1,21 @@
 # Runbook — نصب روی ویندوز و عیب‌یابی
 
 همه‌چیز روی **یک رایانه ویندوز** اجرا می‌شود. Docker، WSL، Caddy، Redis و
-دیتابیس ابری استفاده نمی‌شود.
+دیتابیس ابری استفاده نمی‌شود. موتور پیش‌فرض دیتابیس **SQL Server** است؛
+PostgreSQL همچنان پشتیبانی می‌شود.
+
+راهنمای کوتاه: `docs/SELF_HOST_WINDOWS.md`.
 
 ## نصب اول (گام‌به‌گام)
 
 1. Python 3.12 را از python.org نصب کنید. تیک **Add python.exe to PATH** را بزنید.
-2. PostgreSQL 16 یا 17 را نصب کنید. پورت **5432**. کاربر `postgres` و رمزی که
-   خودتان انتخاب می‌کنید. دیتابیس بسازید:
+2. دیتابیس را آماده کنید.
+
+   **SQL Server (پیشنهادی اگر SSMS دارید):**
+   - ODBC Driver 18 for SQL Server را نصب کنید.
+   - در SSMS: `CREATE DATABASE bale_archive;`
+
+   **PostgreSQL جایگزین:** پورت **5432**. سپس:
 
    ```
    CREATE DATABASE bale_archive;
@@ -17,7 +25,10 @@
 3. پوشه پروژه را باز کنید، فایل `.env.example` را کپی کنید به `.env`.
 4. در `.env` این دو را پر کنید:
    - `BALE_BOT_TOKEN` = توکن ربات بله
-   - `DATABASE_URL=postgresql+asyncpg://postgres:رمز_شما@localhost:5432/bale_archive`
+   - SQL Server:
+     `DATABASE_URL=mssql+aioodbc://USER:رمز@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes`
+   - یا Postgres:
+     `DATABASE_URL=postgresql+asyncpg://postgres:رمز_شما@localhost:5432/bale_archive`
 5. PowerShell را **به‌عنوان Administrator** باز کنید:
 
    ```
@@ -75,8 +86,10 @@ Settings → Windows Update → Advanced options → Active hours
 
 ## بکاپ شبانه با Task Scheduler
 
-اسکریپت `scripts\backup.ps1` با `pg_dump.exe` از دیتابیس بکاپ می‌گیرد و
-۳۰ روز نگه می‌دارد (پوشه `BACKUP_DIR`، پیش‌فرض `data\backups`).
+اسکریپت `scripts\backup.ps1` از دیتابیس بکاپ می‌گیرد و ۳۰ روز نگه می‌دارد
+(پوشه `BACKUP_DIR`، پیش‌فرض `data\backups`). روی PostgreSQL از
+`pg_dump.exe` استفاده می‌کند. روی SQL Server اگر `sqlcmd.exe` در PATH
+باشد فایل `.bak` می‌سازد؛ وگرنه از SSMS: Tasks → Back Up.
 
 1. Task Scheduler را باز کنید → Create Task.
 2. General: Run whether user is logged on or not، Run with highest privileges.
@@ -120,8 +133,10 @@ Settings → Windows Update → Advanced options → Active hours
 عمداً چیزی حذف نمی‌شود تا داده از دست نرود.
 
 ### 5. دیتابیس در دسترس نیست
-PostgreSQL Service در `services.msc` باید Running باشد. پورت 5432. رمز
-`DATABASE_URL` را چک کنید. آپدیت‌ها موقتاً در `data\spool` ذخیره می‌شوند.
+سرویس SQL Server (یا PostgreSQL) در `services.msc` باید Running باشد.
+`DATABASE_URL` و درایور ODBC را چک کنید. یک‌بار
+`.\.venv\Scripts\python.exe scripts\check_db.py` را بزنید. آپدیت‌ها موقتاً
+در `data\spool` ذخیره می‌شوند.
 
 ### 6. بله 429 می‌دهد
 خودکار با `retry_after` صبر می‌کند. در `.env` مقدار `RATE_GLOBAL_RPS` را
@@ -134,9 +149,12 @@ PostgreSQL Service در `services.msc` باید Running باشد. پورت 5432.
 `MEDIA_ROOT` و استثنای Defender را چک کنید. فایل‌های خیلی بزرگ فقط در گروه
 آرشیو بله می‌مانند (محدودیت دانلود بله).
 
-### 9. مهاجرت دیتابیس: pg_trgm
-یک‌بار در pgAdmin: `CREATE EXTENSION IF NOT EXISTS pg_trgm;` سپس
-`.\.venv\Scripts\python.exe -m alembic upgrade head`
+### 9. مهاجرت دیتابیس
+`.\scripts\install.ps1` خودش `alembic upgrade head` را می‌زند.
+روی Postgres اگر `pg_trgm` خطا داد، یک‌بار در pgAdmin:
+`CREATE EXTENSION IF NOT EXISTS pg_trgm;` سپس دوباره
+`.\.venv\Scripts\python.exe -m alembic upgrade head`.
+روی SQL Server دیتابیس خالی `bale_archive` و ODBC Driver 18 کافی است.
 
 ### 10. دو نسخه همزمان
 فقط یک سرویس NSSM و هیچ پنجره `run.ps1` اضافه. وگرنه getUpdates conflict.

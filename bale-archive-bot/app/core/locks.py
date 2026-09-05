@@ -4,8 +4,8 @@ Two layers:
 
 * In-process ``asyncio.Lock`` map — serialises handler execution for the
   same conversation inside one process (double-click protection).
-* PostgreSQL advisory transaction lock — protects wizard state transitions
-  across processes; a no-op on non-Postgres dialects (tests on SQLite).
+* Cross-process transaction lock — ``pg_advisory_xact_lock`` on PostgreSQL
+  and ``sp_getapplock`` on Microsoft SQL Server. SQLite tests are a no-op.
 """
 
 from __future__ import annotations
@@ -44,9 +44,19 @@ class ConversationLocks:
 
 
 async def advisory_xact_lock(session: AsyncSession, chat_id: int, user_id: int) -> None:
-    """Take ``pg_advisory_xact_lock(hashtext(:key))`` inside the current transaction."""
-    bind = session.bind
-    if bind is None or bind.dialect.name != "postgresql":
-        return
+    """Take a transaction-scoped lock for this (chat, user) pair."""
+    name = session.get_bind().dialect.name
     key = f"{chat_id}:{user_id}"
-    await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
+    if name == "postgresql":
+        await session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key})
+        return
+    if name == "mssql":
+        # Resource names are limited to 255 characters. Timeout -1 waits
+        # for the lock, matching PostgreSQL advisory-lock blocking.
+        await session.execute(
+            text(
+                "EXEC sp_getapplock @Resource=:key, @LockMode='Exclusive', "
+                "@LockOwner='Transaction', @LockTimeout=-1"
+            ),
+            {"key": key[:255]},
+        )

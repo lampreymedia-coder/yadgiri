@@ -33,9 +33,39 @@ if (-not $DatabaseUrl) {
     Write-Error "DATABASE_URL is missing from .env"
 }
 
+if ($DatabaseUrl -like "mssql*") {
+    $Stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $OutFile = Join-Path $BackupDir ("backup-{0}.bak" -f $Stamp)
+    if ($DatabaseUrl -notmatch "mssql(?:\+aioodbc)?://(?:([^:]+):([^@]+)@)?([^:/?,]+)(?::(\d+))?/([^?]+)") {
+        Write-Error "Could not parse SQL Server DATABASE_URL. Back up bale_archive from SSMS instead."
+    }
+    $MsUser = $Matches[1]
+    $MsPass = $Matches[2]
+    $MsHost = $Matches[3]
+    $MsPort = $Matches[4]
+    $MsDb = $Matches[5]
+    $Server = if ($MsPort) { "{0},{1}" -f $MsHost, $MsPort } else { $MsHost }
+    $SqlCmd = Get-Command sqlcmd.exe -ErrorAction SilentlyContinue
+    if (-not $SqlCmd) {
+        Write-Error "sqlcmd.exe not found. In SSMS: right-click $MsDb → Tasks → Back Up."
+    }
+    $SqlCmdExe = if ($SqlCmd.Source) { $SqlCmd.Source } else { $SqlCmd.FullName }
+    $Query = "BACKUP DATABASE [$MsDb] TO DISK = N'$OutFile' WITH INIT"
+    if ($MsUser) {
+        & $SqlCmdExe -S $Server -U $MsUser -P $MsPass -Q $Query
+    } else {
+        & $SqlCmdExe -S $Server -E -Q $Query
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "sqlcmd backup failed with exit $LASTEXITCODE"
+    }
+    Write-Host "Backup written to $OutFile"
+    exit 0
+}
+
 # postgresql+asyncpg://user:pass@localhost:5432/db  ->  user, pass, host, port, db
 if ($DatabaseUrl -notmatch "postgresql(?:\+asyncpg)?://([^:]+):([^@]+)@([^:]+):(\d+)/([^?]+)") {
-    Write-Error "Could not parse DATABASE_URL"
+    Write-Error "Could not parse DATABASE_URL. For SQL Server use an mssql+aioodbc URL or back up from SSMS."
 }
 $PgUser = $Matches[1]
 $PgPass = $Matches[2]

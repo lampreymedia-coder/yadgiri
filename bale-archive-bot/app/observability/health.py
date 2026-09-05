@@ -23,7 +23,9 @@ async def health_payload(ctx: BotContext) -> tuple[bool, dict[str, Any]]:
     except (ConnectionError, OSError, TimeoutError):
         db_ok = False
     except Exception as exc:
-        if type(exc).__module__.startswith(("asyncpg", "sqlalchemy", "aiosqlite")):
+        if type(exc).__module__.startswith(
+            ("asyncpg", "sqlalchemy", "aiosqlite", "aioodbc", "pyodbc")
+        ):
             db_ok = False
         else:
             raise

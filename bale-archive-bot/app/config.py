@@ -78,12 +78,12 @@ class Settings(BaseSettings):
     ignore_stickers: bool = Field(default=True, alias="IGNORE_STICKERS")
     formatting_enabled: bool = Field(default=False, alias="FORMATTING_ENABLED")
 
-    # ─── Database (local Postgres on this Windows machine) ───
+    # ─── Database (PostgreSQL, Microsoft SQL Server, or SQLite) ───
     database_url: str = Field(alias="DATABASE_URL")
     db_pool_size: int = Field(default=10, alias="DB_POOL_SIZE")
     db_max_overflow: int = Field(default=10, alias="DB_MAX_OVERFLOW")
 
-    # Conversation state always lives in conversation_states (Postgres).
+    # Conversation state always lives in the conversation_states table.
     # The name is kept so existing .env files stay valid.
     state_backend: str = Field(default="postgres", alias="STATE_BACKEND")
 
@@ -135,6 +135,16 @@ class Settings(BaseSettings):
     @classmethod
     def _force_postgres_state(cls, value: object) -> str:
         return "postgres"
+
+    @field_validator("database_url")
+    @classmethod
+    def _supported_database_url(cls, value: str) -> str:
+        stripped = value.strip()
+        lowered = stripped.lower()
+        if not lowered.startswith(("postgresql", "sqlite", "mssql")):
+            msg = "DATABASE_URL must start with postgresql, sqlite, or mssql"
+            raise ValueError(msg)
+        return stripped
 
     @field_validator("bale_bot_token")
     @classmethod

@@ -1,10 +1,10 @@
 """Reporting queries (spec section 9) and text bar-chart rendering.
 
 PostgreSQL keeps the mandated SQL verbatim (FILTER/LATERAL/similarity).
-SQLite — used for tests and the current Cloud Agent host — has no generated
-``users.display_name``, no ``pg_database_size``, and no ``string_agg``. The
+SQLite (tests) and Microsoft SQL Server have no generated
+``users.display_name``, no ``pg_database_size``, and no ``pg_trgm``. The
 service picks an equivalent bound-parameter query per dialect so the admin
-panel works on both engines.
+panel works on every supported engine.
 """
 
 from __future__ import annotations
@@ -15,6 +15,9 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.dialect import dialect_name
+from app.db.dialect import is_postgres as dialect_is_postgres
 
 _BLOCKS = "█▉▊▋▌▍▎▏"
 
@@ -32,7 +35,7 @@ def text_bar(share: float, max_width: int = 10) -> str:
 
 def is_postgres(session: AsyncSession) -> bool:
     """True when this session is bound to PostgreSQL."""
-    return session.get_bind().dialect.name == "postgresql"
+    return dialect_is_postgres(session)
 
 
 def _pretty_size(nbytes: int) -> str:
@@ -400,13 +403,98 @@ _EXPORT_SQLITE = text("""
             ORDER BY s.completed_at DESC
             """)
 
+_TOP_USERS_MSSQL = text("""
+    SELECT LTRIM(RTRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))))
+               AS display_name, u.username, u.bale_user_id,
+           count(DISTINCT s.id) AS items,
+           count(DISTINCT st.tag_id) AS tags_used,
+           count(DISTINCT CASE WHEN s.content_type = 'text' THEN s.id END) AS texts,
+           count(DISTINCT CASE WHEN s.content_type IN ('image', 'album') THEN s.id END)
+               AS images,
+           count(DISTINCT CASE WHEN s.content_type IN ('voice', 'audio') THEN s.id END)
+               AS audios,
+           count(DISTINCT CASE WHEN s.content_type = 'video' THEN s.id END) AS videos,
+           count(DISTINCT CASE WHEN s.content_type = 'document' THEN s.id END)
+               AS documents,
+           max(s.completed_at) AS last_activity
+    FROM users u
+    JOIN submissions s ON s.user_id = u.id AND s.status = 'completed'
+    LEFT JOIN submission_tags st ON st.submission_id = s.id
+    WHERE (:from_ts IS NULL OR s.completed_at >= :from_ts)
+      AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+    GROUP BY u.id, u.first_name, u.last_name, u.username, u.bale_user_id
+    ORDER BY items DESC
+    OFFSET 0 ROWS FETCH NEXT :limit ROWS ONLY
+    """)
+
+_TREND_MSSQL = text("""
+    SELECT CAST(completed_at AS date) AS day, count(*) AS items
+    FROM submissions
+    WHERE status = 'completed' AND completed_at >= :since
+    GROUP BY CAST(completed_at AS date)
+    ORDER BY 1
+    """)
+
+_SEARCH_MSSQL = text("""
+    SELECT TOP 20 s.short_id, s.content_type, s.completed_at,
+           LEFT(COALESCE(s.text_normalized, ''), 120) AS snippet,
+           0.0 AS score
+    FROM submissions s
+    WHERE s.status = 'completed'
+      AND s.text_normalized LIKE '%' + :q + '%'
+    ORDER BY s.completed_at DESC
+    """)
+
+_HEALTH_MSSQL = text("""
+    SELECT
+      (SELECT count(*) FROM submissions WHERE status IN
+          ('draft','awaiting_decision','awaiting_tag_count','awaiting_tags','awaiting_confirm'))
+          AS in_progress,
+      (SELECT count(*) FROM submissions WHERE status = 'failed') AS failed,
+      (SELECT count(*) FROM outbox WHERE status = 'pending') AS outbox_pending,
+      (SELECT count(*) FROM media_files WHERE storage_status IN ('pending','failed'))
+          AS media_backlog,
+      (SELECT max(update_id) FROM processed_updates) AS last_update_id,
+      (SELECT CAST(CAST(SUM(size) * 8.0 / 1024 AS decimal(18, 1)) AS varchar(32)) + ' MiB'
+       FROM sys.database_files) AS db_size
+    """)
+
+_EXPORT_MSSQL = text("""
+            SELECT s.short_id, s.content_type, s.content_subtype, s.status,
+                   s.text_content, s.caption, s.created_at, s.completed_at,
+                   u.bale_user_id,
+                   LTRIM(RTRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))))
+                       AS display_name, u.username,
+                   g.title AS group_title,
+                   (SELECT STRING_AGG(CAST(t.hashtag AS nvarchar(max)), ' ')
+                    FROM submission_tags st JOIN tags t ON t.id = st.tag_id
+                    WHERE st.submission_id = s.id) AS hashtags,
+                   (SELECT coalesce(sum(mf.file_size_bytes), 0)
+                    FROM media_files mf WHERE mf.submission_id = s.id) AS total_bytes
+            FROM submissions s
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN groups g ON g.id = s.group_id
+            WHERE s.status = 'completed'
+              AND (:from_ts IS NULL OR s.completed_at >= :from_ts)
+              AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+            ORDER BY s.completed_at DESC
+            """)
+
 
 class ReportService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    def _kind(self) -> str:
+        name = dialect_name(self._session)
+        if name == "postgresql":
+            return "postgres"
+        if name == "mssql":
+            return "mssql"
+        return "sqlite"
+
     def _pg(self) -> bool:
-        return is_postgres(self._session)
+        return self._kind() == "postgres"
 
     async def overall(
         self, from_ts: datetime | None = None, to_ts: datetime | None = None
@@ -479,7 +567,13 @@ class ReportService:
         to_ts: datetime | None = None,
         limit: int = 10,
     ) -> list[UserStat]:
-        sql = _TOP_USERS_SQL if self._pg() else _TOP_USERS_SQLITE
+        kind = self._kind()
+        if kind == "postgres":
+            sql = _TOP_USERS_SQL
+        elif kind == "mssql":
+            sql = _TOP_USERS_MSSQL
+        else:
+            sql = _TOP_USERS_SQLITE
         rows = await self._session.execute(
             sql, {"from_ts": from_ts, "to_ts": to_ts, "limit": limit}
         )
@@ -501,7 +595,7 @@ class ReportService:
         ]
 
     async def type_matrix(self) -> list[TypeMatrixRow]:
-        sql = _TYPE_MATRIX_SQL if self._pg() else _TYPE_MATRIX_SQLITE
+        sql = _TYPE_MATRIX_SQL if self._kind() == "postgres" else _TYPE_MATRIX_SQLITE
         rows = await self._session.execute(sql)
         return [
             TypeMatrixRow(
@@ -518,11 +612,13 @@ class ReportService:
         ]
 
     async def daily_trend(self) -> list[TrendPoint]:
-        if self._pg():
+        kind = self._kind()
+        if kind == "postgres":
             rows = await self._session.execute(_TREND_SQL)
         else:
             since = datetime.now(UTC) - timedelta(days=30)
-            rows = await self._session.execute(_TREND_SQLITE, {"since": since})
+            sql = _TREND_MSSQL if kind == "mssql" else _TREND_SQLITE
+            rows = await self._session.execute(sql, {"since": since})
         points: list[TrendPoint] = []
         for row in rows:
             day = _as_datetime(row.day)
@@ -532,10 +628,13 @@ class ReportService:
         return points
 
     async def search(self, query: str, use_trigram: bool = True) -> list[SearchHit]:
-        if self._pg() and use_trigram:
+        kind = self._kind()
+        if kind == "postgres" and use_trigram:
             sql = _SEARCH_SQL
-        elif self._pg():
+        elif kind == "postgres":
             sql = _SEARCH_FALLBACK_SQL
+        elif kind == "mssql":
+            sql = _SEARCH_MSSQL
         else:
             sql = _SEARCH_SQLITE
         rows = await self._session.execute(sql, {"q": query})
@@ -551,8 +650,12 @@ class ReportService:
         ]
 
     async def health(self) -> HealthStats:
-        if self._pg():
+        kind = self._kind()
+        if kind == "postgres":
             row = (await self._session.execute(_HEALTH_SQL)).one()
+            db_size = str(row.db_size)
+        elif kind == "mssql":
+            row = (await self._session.execute(_HEALTH_MSSQL)).one()
             db_size = str(row.db_size)
         else:
             row = (await self._session.execute(_HEALTH_SQLITE)).one()
@@ -575,6 +678,12 @@ class ReportService:
     async def submissions_for_export(
         self, from_ts: datetime | None = None, to_ts: datetime | None = None
     ) -> list[dict[str, Any]]:
-        sql = _EXPORT_SQL if self._pg() else _EXPORT_SQLITE
+        kind = self._kind()
+        if kind == "postgres":
+            sql = _EXPORT_SQL
+        elif kind == "mssql":
+            sql = _EXPORT_MSSQL
+        else:
+            sql = _EXPORT_SQLITE
         rows = await self._session.execute(sql, {"from_ts": from_ts, "to_ts": to_ts})
         return [dict(row._mapping) for row in rows]

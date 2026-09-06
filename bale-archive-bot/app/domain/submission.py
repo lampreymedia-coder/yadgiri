@@ -281,7 +281,16 @@ class SubmissionService:
         }
         await self.submissions.set_status(submission, SubmissionStatus.COMPLETED)
         metrics.submissions_total.labels(status=SubmissionStatus.COMPLETED.value).inc()
+        await self.sync_owner_post(submission)
         return missing
+
+    async def sync_owner_post(self, submission: Submission) -> None:
+        """Write the owner's POST row when OWNER_POST_SYNC is on."""
+        if not self._settings.owner_post_sync:
+            return
+        from app.db.owner_post import insert_owner_post
+
+        await insert_owner_post(self._session, submission)
 
     async def refresh_archive_copies(self, submission: Submission, sender_name: str) -> None:
         """Replace already-archived copies with the latest stored content."""

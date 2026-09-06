@@ -84,6 +84,7 @@ async def run_expiry_once(ctx: BotContext) -> int:
                         await service.complete_into_tag_archives(submission, sender)
                     else:
                         await service.submissions.set_status(submission, SubmissionStatus.COMPLETED)
+                        await service.sync_owner_post(submission)
                 else:  # keep_draft (or republish without a known group)
                     submission.expires_at = datetime.now(UTC) + timedelta(
                         minutes=ctx.settings.submission_ttl_minutes

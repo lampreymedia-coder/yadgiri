@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     # The name is kept so existing .env files stay valid.
     state_backend: str = Field(default="postgres", alias="STATE_BACKEND")
 
+    # Owner-designed POST table (SQL Server). Off until that table exists
+    # on the same DATABASE_URL and the query writer confirms IDENTITY/NULLs.
+    owner_post_sync: bool = Field(default=False, alias="OWNER_POST_SYNC")
+
     # ─── Local media (switch STORAGE_BACKEND=s3 later if needed) ───
     storage_backend: StorageBackend = Field(default=StorageBackend.LOCAL, alias="STORAGE_BACKEND")
     media_root: str = Field(default="data/media", alias="MEDIA_ROOT")

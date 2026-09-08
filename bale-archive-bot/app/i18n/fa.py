@@ -659,7 +659,8 @@ HELP_ADMIN_FOOTER = (
     "/stats — آمار بازه\n"
     "/groups — فهرست گروه‌ها\n"
     "/health — سلامت سیستم\n"
-    "/search عبارت — جست‌وجو"
+    "/search عبارت — جست‌وجو\n"
+    "/addadmin شناسه — افزودن مدیر جدید"
 )
 
 MY_EMPTY = (
@@ -1046,6 +1047,8 @@ TAG_BROWSE_USAGE = "قالب: /tag شناسه [شماره صفحه]"
 
 FORGET_USAGE = "قالب: /forget شناسه‌ی عددی کاربر"
 FORGET_DONE = "✅ داده‌های هویتی کاربر پاک و دسترسی او مسدود شد."
+ADDADMIN_USAGE = "برای افزودن مدیر، شناسهٔ عددی بله را بفرستید:\n/addadmin 123456789"
+ADDADMIN_DONE = "✅ این کاربر الان مدیر ربات است. یک‌بار در پی‌وی /start بزند."
 
 DIGEST_HEADER = "📬 گزارش دوره‌ای آرشیو"
 

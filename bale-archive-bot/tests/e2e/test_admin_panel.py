@@ -117,3 +117,13 @@ async def test_admin_slash_health_and_export(ctx: BotContext, fake_bale: FakeBal
     assert fa.EXPORT_PREPARING in texts
     assert fa.ERR_DEGRADED not in texts
     assert fake_bale.calls_for("sendDocument")
+
+
+async def test_addadmin_grants_another_manager(ctx: BotContext, fake_bale: FakeBaleServer) -> None:
+    ctx.runtime_admin_ids = {USER_ID}
+    dispatcher = Dispatcher(ctx)
+    await dispatcher.dispatch(_private("/addadmin"))
+    assert fa.ADDADMIN_USAGE in "\n".join(fake_bale.sent_texts(USER_ID))
+    await dispatcher.dispatch(_private("/addadmin 888777666"))
+    assert fa.ADDADMIN_DONE in "\n".join(fake_bale.sent_texts(USER_ID))
+    assert 888777666 in ctx.runtime_admin_ids

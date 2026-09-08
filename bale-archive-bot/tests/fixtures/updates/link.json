@@ -1,0 +1,20 @@
+{
+  "update_id": 2,
+  "message": {
+    "message_id": 12,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "text": "https://example.com/article"
+  }
+}

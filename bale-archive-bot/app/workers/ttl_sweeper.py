@@ -1,0 +1,119 @@
+"""TTL sweeper: reminders at minute 10 and expiry handling at minute 30.
+
+Expiry policy (EXPIRED_POLICY):
+* republish — repost untagged into the group, mark expired (default);
+* auto_tag  — save under the fallback tag;
+* keep_draft — leave it pending and report to the admin.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+
+from app.bale.errors import BaleAPIError, NetworkError
+from app.config import ExpiredPolicy
+from app.core.context import BotContext
+from app.core.idempotency import purge_old_records
+from app.db.models import Group, Submission, SubmissionStatus
+from app.db.repositories.tags import TagRepository
+from app.domain.private_chat import META_REMINDER, settle_private_chat, sweep_private_ephemeral
+from app.i18n import fa
+from app.observability.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+async def run_reminders_once(ctx: BotContext) -> int:
+    """Send the minute-10 reminder for stale in-progress submissions."""
+    sent = 0
+    jobs: list[tuple[int, int, str]] = []
+    async with ctx.db.session() as session:
+        service = ctx.submission_service(session)
+        stale = await service.submissions.list_needing_reminder(
+            timedelta(minutes=ctx.settings.reminder_after_minutes), datetime.now(UTC)
+        )
+        now = datetime.now(UTC)
+        for submission in stale:
+            submission.reminded_at = now
+            if submission.wizard_chat_id is None:
+                continue
+            jobs.append((submission.id, submission.wizard_chat_id, submission.content_type.value))
+    for submission_id, chat_id, content_type in jobs:
+        try:
+            posted = await ctx.api.send_message(chat_id, fa.reminder_message(content_type))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("reminder_send_failed", submission_id=submission_id, error=str(exc))
+            continue
+        sent += 1
+        async with ctx.db.session() as session:
+            submission = await session.get(Submission, submission_id)
+            if submission is None:
+                continue
+            submission.meta = {**submission.meta, META_REMINDER: posted.message_id}
+    return sent
+
+
+async def run_expiry_once(ctx: BotContext) -> int:
+    """Apply EXPIRED_POLICY to submissions past their TTL."""
+    handled = 0
+    async with ctx.db.session() as session:
+        service = ctx.submission_service(session)
+        expired = await service.submissions.list_expired_in_progress(datetime.now(UTC))
+        for submission in expired:
+            handled += 1
+            owner = await service.users.get_by_id(submission.user_id)
+            group = await session.get(Group, submission.group_id) if submission.group_id else None
+            sender = ""
+            if owner is not None:
+                sender = owner.display_name or owner.username or fa.fa_digits(owner.bale_user_id)
+
+            policy = ctx.settings.expired_policy
+            try:
+                if policy is ExpiredPolicy.REPUBLISH:
+                    await service.republish_without_tags(
+                        submission, group, sender, SubmissionStatus.EXPIRED
+                    )
+                elif policy is ExpiredPolicy.AUTO_TAG:
+                    tags = TagRepository(session)
+                    slug, title, hashtag = fa.AUTO_TAG_FALLBACK
+                    fallback = await tags.get_by_slug(slug)
+                    if fallback is None:
+                        fallback = await tags.create(slug, title, hashtag)
+                    await service.submissions.set_tags(submission, [fallback.id])
+                    if group is not None:
+                        await service.complete_into_tag_archives(submission, sender)
+                    else:
+                        await service.submissions.set_status(submission, SubmissionStatus.COMPLETED)
+                else:  # keep_draft (or republish without a known group)
+                    submission.expires_at = datetime.now(UTC) + timedelta(
+                        minutes=ctx.settings.submission_ttl_minutes
+                    )
+                    if ctx.settings.admin_chat_id is not None:
+                        await service.outbox.enqueue(
+                            "admin_notify",
+                            ctx.settings.admin_chat_id,
+                            {"text": fa.admin_intake_failure_alert(submission.short_id)},
+                        )
+                    continue
+            except (BaleAPIError, NetworkError) as exc:
+                logger.warning(
+                    "expiry_handling_failed", short_id=submission.short_id, error=str(exc)
+                )
+                continue
+
+            # Close the private wizard; keep only a short summary.
+            await settle_private_chat(
+                ctx, submission, fa.expired_republished_message(submission.short_id)
+            )
+    return handled
+
+
+async def run_nightly_cleanup(ctx: BotContext) -> None:
+    """Purge processed_updates older than 7 days."""
+    async with ctx.db.session() as session:
+        await purge_old_records(session, days=7)
+
+
+async def run_private_cleanup_once(ctx: BotContext) -> int:
+    """Delete leftover private wizard traffic and due summaries."""
+    return await sweep_private_ephemeral(ctx)

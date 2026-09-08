@@ -1,0 +1,689 @@
+"""Reporting queries (spec section 9) and text bar-chart rendering.
+
+PostgreSQL keeps the mandated SQL verbatim (FILTER/LATERAL/similarity).
+SQLite (tests) and Microsoft SQL Server have no generated
+``users.display_name``, no ``pg_database_size``, and no ``pg_trgm``. The
+service picks an equivalent bound-parameter query per dialect so the admin
+panel works on every supported engine.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.dialect import dialect_name
+from app.db.dialect import is_postgres as dialect_is_postgres
+
+_BLOCKS = "█▉▊▋▌▍▎▏"
+
+
+def text_bar(share: float, max_width: int = 10) -> str:
+    """Render a bar with block characters; ``share`` is 0..1."""
+    share = max(0.0, min(1.0, share))
+    eighths = round(share * max_width * 8)
+    full, remainder = divmod(eighths, 8)
+    bar = _BLOCKS[0] * full
+    if remainder:
+        bar += _BLOCKS[8 - remainder]
+    return bar
+
+
+def is_postgres(session: AsyncSession) -> bool:
+    """True when this session is bound to PostgreSQL."""
+    return dialect_is_postgres(session)
+
+
+def _pretty_size(nbytes: int) -> str:
+    """ASCII size label for SQLite health (Postgres uses pg_size_pretty)."""
+    if nbytes < 1024:
+        return f"{nbytes} B"
+    kib = nbytes / 1024
+    if kib < 1024:
+        return f"{kib:.1f} KiB"
+    return f"{kib / 1024:.1f} MiB"
+
+
+def _as_datetime(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    if isinstance(value, date):
+        return datetime(value.year, value.month, value.day, tzinfo=UTC)
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = datetime.strptime(text_value[:10], "%Y-%m-%d")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed
+
+
+@dataclass(slots=True)
+class OverallStats:
+    total: int
+    today: int
+    week: int
+    contributors: int
+    groups: int
+    total_bytes: int
+
+
+@dataclass(slots=True)
+class TagStat:
+    title_fa: str
+    hashtag: str
+    items: int
+    contributors: int
+    last_item_at: datetime | None
+    share_pct: float
+    is_active: bool
+
+
+@dataclass(slots=True)
+class UserStat:
+    display_name: str
+    username: str | None
+    bale_user_id: int
+    items: int
+    tags_used: int
+    texts: int
+    images: int
+    audios: int
+    videos: int
+    documents: int
+    last_activity: datetime | None
+
+
+@dataclass(slots=True)
+class TypeMatrixRow:
+    title_fa: str
+    text_count: int
+    link_count: int
+    image_count: int
+    video_count: int
+    audio_count: int
+    document_count: int
+    total: int
+
+
+@dataclass(slots=True)
+class TrendPoint:
+    day: datetime
+    items: int
+
+
+@dataclass(slots=True)
+class SearchHit:
+    short_id: str
+    content_type: str
+    completed_at: datetime | None
+    snippet: str
+    score: float
+
+
+@dataclass(slots=True)
+class HealthStats:
+    in_progress: int
+    failed: int
+    outbox_pending: int
+    media_backlog: int
+    last_update_id: int | None
+    db_size: str
+
+
+_OVERALL_SQL = text("""
+    SELECT
+        count(*)                                                        AS total,
+        count(*) FILTER (WHERE created_at >= now() - interval '1 day')  AS today,
+        count(*) FILTER (WHERE created_at >= now() - interval '7 days') AS week,
+        count(DISTINCT user_id)                                         AS contributors,
+        count(DISTINCT group_id)                                        AS groups,
+        coalesce(sum(m.total_bytes), 0)                                 AS total_bytes
+    FROM submissions s
+    LEFT JOIN LATERAL (
+        SELECT sum(file_size_bytes) AS total_bytes
+        FROM media_files WHERE submission_id = s.id
+    ) m ON TRUE
+    WHERE s.status = 'completed'
+      AND (CAST(:from_ts AS timestamptz) IS NULL OR s.completed_at >= :from_ts)
+      AND (CAST(:to_ts AS timestamptz) IS NULL OR s.completed_at < :to_ts)
+    """)
+
+_OVERALL_SQLITE = text("""
+    SELECT
+        count(*) AS total,
+        count(CASE WHEN created_at >= :today_ts THEN 1 END) AS today,
+        count(CASE WHEN created_at >= :week_ts THEN 1 END) AS week,
+        count(DISTINCT user_id) AS contributors,
+        count(DISTINCT group_id) AS groups,
+        coalesce((
+            SELECT sum(mf.file_size_bytes)
+            FROM media_files mf
+            WHERE mf.submission_id IN (
+                SELECT s2.id FROM submissions s2
+                WHERE s2.status = 'completed'
+                  AND (:from_ts IS NULL OR s2.completed_at >= :from_ts)
+                  AND (:to_ts IS NULL OR s2.completed_at < :to_ts)
+            )
+        ), 0) AS total_bytes
+    FROM submissions s
+    WHERE s.status = 'completed'
+      AND (:from_ts IS NULL OR s.completed_at >= :from_ts)
+      AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+    """)
+
+_TOP_TAGS_SQL = text("""
+    SELECT t.title_fa, t.hashtag, t.is_active,
+           count(st.submission_id)                      AS items,
+           count(DISTINCT s.user_id)                    AS contributors,
+           max(s.completed_at)                          AS last_item_at,
+           round(100.0 * count(st.submission_id)
+                 / NULLIF(sum(count(st.submission_id)) OVER (), 0), 1) AS share_pct
+    FROM tags t
+    LEFT JOIN submission_tags st ON st.tag_id = t.id
+    LEFT JOIN submissions s ON s.id = st.submission_id AND s.status = 'completed'
+        AND (CAST(:from_ts AS timestamptz) IS NULL OR s.completed_at >= :from_ts)
+        AND (CAST(:to_ts AS timestamptz) IS NULL OR s.completed_at < :to_ts)
+    WHERE t.is_active OR :include_inactive
+    GROUP BY t.id, t.title_fa, t.hashtag, t.is_active
+    ORDER BY items DESC
+    """)
+
+_TOP_TAGS_SQLITE = text("""
+    SELECT t.title_fa, t.hashtag, t.is_active,
+           count(st.submission_id) AS items,
+           count(DISTINCT s.user_id) AS contributors,
+           max(s.completed_at) AS last_item_at
+    FROM tags t
+    LEFT JOIN submission_tags st ON st.tag_id = t.id
+    LEFT JOIN submissions s ON s.id = st.submission_id AND s.status = 'completed'
+        AND (:from_ts IS NULL OR s.completed_at >= :from_ts)
+        AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+    WHERE t.is_active OR :include_inactive
+    GROUP BY t.id, t.title_fa, t.hashtag, t.is_active
+    ORDER BY items DESC
+    """)
+
+_TOP_USERS_SQL = text("""
+    SELECT coalesce(u.display_name, '') AS display_name, u.username, u.bale_user_id,
+           count(DISTINCT s.id)                                 AS items,
+           count(DISTINCT st.tag_id)                            AS tags_used,
+           count(DISTINCT s.id) FILTER (WHERE s.content_type = 'text')      AS texts,
+           count(DISTINCT s.id) FILTER (WHERE s.content_type IN ('image','album')) AS images,
+           count(DISTINCT s.id) FILTER (WHERE s.content_type IN ('voice','audio'))  AS audios,
+           count(DISTINCT s.id) FILTER (WHERE s.content_type = 'video')     AS videos,
+           count(DISTINCT s.id) FILTER (WHERE s.content_type = 'document')  AS documents,
+           max(s.completed_at)                                  AS last_activity
+    FROM users u
+    JOIN submissions s ON s.user_id = u.id AND s.status = 'completed'
+    LEFT JOIN submission_tags st ON st.submission_id = s.id
+    WHERE (CAST(:from_ts AS timestamptz) IS NULL OR s.completed_at >= :from_ts)
+      AND (CAST(:to_ts AS timestamptz) IS NULL OR s.completed_at < :to_ts)
+    GROUP BY u.id
+    ORDER BY items DESC
+    LIMIT :limit
+    """)
+
+_TOP_USERS_SQLITE = text("""
+    SELECT trim(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, ''))
+               AS display_name, u.username, u.bale_user_id,
+           count(DISTINCT s.id) AS items,
+           count(DISTINCT st.tag_id) AS tags_used,
+           count(DISTINCT CASE WHEN s.content_type = 'text' THEN s.id END) AS texts,
+           count(DISTINCT CASE WHEN s.content_type IN ('image', 'album') THEN s.id END)
+               AS images,
+           count(DISTINCT CASE WHEN s.content_type IN ('voice', 'audio') THEN s.id END)
+               AS audios,
+           count(DISTINCT CASE WHEN s.content_type = 'video' THEN s.id END) AS videos,
+           count(DISTINCT CASE WHEN s.content_type = 'document' THEN s.id END)
+               AS documents,
+           max(s.completed_at) AS last_activity
+    FROM users u
+    JOIN submissions s ON s.user_id = u.id AND s.status = 'completed'
+    LEFT JOIN submission_tags st ON st.submission_id = s.id
+    WHERE (:from_ts IS NULL OR s.completed_at >= :from_ts)
+      AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+    GROUP BY u.id
+    ORDER BY items DESC
+    LIMIT :limit
+    """)
+
+_TYPE_MATRIX_SQL = text("""
+    SELECT t.title_fa,
+           count(*) FILTER (WHERE s.content_type = 'text')     AS text_count,
+           count(*) FILTER (WHERE s.content_type = 'link')     AS link_count,
+           count(*) FILTER (WHERE s.content_type IN ('image','album')) AS image_count,
+           count(*) FILTER (WHERE s.content_type = 'video')    AS video_count,
+           count(*) FILTER (WHERE s.content_type IN ('voice','audio')) AS audio_count,
+           count(*) FILTER (WHERE s.content_type = 'document') AS document_count,
+           count(*)                                            AS total
+    FROM tags t
+    JOIN submission_tags st ON st.tag_id = t.id
+    JOIN submissions s ON s.id = st.submission_id AND s.status = 'completed'
+    GROUP BY t.id, t.title_fa, t.sort_order
+    ORDER BY t.sort_order
+    """)
+
+_TYPE_MATRIX_SQLITE = text("""
+    SELECT t.title_fa,
+           count(CASE WHEN s.content_type = 'text' THEN 1 END) AS text_count,
+           count(CASE WHEN s.content_type = 'link' THEN 1 END) AS link_count,
+           count(CASE WHEN s.content_type IN ('image', 'album') THEN 1 END)
+               AS image_count,
+           count(CASE WHEN s.content_type = 'video' THEN 1 END) AS video_count,
+           count(CASE WHEN s.content_type IN ('voice', 'audio') THEN 1 END)
+               AS audio_count,
+           count(CASE WHEN s.content_type = 'document' THEN 1 END)
+               AS document_count,
+           count(*) AS total
+    FROM tags t
+    JOIN submission_tags st ON st.tag_id = t.id
+    JOIN submissions s ON s.id = st.submission_id AND s.status = 'completed'
+    GROUP BY t.id, t.title_fa, t.sort_order
+    ORDER BY t.sort_order
+    """)
+
+_TREND_SQL = text("""
+    SELECT date_trunc('day', completed_at AT TIME ZONE 'Asia/Tehran') AS day,
+           count(*) AS items
+    FROM submissions
+    WHERE status = 'completed' AND completed_at >= now() - interval '30 days'
+    GROUP BY 1 ORDER BY 1
+    """)
+
+_TREND_SQLITE = text("""
+    SELECT date(completed_at) AS day, count(*) AS items
+    FROM submissions
+    WHERE status = 'completed' AND completed_at >= :since
+    GROUP BY 1 ORDER BY 1
+    """)
+
+_SEARCH_SQL = text("""
+    SELECT s.short_id, s.content_type, s.completed_at,
+           left(s.text_normalized, 120) AS snippet,
+           similarity(s.text_normalized, :q) AS score
+    FROM submissions s
+    WHERE s.status = 'completed' AND s.text_normalized % :q
+    ORDER BY score DESC, s.completed_at DESC
+    LIMIT 20
+    """)
+
+_SEARCH_FALLBACK_SQL = text("""
+    SELECT s.short_id, s.content_type, s.completed_at,
+           left(s.text_normalized, 120) AS snippet,
+           0.0 AS score
+    FROM submissions s
+    WHERE s.status = 'completed' AND s.text_normalized ILIKE '%' || :q || '%'
+    ORDER BY s.completed_at DESC
+    LIMIT 20
+    """)
+
+_SEARCH_SQLITE = text("""
+    SELECT s.short_id, s.content_type, s.completed_at,
+           substr(coalesce(s.text_normalized, ''), 1, 120) AS snippet,
+           0.0 AS score
+    FROM submissions s
+    WHERE s.status = 'completed'
+      AND s.text_normalized LIKE '%' || :q || '%'
+    ORDER BY s.completed_at DESC
+    LIMIT 20
+    """)
+
+_HEALTH_SQL = text("""
+    SELECT
+      (SELECT count(*) FROM submissions WHERE status IN
+          ('draft','awaiting_decision','awaiting_tag_count','awaiting_tags','awaiting_confirm'))
+          AS in_progress,
+      (SELECT count(*) FROM submissions WHERE status = 'failed')                    AS failed,
+      (SELECT count(*) FROM outbox WHERE status = 'pending')          AS outbox_pending,
+      (SELECT count(*) FROM media_files WHERE storage_status IN ('pending','failed'))
+          AS media_backlog,
+      (SELECT max(update_id) FROM processed_updates)                  AS last_update_id,
+      (SELECT pg_size_pretty(pg_database_size(current_database())))                 AS db_size
+    """)
+
+_HEALTH_SQLITE = text("""
+    SELECT
+      (SELECT count(*) FROM submissions WHERE status IN
+          ('draft','awaiting_decision','awaiting_tag_count','awaiting_tags','awaiting_confirm'))
+          AS in_progress,
+      (SELECT count(*) FROM submissions WHERE status = 'failed') AS failed,
+      (SELECT count(*) FROM outbox WHERE status = 'pending') AS outbox_pending,
+      (SELECT count(*) FROM media_files WHERE storage_status IN ('pending','failed'))
+          AS media_backlog,
+      (SELECT max(update_id) FROM processed_updates) AS last_update_id
+    """)
+
+_EXPORT_SQL = text("""
+            SELECT s.short_id, s.content_type, s.content_subtype, s.status,
+                   s.text_content, s.caption, s.created_at, s.completed_at,
+                   u.bale_user_id, coalesce(u.display_name, '') AS display_name, u.username,
+                   g.title AS group_title,
+                   (SELECT string_agg(t.hashtag, ' ')
+                    FROM submission_tags st JOIN tags t ON t.id = st.tag_id
+                    WHERE st.submission_id = s.id) AS hashtags,
+                   (SELECT coalesce(sum(mf.file_size_bytes), 0)
+                    FROM media_files mf WHERE mf.submission_id = s.id) AS total_bytes
+            FROM submissions s
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN groups g ON g.id = s.group_id
+            WHERE s.status = 'completed'
+              AND (CAST(:from_ts AS timestamptz) IS NULL OR s.completed_at >= :from_ts)
+              AND (CAST(:to_ts AS timestamptz) IS NULL OR s.completed_at < :to_ts)
+            ORDER BY s.completed_at DESC
+            """)
+
+_EXPORT_SQLITE = text("""
+            SELECT s.short_id, s.content_type, s.content_subtype, s.status,
+                   s.text_content, s.caption, s.created_at, s.completed_at,
+                   u.bale_user_id,
+                   trim(coalesce(u.first_name, '') || ' ' || coalesce(u.last_name, ''))
+                       AS display_name, u.username,
+                   g.title AS group_title,
+                   (SELECT group_concat(t.hashtag, ' ')
+                    FROM submission_tags st JOIN tags t ON t.id = st.tag_id
+                    WHERE st.submission_id = s.id) AS hashtags,
+                   (SELECT coalesce(sum(mf.file_size_bytes), 0)
+                    FROM media_files mf WHERE mf.submission_id = s.id) AS total_bytes
+            FROM submissions s
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN groups g ON g.id = s.group_id
+            WHERE s.status = 'completed'
+              AND (:from_ts IS NULL OR s.completed_at >= :from_ts)
+              AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+            ORDER BY s.completed_at DESC
+            """)
+
+_TOP_USERS_MSSQL = text("""
+    SELECT LTRIM(RTRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))))
+               AS display_name, u.username, u.bale_user_id,
+           count(DISTINCT s.id) AS items,
+           count(DISTINCT st.tag_id) AS tags_used,
+           count(DISTINCT CASE WHEN s.content_type = 'text' THEN s.id END) AS texts,
+           count(DISTINCT CASE WHEN s.content_type IN ('image', 'album') THEN s.id END)
+               AS images,
+           count(DISTINCT CASE WHEN s.content_type IN ('voice', 'audio') THEN s.id END)
+               AS audios,
+           count(DISTINCT CASE WHEN s.content_type = 'video' THEN s.id END) AS videos,
+           count(DISTINCT CASE WHEN s.content_type = 'document' THEN s.id END)
+               AS documents,
+           max(s.completed_at) AS last_activity
+    FROM users u
+    JOIN submissions s ON s.user_id = u.id AND s.status = 'completed'
+    LEFT JOIN submission_tags st ON st.submission_id = s.id
+    WHERE (:from_ts IS NULL OR s.completed_at >= :from_ts)
+      AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+    GROUP BY u.id, u.first_name, u.last_name, u.username, u.bale_user_id
+    ORDER BY items DESC
+    OFFSET 0 ROWS FETCH NEXT :limit ROWS ONLY
+    """)
+
+_TREND_MSSQL = text("""
+    SELECT CAST(completed_at AS date) AS day, count(*) AS items
+    FROM submissions
+    WHERE status = 'completed' AND completed_at >= :since
+    GROUP BY CAST(completed_at AS date)
+    ORDER BY 1
+    """)
+
+_SEARCH_MSSQL = text("""
+    SELECT TOP 20 s.short_id, s.content_type, s.completed_at,
+           LEFT(COALESCE(s.text_normalized, ''), 120) AS snippet,
+           0.0 AS score
+    FROM submissions s
+    WHERE s.status = 'completed'
+      AND s.text_normalized LIKE '%' + :q + '%'
+    ORDER BY s.completed_at DESC
+    """)
+
+_HEALTH_MSSQL = text("""
+    SELECT
+      (SELECT count(*) FROM submissions WHERE status IN
+          ('draft','awaiting_decision','awaiting_tag_count','awaiting_tags','awaiting_confirm'))
+          AS in_progress,
+      (SELECT count(*) FROM submissions WHERE status = 'failed') AS failed,
+      (SELECT count(*) FROM outbox WHERE status = 'pending') AS outbox_pending,
+      (SELECT count(*) FROM media_files WHERE storage_status IN ('pending','failed'))
+          AS media_backlog,
+      (SELECT max(update_id) FROM processed_updates) AS last_update_id,
+      (SELECT CAST(CAST(SUM(size) * 8.0 / 1024 AS decimal(18, 1)) AS varchar(32)) + ' MiB'
+       FROM sys.database_files) AS db_size
+    """)
+
+_EXPORT_MSSQL = text("""
+            SELECT s.short_id, s.content_type, s.content_subtype, s.status,
+                   s.text_content, s.caption, s.created_at, s.completed_at,
+                   u.bale_user_id,
+                   LTRIM(RTRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))))
+                       AS display_name, u.username,
+                   g.title AS group_title,
+                   (SELECT STRING_AGG(CAST(t.hashtag AS nvarchar(max)), ' ')
+                    FROM submission_tags st JOIN tags t ON t.id = st.tag_id
+                    WHERE st.submission_id = s.id) AS hashtags,
+                   (SELECT coalesce(sum(mf.file_size_bytes), 0)
+                    FROM media_files mf WHERE mf.submission_id = s.id) AS total_bytes
+            FROM submissions s
+            JOIN users u ON u.id = s.user_id
+            LEFT JOIN groups g ON g.id = s.group_id
+            WHERE s.status = 'completed'
+              AND (:from_ts IS NULL OR s.completed_at >= :from_ts)
+              AND (:to_ts IS NULL OR s.completed_at < :to_ts)
+            ORDER BY s.completed_at DESC
+            """)
+
+
+class ReportService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def _kind(self) -> str:
+        name = dialect_name(self._session)
+        if name == "postgresql":
+            return "postgres"
+        if name == "mssql":
+            return "mssql"
+        return "sqlite"
+
+    def _pg(self) -> bool:
+        return self._kind() == "postgres"
+
+    async def overall(
+        self, from_ts: datetime | None = None, to_ts: datetime | None = None
+    ) -> OverallStats:
+        if self._pg():
+            row = (
+                await self._session.execute(_OVERALL_SQL, {"from_ts": from_ts, "to_ts": to_ts})
+            ).one()
+        else:
+            now = datetime.now(UTC)
+            row = (
+                await self._session.execute(
+                    _OVERALL_SQLITE,
+                    {
+                        "from_ts": from_ts,
+                        "to_ts": to_ts,
+                        "today_ts": now - timedelta(days=1),
+                        "week_ts": now - timedelta(days=7),
+                    },
+                )
+            ).one()
+        return OverallStats(
+            total=int(row.total),
+            today=int(row.today),
+            week=int(row.week),
+            contributors=int(row.contributors),
+            groups=int(row.groups or 0),
+            total_bytes=int(row.total_bytes or 0),
+        )
+
+    async def top_tags(
+        self,
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        include_inactive: bool = True,
+    ) -> list[TagStat]:
+        params = {"from_ts": from_ts, "to_ts": to_ts, "include_inactive": include_inactive}
+        if self._pg():
+            rows = (await self._session.execute(_TOP_TAGS_SQL, params)).all()
+            return [
+                TagStat(
+                    title_fa=row.title_fa,
+                    hashtag=row.hashtag,
+                    items=int(row.items),
+                    contributors=int(row.contributors),
+                    last_item_at=_as_datetime(row.last_item_at),
+                    share_pct=float(row.share_pct or 0.0),
+                    is_active=bool(row.is_active),
+                )
+                for row in rows
+            ]
+        rows = (await self._session.execute(_TOP_TAGS_SQLITE, params)).all()
+        total_items = sum(int(row.items) for row in rows)
+        return [
+            TagStat(
+                title_fa=row.title_fa,
+                hashtag=row.hashtag,
+                items=int(row.items),
+                contributors=int(row.contributors),
+                last_item_at=_as_datetime(row.last_item_at),
+                share_pct=round(100.0 * int(row.items) / total_items, 1) if total_items else 0.0,
+                is_active=bool(row.is_active),
+            )
+            for row in rows
+        ]
+
+    async def top_users(
+        self,
+        from_ts: datetime | None = None,
+        to_ts: datetime | None = None,
+        limit: int = 10,
+    ) -> list[UserStat]:
+        kind = self._kind()
+        if kind == "postgres":
+            sql = _TOP_USERS_SQL
+        elif kind == "mssql":
+            sql = _TOP_USERS_MSSQL
+        else:
+            sql = _TOP_USERS_SQLITE
+        rows = await self._session.execute(
+            sql, {"from_ts": from_ts, "to_ts": to_ts, "limit": limit}
+        )
+        return [
+            UserStat(
+                display_name=row.display_name or "",
+                username=row.username,
+                bale_user_id=int(row.bale_user_id),
+                items=int(row.items),
+                tags_used=int(row.tags_used),
+                texts=int(row.texts),
+                images=int(row.images),
+                audios=int(row.audios),
+                videos=int(row.videos),
+                documents=int(row.documents),
+                last_activity=_as_datetime(row.last_activity),
+            )
+            for row in rows
+        ]
+
+    async def type_matrix(self) -> list[TypeMatrixRow]:
+        sql = _TYPE_MATRIX_SQL if self._kind() == "postgres" else _TYPE_MATRIX_SQLITE
+        rows = await self._session.execute(sql)
+        return [
+            TypeMatrixRow(
+                title_fa=row.title_fa,
+                text_count=int(row.text_count),
+                link_count=int(row.link_count),
+                image_count=int(row.image_count),
+                video_count=int(row.video_count),
+                audio_count=int(row.audio_count),
+                document_count=int(row.document_count),
+                total=int(row.total),
+            )
+            for row in rows
+        ]
+
+    async def daily_trend(self) -> list[TrendPoint]:
+        kind = self._kind()
+        if kind == "postgres":
+            rows = await self._session.execute(_TREND_SQL)
+        else:
+            since = datetime.now(UTC) - timedelta(days=30)
+            sql = _TREND_MSSQL if kind == "mssql" else _TREND_SQLITE
+            rows = await self._session.execute(sql, {"since": since})
+        points: list[TrendPoint] = []
+        for row in rows:
+            day = _as_datetime(row.day)
+            if day is None:
+                continue
+            points.append(TrendPoint(day=day, items=int(row.items)))
+        return points
+
+    async def search(self, query: str, use_trigram: bool = True) -> list[SearchHit]:
+        kind = self._kind()
+        if kind == "postgres" and use_trigram:
+            sql = _SEARCH_SQL
+        elif kind == "postgres":
+            sql = _SEARCH_FALLBACK_SQL
+        elif kind == "mssql":
+            sql = _SEARCH_MSSQL
+        else:
+            sql = _SEARCH_SQLITE
+        rows = await self._session.execute(sql, {"q": query})
+        return [
+            SearchHit(
+                short_id=row.short_id,
+                content_type=str(row.content_type),
+                completed_at=_as_datetime(row.completed_at),
+                snippet=row.snippet or "",
+                score=float(row.score or 0.0),
+            )
+            for row in rows
+        ]
+
+    async def health(self) -> HealthStats:
+        kind = self._kind()
+        if kind == "postgres":
+            row = (await self._session.execute(_HEALTH_SQL)).one()
+            db_size = str(row.db_size)
+        elif kind == "mssql":
+            row = (await self._session.execute(_HEALTH_MSSQL)).one()
+            db_size = str(row.db_size)
+        else:
+            row = (await self._session.execute(_HEALTH_SQLITE)).one()
+            db_size = await self._sqlite_db_size()
+        return HealthStats(
+            in_progress=int(row.in_progress),
+            failed=int(row.failed),
+            outbox_pending=int(row.outbox_pending),
+            media_backlog=int(row.media_backlog),
+            last_update_id=int(row.last_update_id) if row.last_update_id is not None else None,
+            db_size=db_size,
+        )
+
+    async def _sqlite_db_size(self) -> str:
+        page_count = await self._session.scalar(text("PRAGMA page_count"))
+        page_size = await self._session.scalar(text("PRAGMA page_size"))
+        nbytes = int(page_count or 0) * int(page_size or 0)
+        return _pretty_size(nbytes)
+
+    async def submissions_for_export(
+        self, from_ts: datetime | None = None, to_ts: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        kind = self._kind()
+        if kind == "postgres":
+            sql = _EXPORT_SQL
+        elif kind == "mssql":
+            sql = _EXPORT_MSSQL
+        else:
+            sql = _EXPORT_SQLITE
+        rows = await self._session.execute(sql, {"from_ts": from_ts, "to_ts": to_ts})
+        return [dict(row._mapping) for row in rows]

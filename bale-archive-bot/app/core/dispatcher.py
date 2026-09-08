@@ -461,6 +461,8 @@ class Dispatcher:
             await admin.start_broadcast_flow(ctx, session, message)
         elif command == "forget":
             await admin.handle_forget(ctx, session, chat_id, args, actor)
+        elif command == "addadmin":
+            await admin.handle_addadmin(ctx, session, chat_id, args, actor)
         else:
             await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
 

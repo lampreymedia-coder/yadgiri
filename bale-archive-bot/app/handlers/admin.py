@@ -663,6 +663,22 @@ async def handle_forget(
     await ctx.api.send_message(chat_id, fa.FORGET_DONE)
 
 
+async def handle_addadmin(
+    ctx: BotContext, session: AsyncSession, chat_id: int, args: list[str], actor: int
+) -> None:
+    if not args or not args[0].lstrip("-").isdigit():
+        await ctx.api.send_message(chat_id, fa.ADDADMIN_USAGE)
+        return
+    bale_user_id = int(args[0])
+    users = UserRepository(session)
+    user = await users.upsert_from_bale(bale_user_id, None, None, None)
+    await users.set_admin(user.id, True)
+    ctx.runtime_admin_ids.add(bale_user_id)
+    audit = AuditRepository(session)
+    await audit.record("admin_granted", actor, "user", str(bale_user_id), {})
+    await ctx.api.send_message(chat_id, fa.ADDADMIN_DONE)
+
+
 async def persist_archive_chat(
     ctx: BotContext,
     session: AsyncSession,

@@ -19,11 +19,13 @@ copy .env.example .env
 .\scripts\run.ps1
 ```
 
-`DATABASE_URL` example (SQL Server on this PC):
+`DATABASE_URL` example (SQL Server on this PC — ODBC Driver **17**):
 
 ```
-mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes
+mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes
 ```
+
+If a newer ODBC driver is installed later, change only the number inside `driver=` (currently 17). Never point `DATABASE_URL` at the `ehya` database.
 
 PostgreSQL still works:
 

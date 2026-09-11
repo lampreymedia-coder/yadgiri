@@ -9,18 +9,30 @@
 - ویندوز ۱۰/۱۱
 - Python 3.12
 - **Microsoft SQL Server ۲۰۱۷+** (با SSMS) **یا** PostgreSQL روی localhost
-- برای SQL Server: ODBC Driver 17 یا 18
+- برای SQL Server: **ODBC Driver 17** (اگر بعداً نسخهٔ جدیدتر ODBC نصب شد فقط عدد داخل `driver=` را عوض کنید)
 - توکن ربات بله
 
 ## مراحل
 
 1. `.env` را از `.env.example` بسازید و `BALE_BOT_TOKEN` و `DATABASE_URL` را پر کنید.
 
-   SQL Server:
+   SQL Server (فقط دیتابیس `bale_archive` — **هرگز `ehya`**):
 
-   `DATABASE_URL=mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes`
+   `DATABASE_URL=mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes`
 
-   در SSMS یک‌بار: `CREATE DATABASE bale_archive;`
+   در SSMS یک‌بار (COLLATE مناسب فارسی):
+
+   ```
+   CREATE DATABASE bale_archive
+   COLLATE Persian_100_CI_AS;
+   ```
+
+   اگر `Persian_100_CI_AS` شناخته نشد:
+
+   ```
+   CREATE DATABASE bale_archive
+   COLLATE Arabic_100_CI_AS;
+   ```
 
    PostgreSQL جایگزین:
 
@@ -38,3 +50,10 @@
 
 کامپیوتر خانگی اگر Sleep برود یا خاموش شود ربات می‌ایستد. برای ۲۴ ساعته
 یک VPS لازم است؛ این استقرار فقط وابستگی به Cursor را قطع می‌کند.
+
+## هشدارهای امنیتی و منابع (SQL Server)
+
+- **هرگز** `DATABASE_URL` را به دیتابیس `ehya` وصل نکنید. جداول ربات فقط در `bale_archive`.
+- پورت **۱۴۳۳** را به اینترنت باز نکنید. ربات روی همان ماشین است؛ `localhost` کافی است.
+- روی سرور کم‌رم (~۲ گیگ) حافظه SQL Server را حدود **۵۱۲ مگابایت** محدود کنید
+  (دستور در `docs/RUNBOOK.md`).

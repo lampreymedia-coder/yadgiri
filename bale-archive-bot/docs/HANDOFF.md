@@ -276,7 +276,7 @@ WEBHOOK_SECRET_PATH=
 
 `data/` و `.env` در gitignoreاند. بک‌آپ SQLite زنده: `bale-archive-bot/data/bot.db` (روی همین VM؛ در گیت نیست).
 
-نمونه تولید SQL Server: `DATABASE_URL=mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes`
+نمونه تولید SQL Server: `DATABASE_URL=mssql+aioodbc://USER:PASSWORD@localhost:1433/bale_archive?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes`
 
 نمونه تولید Postgres: `DATABASE_URL=postgresql+asyncpg://postgres:YOUR_PASSWORD@localhost:5432/bale_archive`
 

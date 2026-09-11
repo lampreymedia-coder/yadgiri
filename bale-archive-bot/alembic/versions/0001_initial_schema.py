@@ -4,12 +4,15 @@ Revision ID: 0001
 Revises:
 Create Date: 2026-08-19
 
+On Microsoft SQL Server every textual column is NVARCHAR (never VARCHAR)
+so Persian round-trips intact. Unicode string literals use the N'…' prefix.
 """
 from __future__ import annotations
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.mssql import NVARCHAR
 
 revision = "0001"
 down_revision = None
@@ -37,38 +40,88 @@ def _now_sql(is_pg: bool, is_mssql: bool) -> sa.TextClause:
     return sa.text("CURRENT_TIMESTAMP")
 
 
+def _n_literal(value: str, *, is_mssql: bool) -> sa.TextClause:
+    """SQL string literal; N'…' on SQL Server so Unicode is preserved."""
+    if is_mssql:
+        return sa.text(f"N'{value}'")
+    return sa.text(f"'{value}'")
+
+
+def _nvarchar_in_list(values: tuple[str, ...]) -> str:
+    return ", ".join(f"N'{item}'" for item in values)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
     is_mssql = bind.dialect.name == "mssql"
     now_sql = _now_sql(is_pg, is_mssql)
-    json_empty = sa.text("N'{}'") if is_mssql else sa.text("'{}'")
-    json_array = sa.text("N'[]'") if is_mssql else sa.text("'[]'")
+    json_empty = _n_literal("{}", is_mssql=is_mssql)
+    json_array = _n_literal("[]", is_mssql=is_mssql)
+
+    # Explicit unicode text: NVARCHAR on SQL Server, UnicodeText elsewhere.
+    text_col: sa.types.TypeEngine[object]
+    enum_col: sa.types.TypeEngine[object]
+    if is_mssql:
+        text_col = NVARCHAR(None)
+        enum_col = NVARCHAR(30)
+    else:
+        text_col = sa.UnicodeText()
+        enum_col = sa.Unicode(30)
 
     if is_pg:
         # Extension for Persian trigram search. Requires appropriate rights;
         # on managed DBaaS run it once as the maintenance user if this fails.
         op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-
-    content_type_enum = sa.Enum(*CONTENT_TYPES, name="content_type_enum")
-    submission_status_enum = sa.Enum(*SUBMISSION_STATUSES, name="submission_status_enum")
-    storage_status_enum = sa.Enum(*STORAGE_STATUSES, name="storage_status_enum")
-
-    json_type = postgresql.JSONB(astext_type=sa.Text()) if is_pg else sa.JSON()
-    urls_type = postgresql.ARRAY(sa.Text()) if is_pg else sa.JSON()
+        content_type_type: sa.types.TypeEngine[object] = sa.Enum(
+            *CONTENT_TYPES, name="content_type_enum"
+        )
+        submission_status_type: sa.types.TypeEngine[object] = sa.Enum(
+            *SUBMISSION_STATUSES, name="submission_status_enum"
+        )
+        storage_status_type: sa.types.TypeEngine[object] = sa.Enum(
+            *STORAGE_STATUSES, name="storage_status_enum"
+        )
+        json_type: sa.types.TypeEngine[object] = postgresql.JSONB(
+            astext_type=sa.UnicodeText()
+        )
+        urls_type: sa.types.TypeEngine[object] = postgresql.ARRAY(sa.UnicodeText())
+    elif is_mssql:
+        content_type_type = enum_col
+        submission_status_type = enum_col
+        storage_status_type = enum_col
+        json_type = NVARCHAR(None)
+        urls_type = NVARCHAR(None)
+    else:
+        content_type_type = sa.Enum(
+            *CONTENT_TYPES, name="content_type_enum", native_enum=False
+        )
+        submission_status_type = sa.Enum(
+            *SUBMISSION_STATUSES, name="submission_status_enum", native_enum=False
+        )
+        storage_status_type = sa.Enum(
+            *STORAGE_STATUSES, name="storage_status_enum", native_enum=False
+        )
+        json_type = sa.JSON()
+        urls_type = sa.JSON()
 
     op.create_table(
         "users",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
         sa.Column("bale_user_id", sa.BigInteger(), nullable=False, unique=True),
-        sa.Column("username", sa.Text()),
-        sa.Column("first_name", sa.Text()),
-        sa.Column("last_name", sa.Text()),
+        sa.Column("username", text_col),
+        sa.Column("first_name", text_col),
+        sa.Column("last_name", text_col),
         sa.Column("is_admin", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("is_blocked", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("is_forgotten", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("has_private_chat", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("locale", sa.Text(), nullable=False, server_default="fa"),
+        sa.Column(
+            "locale",
+            text_col,
+            nullable=False,
+            server_default=_n_literal("fa", is_mssql=is_mssql),
+        ),
         sa.Column(
             "first_seen_at", sa.DateTime(timezone=True), nullable=False,
             server_default=now_sql,
@@ -88,8 +141,8 @@ def upgrade() -> None:
         "groups",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
         sa.Column("bale_chat_id", sa.BigInteger(), nullable=False, unique=True),
-        sa.Column("title", sa.Text()),
-        sa.Column("chat_type", sa.Text(), nullable=False),
+        sa.Column("title", text_col),
+        sa.Column("chat_type", text_col, nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("bot_can_delete", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("settings", json_type, nullable=False, server_default=json_empty),
@@ -102,11 +155,11 @@ def upgrade() -> None:
     op.create_table(
         "tags",
         sa.Column("id", sa.Integer(), sa.Identity(), primary_key=True),
-        sa.Column("slug", sa.Text(), nullable=False, unique=True),
-        sa.Column("title_fa", sa.Text(), nullable=False),
-        sa.Column("hashtag", sa.Text(), nullable=False, unique=True),
-        sa.Column("description", sa.Text()),
-        sa.Column("emoji", sa.Text()),
+        sa.Column("slug", text_col, nullable=False, unique=True),
+        sa.Column("title_fa", text_col, nullable=False),
+        sa.Column("hashtag", text_col, nullable=False, unique=True),
+        sa.Column("description", text_col),
+        sa.Column("emoji", text_col),
         sa.Column("parent_id", sa.Integer(), sa.ForeignKey("tags.id", ondelete="SET NULL")),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("requires_approval", sa.Boolean(), nullable=False, server_default=sa.false()),
@@ -121,21 +174,26 @@ def upgrade() -> None:
     op.create_table(
         "submissions",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
-        sa.Column("short_id", sa.Text(), nullable=False, unique=True),
+        sa.Column("short_id", text_col, nullable=False, unique=True),
         sa.Column("user_id", sa.BigInteger(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("group_id", sa.BigInteger(), sa.ForeignKey("groups.id")),
-        sa.Column("status", submission_status_enum, nullable=False, server_default="draft"),
-        sa.Column("content_type", content_type_enum, nullable=False),
-        sa.Column("content_subtype", sa.Text()),
-        sa.Column("text_content", sa.Text()),
-        sa.Column("text_normalized", sa.Text()),
-        sa.Column("caption", sa.Text()),
+        sa.Column(
+            "status",
+            submission_status_type,
+            nullable=False,
+            server_default=_n_literal("draft", is_mssql=is_mssql),
+        ),
+        sa.Column("content_type", content_type_type, nullable=False),
+        sa.Column("content_subtype", text_col),
+        sa.Column("text_content", text_col),
+        sa.Column("text_normalized", text_col),
+        sa.Column("caption", text_col),
         sa.Column(
             "urls", urls_type, nullable=False,
             server_default=sa.text("'{}'") if is_pg else json_array,
         ),
         sa.Column("is_forwarded", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("forward_source", sa.Text()),
+        sa.Column("forward_source", text_col),
         sa.Column("original_message_id", sa.BigInteger()),
         sa.Column("archive_chat_id", sa.BigInteger()),
         sa.Column("archive_message_id", sa.BigInteger()),
@@ -178,20 +236,25 @@ def upgrade() -> None:
             sa.ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False,
         ),
         sa.Column("position", sa.SmallInteger(), nullable=False, server_default="0"),
-        sa.Column("bale_file_id", sa.Text(), nullable=False),
-        sa.Column("bale_file_unique", sa.Text()),
-        sa.Column("file_name", sa.Text()),
-        sa.Column("mime_type", sa.Text()),
+        sa.Column("bale_file_id", text_col, nullable=False),
+        sa.Column("bale_file_unique", text_col),
+        sa.Column("file_name", text_col),
+        sa.Column("mime_type", text_col),
         sa.Column("file_size_bytes", sa.BigInteger()),
         sa.Column("duration_seconds", sa.Integer()),
         sa.Column("width", sa.Integer()),
         sa.Column("height", sa.Integer()),
-        sa.Column("sha256", sa.Text()),
-        sa.Column("storage_bucket", sa.Text()),
-        sa.Column("storage_key", sa.Text()),
-        sa.Column("storage_status", storage_status_enum, nullable=False, server_default="pending"),
+        sa.Column("sha256", text_col),
+        sa.Column("storage_bucket", text_col),
+        sa.Column("storage_key", text_col),
+        sa.Column(
+            "storage_status",
+            storage_status_type,
+            nullable=False,
+            server_default=_n_literal("pending", is_mssql=is_mssql),
+        ),
         sa.Column("storage_attempts", sa.SmallInteger(), nullable=False, server_default="0"),
-        sa.Column("last_error", sa.Text()),
+        sa.Column("last_error", text_col),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
             server_default=now_sql,
@@ -203,7 +266,7 @@ def upgrade() -> None:
         "conversation_states",
         sa.Column("chat_id", sa.BigInteger(), primary_key=True),
         sa.Column("user_id", sa.BigInteger(), primary_key=True),
-        sa.Column("state", sa.Text(), nullable=False),
+        sa.Column("state", text_col, nullable=False),
         sa.Column("history", json_type, nullable=False, server_default=json_array),
         sa.Column("payload", json_type, nullable=False, server_default=json_empty),
         sa.Column(
@@ -225,12 +288,17 @@ def upgrade() -> None:
     op.create_table(
         "outbox",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
-        sa.Column("kind", sa.Text(), nullable=False),
+        sa.Column("kind", text_col, nullable=False),
         sa.Column("target_chat_id", sa.BigInteger(), nullable=False),
         sa.Column("payload", json_type, nullable=False),
-        sa.Column("status", sa.Text(), nullable=False, server_default="pending"),
+        sa.Column(
+            "status",
+            text_col,
+            nullable=False,
+            server_default=_n_literal("pending", is_mssql=is_mssql),
+        ),
         sa.Column("attempts", sa.SmallInteger(), nullable=False, server_default="0"),
-        sa.Column("last_error", sa.Text()),
+        sa.Column("last_error", text_col),
         sa.Column(
             "next_retry_at", sa.DateTime(timezone=True), nullable=False,
             server_default=now_sql,
@@ -245,9 +313,9 @@ def upgrade() -> None:
         "audit_log",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
         sa.Column("actor_user_id", sa.BigInteger()),
-        sa.Column("action", sa.Text(), nullable=False),
-        sa.Column("entity_type", sa.Text()),
-        sa.Column("entity_id", sa.Text()),
+        sa.Column("action", text_col, nullable=False),
+        sa.Column("entity_type", text_col),
+        sa.Column("entity_id", text_col),
         sa.Column("payload", json_type, nullable=False, server_default=json_empty),
         sa.Column(
             "created_at", sa.DateTime(timezone=True), nullable=False,
@@ -257,7 +325,7 @@ def upgrade() -> None:
 
     op.create_table(
         "app_settings",
-        sa.Column("key", sa.Text(), primary_key=True),
+        sa.Column("key", text_col, primary_key=True),
         sa.Column("value", json_type, nullable=False),
         sa.Column("updated_by", sa.BigInteger()),
         sa.Column(
@@ -265,6 +333,38 @@ def upgrade() -> None:
             server_default=now_sql,
         ),
     )
+
+    if is_mssql:
+        op.create_check_constraint(
+            "ck_submissions_status",
+            "submissions",
+            f"status IN ({_nvarchar_in_list(SUBMISSION_STATUSES)})",
+        )
+        op.create_check_constraint(
+            "ck_submissions_content_type",
+            "submissions",
+            f"content_type IN ({_nvarchar_in_list(CONTENT_TYPES)})",
+        )
+        op.create_check_constraint(
+            "ck_media_files_storage_status",
+            "media_files",
+            f"storage_status IN ({_nvarchar_in_list(STORAGE_STATUSES)})",
+        )
+        for table, column in (
+            ("groups", "settings"),
+            ("submissions", "meta"),
+            ("submissions", "urls"),
+            ("conversation_states", "history"),
+            ("conversation_states", "payload"),
+            ("outbox", "payload"),
+            ("audit_log", "payload"),
+            ("app_settings", "value"),
+        ):
+            op.create_check_constraint(
+                f"ck_{table}_{column}_isjson",
+                table,
+                f"({column} IS NULL OR ISJSON({column}) = 1)",
+            )
 
     # ─── Indexes ───
     op.create_index("idx_sub_user_created", "submissions", ["user_id", sa.text("created_at DESC")])
@@ -311,10 +411,27 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
+    is_mssql = bind.dialect.name == "mssql"
 
     if is_pg:
         op.execute("DROP INDEX IF EXISTS idx_sub_text_trgm")
         op.execute("DROP INDEX IF EXISTS idx_sub_meta_gin")
+
+    if is_mssql:
+        for name, table in (
+            ("ck_app_settings_value_isjson", "app_settings"),
+            ("ck_audit_log_payload_isjson", "audit_log"),
+            ("ck_outbox_payload_isjson", "outbox"),
+            ("ck_conversation_states_payload_isjson", "conversation_states"),
+            ("ck_conversation_states_history_isjson", "conversation_states"),
+            ("ck_submissions_urls_isjson", "submissions"),
+            ("ck_submissions_meta_isjson", "submissions"),
+            ("ck_groups_settings_isjson", "groups"),
+            ("ck_media_files_storage_status", "media_files"),
+            ("ck_submissions_content_type", "submissions"),
+            ("ck_submissions_status", "submissions"),
+        ):
+            op.drop_constraint(name, table, type_="check")
 
     for table in (
         "app_settings", "audit_log", "outbox", "processed_updates",

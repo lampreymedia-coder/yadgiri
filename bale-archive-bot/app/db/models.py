@@ -25,13 +25,13 @@ from sqlalchemy import (
     Index,
     Integer,
     SmallInteger,
-    Text,
     text,
 )
+from sqlalchemy.dialects.mssql import NVARCHAR
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, BigIntPK, PortableJSON
+from app.db.base import Base, BigIntPK, PortableJSON, PortableText
 
 
 def utcnow() -> datetime:
@@ -93,7 +93,8 @@ class StorageStatus(enum.StrEnum):
     DUPLICATE = "duplicate"
 
 
-def _enum(py_enum: type[enum.StrEnum], name: str) -> Enum:
+def _enum(py_enum: type[enum.StrEnum], name: str) -> Any:
+    """Postgres native ENUM; NVARCHAR(30) on SQL Server; portable elsewhere."""
     return Enum(
         py_enum,
         name=name,
@@ -101,7 +102,7 @@ def _enum(py_enum: type[enum.StrEnum], name: str) -> Enum:
         native_enum=True,
         create_constraint=True,
         validate_strings=True,
-    )
+    ).with_variant(NVARCHAR(30), "mssql")
 
 
 class User(Base):
@@ -109,14 +110,14 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     bale_user_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
-    username: Mapped[str | None] = mapped_column(Text)
-    first_name: Mapped[str | None] = mapped_column(Text)
-    last_name: Mapped[str | None] = mapped_column(Text)
+    username: Mapped[str | None] = mapped_column(PortableText())
+    first_name: Mapped[str | None] = mapped_column(PortableText())
+    last_name: Mapped[str | None] = mapped_column(PortableText())
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_blocked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_forgotten: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     has_private_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    locale: Mapped[str] = mapped_column(Text, nullable=False, default="fa")
+    locale: Mapped[str] = mapped_column(PortableText(), nullable=False, default="fa")
     first_seen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -137,8 +138,8 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     bale_chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False)
-    title: Mapped[str | None] = mapped_column(Text)
-    chat_type: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(PortableText())
+    chat_type: Mapped[str] = mapped_column(PortableText(), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     bot_can_delete: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     settings: Mapped[dict[str, Any]] = mapped_column(PortableJSON(), nullable=False, default=dict)
@@ -151,11 +152,11 @@ class Tag(Base):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    slug: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    title_fa: Mapped[str] = mapped_column(Text, nullable=False)
-    hashtag: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
-    emoji: Mapped[str | None] = mapped_column(Text)
+    slug: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
+    title_fa: Mapped[str] = mapped_column(PortableText(), nullable=False)
+    hashtag: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
+    description: Mapped[str | None] = mapped_column(PortableText())
+    emoji: Mapped[str | None] = mapped_column(PortableText())
     parent_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("tags.id", ondelete="SET NULL")
     )
@@ -172,7 +173,7 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
-    short_id: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    short_id: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id"))
     status: Mapped[SubmissionStatus] = mapped_column(
@@ -183,15 +184,19 @@ class Submission(Base):
     content_type: Mapped[ContentType] = mapped_column(
         _enum(ContentType, "content_type_enum"), nullable=False
     )
-    content_subtype: Mapped[str | None] = mapped_column(Text)
-    text_content: Mapped[str | None] = mapped_column(Text)
-    text_normalized: Mapped[str | None] = mapped_column(Text)
-    caption: Mapped[str | None] = mapped_column(Text)
+    content_subtype: Mapped[str | None] = mapped_column(PortableText())
+    text_content: Mapped[str | None] = mapped_column(PortableText())
+    text_normalized: Mapped[str | None] = mapped_column(PortableText())
+    caption: Mapped[str | None] = mapped_column(PortableText())
     urls: Mapped[list[str]] = mapped_column(
-        JSON().with_variant(ARRAY(Text()), "postgresql"), nullable=False, default=list
+        JSON()
+        .with_variant(ARRAY(PortableText()), "postgresql")
+        .with_variant(NVARCHAR(None), "mssql"),
+        nullable=False,
+        default=list,
     )
     is_forwarded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    forward_source: Mapped[str | None] = mapped_column(Text)
+    forward_source: Mapped[str | None] = mapped_column(PortableText())
     # Message tracking
     original_message_id: Mapped[int | None] = mapped_column(BigInteger)
     archive_chat_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -258,24 +263,24 @@ class MediaFile(Base):
         BigInteger, ForeignKey("submissions.id", ondelete="CASCADE"), nullable=False
     )
     position: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    bale_file_id: Mapped[str] = mapped_column(Text, nullable=False)
-    bale_file_unique: Mapped[str | None] = mapped_column(Text)
-    file_name: Mapped[str | None] = mapped_column(Text)
-    mime_type: Mapped[str | None] = mapped_column(Text)
+    bale_file_id: Mapped[str] = mapped_column(PortableText(), nullable=False)
+    bale_file_unique: Mapped[str | None] = mapped_column(PortableText())
+    file_name: Mapped[str | None] = mapped_column(PortableText())
+    mime_type: Mapped[str | None] = mapped_column(PortableText())
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
-    sha256: Mapped[str | None] = mapped_column(Text)
-    storage_bucket: Mapped[str | None] = mapped_column(Text)
-    storage_key: Mapped[str | None] = mapped_column(Text)
+    sha256: Mapped[str | None] = mapped_column(PortableText())
+    storage_bucket: Mapped[str | None] = mapped_column(PortableText())
+    storage_key: Mapped[str | None] = mapped_column(PortableText())
     storage_status: Mapped[StorageStatus] = mapped_column(
         _enum(StorageStatus, "storage_status_enum"),
         nullable=False,
         default=StorageStatus.PENDING,
     )
     storage_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(PortableText())
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -299,7 +304,7 @@ class ConversationState(Base):
 
     chat_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    state: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(PortableText(), nullable=False)
     history: Mapped[list[str]] = mapped_column(PortableJSON(), nullable=False, default=list)
     payload: Mapped[dict[str, Any]] = mapped_column(PortableJSON(), nullable=False, default=dict)
     updated_at: Mapped[datetime] = mapped_column(
@@ -321,12 +326,12 @@ class OutboxItem(Base):
     __tablename__ = "outbox"
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
-    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(PortableText(), nullable=False)
     target_chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(PortableJSON(), nullable=False)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(PortableText(), nullable=False, default="pending")
     attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
-    last_error: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(PortableText())
     next_retry_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
     )
@@ -344,9 +349,9 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
     actor_user_id: Mapped[int | None] = mapped_column(BigInteger)
-    action: Mapped[str] = mapped_column(Text, nullable=False)
-    entity_type: Mapped[str | None] = mapped_column(Text)
-    entity_id: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str] = mapped_column(PortableText(), nullable=False)
+    entity_type: Mapped[str | None] = mapped_column(PortableText())
+    entity_id: Mapped[str | None] = mapped_column(PortableText())
     payload: Mapped[dict[str, Any]] = mapped_column(PortableJSON(), nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utcnow
@@ -356,7 +361,7 @@ class AuditLog(Base):
 class AppSetting(Base):
     __tablename__ = "app_settings"
 
-    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    key: Mapped[str] = mapped_column(PortableText(), primary_key=True)
     value: Mapped[Any] = mapped_column(PortableJSON(), nullable=False)
     updated_by: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(

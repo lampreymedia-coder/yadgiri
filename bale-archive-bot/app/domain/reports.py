@@ -292,6 +292,11 @@ _TYPE_MATRIX_SQLITE = text("""
     ORDER BY t.sort_order
     """)
 
+# Iran no longer observes DST; Tehran stays UTC+03:30 year-round.
+# SQL Server has no reliable Asia/Tehran zone without extra setup, so both
+# MSSQL and SQLite shift by this fixed offset before grouping by calendar day.
+TEHRAN_UTC_OFFSET_MINUTES = 210
+
 _TREND_SQL = text("""
     SELECT date_trunc('day', completed_at AT TIME ZONE 'Asia/Tehran') AS day,
            count(*) AS items
@@ -300,8 +305,8 @@ _TREND_SQL = text("""
     GROUP BY 1 ORDER BY 1
     """)
 
-_TREND_SQLITE = text("""
-    SELECT date(completed_at) AS day, count(*) AS items
+_TREND_SQLITE = text(f"""
+    SELECT date(completed_at, '+{TEHRAN_UTC_OFFSET_MINUTES} minutes') AS day, count(*) AS items
     FROM submissions
     WHERE status = 'completed' AND completed_at >= :since
     GROUP BY 1 ORDER BY 1
@@ -427,11 +432,12 @@ _TOP_USERS_MSSQL = text("""
     OFFSET 0 ROWS FETCH NEXT :limit ROWS ONLY
     """)
 
-_TREND_MSSQL = text("""
-    SELECT CAST(completed_at AS date) AS day, count(*) AS items
+_TREND_MSSQL = text(f"""
+    SELECT CAST(DATEADD(MINUTE, {TEHRAN_UTC_OFFSET_MINUTES}, completed_at) AS date) AS day,
+           count(*) AS items
     FROM submissions
     WHERE status = 'completed' AND completed_at >= :since
-    GROUP BY CAST(completed_at AS date)
+    GROUP BY CAST(DATEADD(MINUTE, {TEHRAN_UTC_OFFSET_MINUTES}, completed_at) AS date)
     ORDER BY 1
     """)
 

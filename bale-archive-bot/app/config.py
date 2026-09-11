@@ -87,8 +87,9 @@ class Settings(BaseSettings):
     # The name is kept so existing .env files stay valid.
     state_backend: str = Field(default="postgres", alias="STATE_BACKEND")
 
-    # Owner-designed POST table (SQL Server). Off until that table exists
-    # on the same DATABASE_URL and the query writer confirms IDENTITY/NULLs.
+    # Owner POST mirror (incomplete). Default off. Only works when table POST
+    # exists in the same database as DATABASE_URL (bale_archive) — never ehya.
+    # Inserts use a separate transaction so failures cannot undo archive rows.
     owner_post_sync: bool = Field(default=False, alias="OWNER_POST_SYNC")
 
     # ─── Local media (switch STORAGE_BACKEND=s3 later if needed) ───

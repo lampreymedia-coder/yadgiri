@@ -54,7 +54,7 @@ def test_engine_kind_from_url() -> None:
     assert engine_kind_from_url("sqlite+aiosqlite:///:memory:") == "sqlite"
     assert (
         engine_kind_from_url(
-            "mssql+aioodbc://u:p@localhost:1433/db?driver=ODBC+Driver+18+for+SQL+Server"
+            "mssql+aioodbc://u:p@localhost:1433/db?driver=ODBC+Driver+17+for+SQL+Server"
         )
         == "mssql"
     )
@@ -117,6 +117,6 @@ def test_mssql_engine_requires_optional_extra() -> None:
         # Driver extra is present; constructing the engine must not crash.
         database = Database(
             "mssql+aioodbc://u:p@localhost:1433/db"
-            "?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes"
+            "?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes"
         )
         assert database.engine is not None

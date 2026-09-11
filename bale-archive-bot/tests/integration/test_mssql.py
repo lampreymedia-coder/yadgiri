@@ -1,6 +1,6 @@
 """SQL Server integration: skipped unless MSSQL_TEST_URL is set.
 
-Point this at a local SQL Server (ODBC Driver 17/18) when you want a
+Point this at a local SQL Server (ODBC Driver 17) when you want a
 live round-trip. CI does not run this.
 """
 

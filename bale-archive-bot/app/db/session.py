@@ -188,7 +188,8 @@ class Database:
                     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
                 engine_kwargs.update({"poolclass": NullPool, "connect_args": {"timeout": 30.0}})
         elif url.startswith("mssql"):
-            # aioodbc / ODBC Driver 17 or 18. TrustServerCertificate and the
+            # aioodbc / ODBC Driver 17 (bump the number in DATABASE_URL if newer).
+            # TrustServerCertificate and the
             # driver name live on the URL query string (see .env.example).
             try:
                 import aioodbc  # noqa: F401

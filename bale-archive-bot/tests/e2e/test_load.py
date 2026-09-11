@@ -96,5 +96,9 @@ async def test_200_concurrent_updates(
     assert processed_count == 100
     latencies.sort()
     p95 = latencies[int(len(latencies) * 0.95)]
+    # The 2s p95 budget is a production-oriented gate. On a busy developer
+    # laptop (or shared CI) this assertion is not reliable and may fail even
+    # when correctness above is fine. Measure p95 on the real Windows server
+    # after deploy; if it still exceeds ~3s there, the 2 GB host is too small.
     assert p95 < 2.0, f"p95 latency {p95:.2f}s exceeds 2s (total {elapsed:.2f}s)"
     await client.close()

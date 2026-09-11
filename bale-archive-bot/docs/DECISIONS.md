@@ -176,7 +176,9 @@ the dispatcher spooled them as an outage.
 ## D-22: Microsoft SQL Server is a supported production dialect
 The owner already runs SQL Server (SSMS 18) and asked the bot to connect
 there instead of installing PostgreSQL. The engine URL is
-`mssql+aioodbc://…` with ODBC Driver 17/18. Differences from Postgres:
+`mssql+aioodbc://…` with **ODBC Driver 17** (this deployment). If a newer
+ODBC driver is installed later, change only the number in the `driver=`
+query parameter. Differences from Postgres:
 
 * no `ON CONFLICT` — group upsert is SELECT + INSERT/UPDATE
 * locks use `sp_getapplock` (transaction owner)
@@ -188,4 +190,22 @@ there instead of installing PostgreSQL. The engine URL is
 SQLite remains the test dialect. PostgreSQL remains fully supported.
 A home Windows PC is still a poor 24/7 host (sleep, modem drops); SQL
 Server support only removes the Cursor-VM dependency.
+
+## D-23: OWNER_POST_SYNC is incomplete and archive-safe
+`OWNER_POST_SYNC` (default **false**) optionally inserts one row into an
+owner-designed `POST` table after a submission is marked completed.
+
+Limitations (documented for operators):
+
+* The `POST` table must live in the **same** database as `DATABASE_URL`
+  (intended: `bale_archive`). The bot does **not** write across databases
+  and must **never** be pointed at `ehya` just to reach `POST`.
+* The feature is incomplete until that table exists on `bale_archive` and
+  column NULLability/IDENTITY are confirmed with the query writer.
+
+Safety (golden rule: archive is never sacrificed):
+
+* The INSERT runs in a **separate** SQL transaction from the archive write.
+* On failure the bot logs `owner_post_insert_failed`, notifies the admin
+  via outbox, and leaves the completed submission intact.
 

@@ -285,12 +285,35 @@ class SubmissionService:
         return missing
 
     async def sync_owner_post(self, submission: Submission) -> None:
-        """Write the owner's POST row when OWNER_POST_SYNC is on."""
+        """Best-effort POST mirror; never rolls back the archive transaction.
+
+        OWNER_POST_SYNC defaults to false. When enabled, the insert runs in a
+        **separate** DB transaction. Failures are logged and the admin is
+        notified via outbox; the completed submission stays committed.
+        """
         if not self._settings.owner_post_sync:
             return
-        from app.db.owner_post import insert_owner_post
+        from app.db.owner_post import insert_owner_post_separate_transaction
 
-        await insert_owner_post(self._session, submission)
+        bind = self._session.get_bind()
+        try:
+            await insert_owner_post_separate_transaction(bind, self._session, submission)
+        except Exception as exc:
+            # Archive must never be sacrificed for the owner's POST mirror.
+            logger.error(
+                "owner_post_insert_failed",
+                submission_id=submission.id,
+                short_id=submission.short_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            if self._admin_chat_id is not None:
+                await self.outbox.enqueue(
+                    "admin_notify",
+                    self._admin_chat_id,
+                    {"text": fa.admin_owner_post_sync_failed(submission.short_id)},
+                )
+
 
     async def refresh_archive_copies(self, submission: Submission, sender_name: str) -> None:
         """Replace already-archived copies with the latest stored content."""

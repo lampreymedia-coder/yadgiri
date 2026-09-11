@@ -80,7 +80,7 @@ if ($DatabaseUrl -like "mssql*") {
 Write-Host "Applying database migrations..."
 & $VenvPy -m alembic upgrade head
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Alembic failed. For SQL Server check ODBC Driver 18, DATABASE_URL, and that database bale_archive exists."
+    Write-Error "Alembic failed. For SQL Server check ODBC Driver 17, DATABASE_URL, and that database bale_archive exists."
 }
 & $VenvPy scripts\seed_tags.py
 

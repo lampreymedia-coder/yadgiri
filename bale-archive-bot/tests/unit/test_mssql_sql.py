@@ -44,11 +44,14 @@ def test_mssql_health_uses_sys_database_files() -> None:
     assert "PRAGMA" not in sql
 
 
-def test_mssql_trend_casts_date() -> None:
+def test_mssql_trend_shifts_utc_to_tehran_before_date() -> None:
     sql = _sql(reports._TREND_MSSQL)
-    assert "CAST(COMPLETED_AT AS DATE)" in sql
+    assert "DATEADD(MINUTE, 210, COMPLETED_AT)" in sql
+    assert "CAST(DATEADD(MINUTE, 210, COMPLETED_AT) AS DATE)" in sql
+    # Raw UTC cast would put 21:00 UTC on the wrong Tehran calendar day.
+    assert "CAST(COMPLETED_AT AS DATE)" not in sql
     assert "DATE_TRUNC" not in sql
-    assert "DATE(COMPLETED_AT)" not in sql
+    assert reports.TEHRAN_UTC_OFFSET_MINUTES == 210
 
 
 def test_postgres_sql_is_unchanged() -> None:

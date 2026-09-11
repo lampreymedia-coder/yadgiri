@@ -2,6 +2,12 @@
 
 The INSERT text and column order are the query writer's contract. Bot
 field names are mapped here; POST column names are not renamed.
+
+IMPORTANT: this feature is incomplete. It only works when table POST lives
+in the **same** database as DATABASE_URL (``bale_archive``). It must never
+run inside the archive transaction — use
+``insert_owner_post_separate_transaction`` so a POST failure cannot roll
+back a completed submission.
 """
 
 from __future__ import annotations
@@ -9,7 +15,8 @@ from __future__ import annotations
 from typing import Any
 
 from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from app.db.models import MediaFile, Submission
 from app.observability.logging import get_logger
@@ -82,10 +89,38 @@ async def _first_media(session: AsyncSession, submission: Submission) -> MediaFi
 
 
 async def insert_owner_post(session: AsyncSession, submission: Submission) -> None:
-    """Insert the owner's POST row. One submission → one POST row."""
+    """Insert the owner's POST row on the given session (one submission → one row).
+
+    Prefer ``insert_owner_post_separate_transaction`` from production paths so
+    archive commits stay isolated from POST failures.
+    """
     media = await _first_media(session, submission)
     values = owner_post_values(submission, media)
     await session.execute(INSERT_POST_SQL, values)
+    logger.info(
+        "owner_post_inserted",
+        post_id=values["post_id"],
+        media_type=values["media_type"],
+        has_file=media is not None,
+    )
+
+
+async def insert_owner_post_separate_transaction(
+    bind: AsyncEngine | Engine,
+    read_session: AsyncSession,
+    submission: Submission,
+) -> None:
+    """Insert POST in its own transaction on ``bind``.
+
+    Reads media mapping via ``read_session`` (the archive session) but never
+    writes through it. Callers must catch failures — this function re-raises.
+    """
+    media = await _first_media(read_session, submission)
+    values = owner_post_values(submission, media)
+    factory = async_sessionmaker(bind, expire_on_commit=False, class_=AsyncSession)
+    async with factory() as post_session:
+        async with post_session.begin():
+            await post_session.execute(INSERT_POST_SQL, values)
     logger.info(
         "owner_post_inserted",
         post_id=values["post_id"],

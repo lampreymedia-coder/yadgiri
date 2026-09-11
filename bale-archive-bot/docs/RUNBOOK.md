@@ -12,8 +12,26 @@ PostgreSQL همچنان پشتیبانی می‌شود.
 2. دیتابیس را آماده کنید.
 
    **SQL Server (پیشنهادی اگر SSMS دارید):**
-   - ODBC Driver 18 for SQL Server را نصب کنید.
-   - در SSMS: `CREATE DATABASE bale_archive;`
+   - **ODBC Driver 17** for SQL Server را نصب کنید
+     (اگر بعداً نسخهٔ جدیدتر ODBC نصب شد، فقط عدد داخل `driver=` را عوض کنید؛ الان ۱۷).
+   - در SSMS دیتابیس را با COLLATE فارسی بسازید:
+
+     ```
+     CREATE DATABASE bale_archive
+     COLLATE Persian_100_CI_AS;
+     ```
+
+     اگر خطا داد که این COLLATE نیست:
+
+     ```
+     CREATE DATABASE bale_archive
+     COLLATE Arabic_100_CI_AS;
+     ```
+
+   - **هرگز** ربات را به دیتابیس `ehya` وصل نکنید. فقط `bale_archive`.
+   - پورت **۱۴۳۳** را به اینترنت باز نکنید (`localhost` کافی است).
+   - روی سرور ۲ گیگ رم، حافظه SQL Server را حدود ۵۱۲ مگابایت محدود کنید
+     (بخش «محدود کردن حافظه SQL Server» پایین‌تر).
 
    **PostgreSQL جایگزین:** پورت **5432**. سپس:
 
@@ -26,7 +44,7 @@ PostgreSQL همچنان پشتیبانی می‌شود.
 4. در `.env` این دو را پر کنید:
    - `BALE_BOT_TOKEN` = توکن ربات بله
    - SQL Server:
-     `DATABASE_URL=mssql+aioodbc://USER:رمز@localhost:1433/bale_archive?driver=ODBC+Driver+18+for+SQL+Server&TrustServerCertificate=yes`
+     `DATABASE_URL=mssql+aioodbc://USER:رمز@localhost:1433/bale_archive?driver=ODBC+Driver+17+for+SQL+Server&TrustServerCertificate=yes`
    - یا Postgres:
      `DATABASE_URL=postgresql+asyncpg://postgres:رمز_شما@localhost:5432/bale_archive`
 5. PowerShell را **به‌عنوان Administrator** باز کنید:
@@ -39,6 +57,24 @@ PostgreSQL همچنان پشتیبانی می‌شود.
 
    اگر `polling_started` را دیدید ربات روشن است. یک‌بار در بله به ربات
    `/start` بزنید.
+
+## محدود کردن حافظه SQL Server (سرور کم‌رم)
+
+روی سروری که حدود ۲ گیگ رم دارد، در SSMS این را یک‌بار اجرا کنید تا
+SQL Server بیش از حدود ۵۱۲ مگابایت ram نگیرد:
+
+```
+EXEC sys.sp_configure N'show advanced options', 1;
+RECONFIGURE;
+EXEC sys.sp_configure N'max server memory (MB)', 512;
+RECONFIGURE;
+```
+
+برای دیدن مقدار فعلی:
+
+```
+EXEC sys.sp_configure N'max server memory (MB)';
+```
 
 ## سرویس دائمی با NSSM
 
@@ -154,7 +190,8 @@ Settings → Windows Update → Advanced options → Active hours
 روی Postgres اگر `pg_trgm` خطا داد، یک‌بار در pgAdmin:
 `CREATE EXTENSION IF NOT EXISTS pg_trgm;` سپس دوباره
 `.\.venv\Scripts\python.exe -m alembic upgrade head`.
-روی SQL Server دیتابیس خالی `bale_archive` و ODBC Driver 18 کافی است.
+روی SQL Server دیتابیس خالی `bale_archive` و ODBC Driver 17 کافی است.
+(ارتقای بعدی به نسخهٔ جدیدتر ODBC = فقط عوض کردن عدد در `driver=`.)
 
 ### 10. دو نسخه همزمان
 فقط یک سرویس NSSM و هیچ پنجره `run.ps1` اضافه. وگرنه getUpdates conflict.

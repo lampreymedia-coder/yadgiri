@@ -94,7 +94,9 @@ class GroupRepository:
         return group
 
     async def list_active(self) -> list[Group]:
-        result = await self._session.execute(select(Group).where(Group.is_active.is_(True)))
+        result = await self._session.execute(
+            select(Group).where(Group.is_active == True)  # noqa: E712
+        )
         return list(result.scalars().all())
 
     async def set_can_delete(self, group_id: int, can_delete: bool) -> None:
@@ -109,7 +111,9 @@ class GroupRepository:
 
     async def archive_chat_id_for_slug(self, slug: str) -> int | None:
         """Find the private archive group bound to a hashtag slug."""
-        result = await self._session.execute(select(Group).where(Group.is_active.is_(True)))
+        result = await self._session.execute(
+            select(Group).where(Group.is_active == True)  # noqa: E712
+        )
         for group in result.scalars().all():
             settings = group.settings if isinstance(group.settings, dict) else {}
             if settings.get("role") == "archive" and settings.get("tag_slug") == slug:

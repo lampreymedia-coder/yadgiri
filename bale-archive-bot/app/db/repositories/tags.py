@@ -14,7 +14,7 @@ class TagRepository:
 
     async def list_active(self) -> list[Tag]:
         result = await self._session.execute(
-            select(Tag).where(Tag.is_active.is_(True)).order_by(Tag.sort_order, Tag.id)
+            select(Tag).where(Tag.is_active == True).order_by(Tag.sort_order, Tag.id)  # noqa: E712
         )
         return list(result.scalars().all())
 

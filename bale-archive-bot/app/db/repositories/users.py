@@ -60,7 +60,7 @@ class UserRepository:
         )
 
     async def list_admins(self) -> list[User]:
-        result = await self._session.execute(select(User).where(User.is_admin.is_(True)))
+        result = await self._session.execute(select(User).where(User.is_admin == True))  # noqa: E712
         return list(result.scalars().all())
 
     async def forget(self, user_id: int) -> None:

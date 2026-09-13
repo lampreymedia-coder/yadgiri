@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
-    JSON,
     BigInteger,
     Boolean,
     DateTime,
@@ -196,9 +195,8 @@ class Submission(Base):
     text_normalized: Mapped[str | None] = mapped_column(PortableText())
     caption: Mapped[str | None] = mapped_column(PortableText())
     urls: Mapped[list[str]] = mapped_column(
-        JSON()
-        .with_variant(ARRAY(PortableText()), "postgresql")
-        .with_variant(NVARCHAR(None), "mssql"),
+        # TEXT[] on Postgres; JSON/NVARCHAR text elsewhere (same bind rules as PortableJSON).
+        PortableJSON().with_variant(ARRAY(PortableText()), "postgresql"),
         nullable=False,
         default=list,
     )

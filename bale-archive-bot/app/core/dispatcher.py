@@ -386,6 +386,16 @@ class Dispatcher:
             return
 
         async with self.ctx.db.session() as session:
+            if command == "claimowner":
+                if not message.is_private_message and not admin.admin_chat_allowed(
+                    self.ctx, message
+                ):
+                    await self.ctx.api.send_message(message.chat.id, fa.ERR_UNKNOWN_COMMAND)
+                    return
+                await admin.handle_claimowner(
+                    self.ctx, session, message.chat.id, message.from_user.id
+                )
+                return
             authorized = await admin.is_admin(self.ctx, session, message.from_user.id)
             if command in {"onboard", "archive"} and not message.is_private_message:
                 if not authorized:
@@ -469,6 +479,8 @@ class Dispatcher:
             await admin.handle_removeadmin(ctx, session, chat_id, args, actor)
         elif command == "transferadmin":
             await admin.handle_transferadmin(ctx, session, chat_id, args, actor)
+        elif command == "claimowner":
+            await admin.handle_claimowner(ctx, session, chat_id, actor)
         else:
             await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
 

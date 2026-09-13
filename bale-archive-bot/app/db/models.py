@@ -19,20 +19,19 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     DateTime,
-    Enum,
     ForeignKey,
     Index,
     Integer,
     SmallInteger,
     text,
 )
-from sqlalchemy.dialects.mssql import NVARCHAR
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import (
     Base,
     BigIntPK,
+    PortableEnum,
     PortableJSON,
     PortableString,
     PortableText,
@@ -100,15 +99,8 @@ class StorageStatus(enum.StrEnum):
 
 
 def _enum(py_enum: type[enum.StrEnum], name: str) -> Any:
-    """Postgres native ENUM; NVARCHAR(30) on SQL Server; portable elsewhere."""
-    return Enum(
-        py_enum,
-        name=name,
-        values_callable=lambda e: [member.value for member in e],
-        native_enum=True,
-        create_constraint=True,
-        validate_strings=True,
-    ).with_variant(NVARCHAR(30), "mssql")
+    """Postgres native ENUM; NVARCHAR(30) on SQL Server with enum round-trip."""
+    return PortableEnum(py_enum, name)
 
 
 class User(Base):

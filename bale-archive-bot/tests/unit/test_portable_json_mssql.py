@@ -47,6 +47,20 @@ def test_mssql_bind_dumps_dict_and_list_with_persian() -> None:
     assert col.process_bind_param(None, dialect) is None
 
 
+def test_mssql_app_settings_scalar_is_isjson_safe() -> None:
+    """Bare numbers fail ISJSON on several SQL Server builds; wrap scalars."""
+    col = _PortableJSON()
+    dialect = mssql.dialect()
+    owner_id = 1_290_496_049
+    bound = col.process_bind_param(owner_id, dialect)
+    assert isinstance(bound, str)
+    loaded = json.loads(bound)
+    assert isinstance(loaded, dict)
+    assert loaded.get("__scalar__") == owner_id
+    assert bound.strip()[:1] == "{"
+    assert col.process_result_value(bound, dialect) == owner_id
+
+
 def test_mssql_result_loads_text_back_to_python() -> None:
     col = _PortableJSON()
     dialect = mssql.dialect()

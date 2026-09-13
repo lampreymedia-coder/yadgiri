@@ -85,9 +85,13 @@ class AppSettingsRepository:
 
     async def get(self, key: str, default: Any = None) -> Any:
         setting = await self._session.get(AppSetting, key)
-        return setting.value if setting is not None else default
+        if setting is None:
+            return default
+        # PortableJSON unwraps MSSQL scalar wrappers; value is already Python.
+        return setting.value
 
     async def set(self, key: str, value: Any, updated_by: int | None = None) -> None:
+        """Persist ``value`` through the PortableJSON column (MSSQL-safe dumps)."""
         setting = await self._session.get(AppSetting, key)
         if setting is None:
             self._session.add(AppSetting(key=key, value=value, updated_by=updated_by))

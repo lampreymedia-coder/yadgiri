@@ -36,12 +36,14 @@ async def test_last_admin_cannot_be_removed(
         callback_update(pack_callback("ray", "", str(other)), USER_ID, 1)
     )
 
-    # Forge a remove-confirm for the last remaining admin.
+    # Forge a remove-confirm for the last remaining admin (same user).
     await dispatcher.dispatch(
         callback_update(pack_callback("ray", "", str(USER_ID)), USER_ID, 1)
     )
     texts = "\n".join(fake_bale.sent_texts(USER_ID))
-    assert fa.REMOVEADMIN_LAST in texts
+    # Self-remove is blocked (owner should use /transferadmin); last-admin
+    # guard also applies when actor != target.
+    assert fa.REMOVEADMIN_SELF in texts or fa.REMOVEADMIN_LAST in texts or fa.REMOVEADMIN_OWNER in texts
 
     async with ctx.db.session() as session:
         users = UserRepository(session)

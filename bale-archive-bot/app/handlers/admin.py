@@ -720,6 +720,11 @@ async def handle_removeadmin(
     if target_id == actor:
         await ctx.api.send_message(chat_id, fa.REMOVEADMIN_SELF)
         return
+    stored = AppSettingsRepository(session)
+    owner_id = stored_owner_id(await stored.get("owner_user_id"))
+    if owner_id is not None and target_id == owner_id:
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_OWNER)
+        return
     users = UserRepository(session)
     user = await users.get_by_bale_id(target_id)
     effective = await _collect_effective_admin_ids(ctx, session)
@@ -743,9 +748,26 @@ async def handle_removeadmin(
     )
 
 
+def stored_owner_id(raw: object) -> int | None:
+    if raw is None:
+        return None
+    try:
+        return int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
 async def confirm_removeadmin(
     ctx: BotContext, session: AsyncSession, chat_id: int, target_id: int, actor: int
 ) -> None:
+    stored = AppSettingsRepository(session)
+    owner_id = stored_owner_id(await stored.get("owner_user_id"))
+    if owner_id is not None and target_id == owner_id:
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_OWNER)
+        return
+    if target_id == actor:
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_SELF)
+        return
     users = UserRepository(session)
     user = await users.get_by_bale_id(target_id)
     effective = await _collect_effective_admin_ids(ctx, session)
@@ -825,6 +847,33 @@ async def confirm_transferadmin(
         {"from_bale_user_id": actor, "to_bale_user_id": target_id},
     )
     await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_DONE)
+
+
+async def handle_claimowner(
+    ctx: BotContext, session: AsyncSession, chat_id: int, actor: int
+) -> None:
+    """Claim bot ownership when none is set, or when caller is in ADMIN_USER_IDS."""
+    stored = AppSettingsRepository(session)
+    owner_id = stored_owner_id(await stored.get("owner_user_id"))
+    if owner_id is not None and not ctx.settings.is_admin_user(actor):
+        await ctx.api.send_message(chat_id, fa.CLAIMOWNER_DENIED)
+        return
+    users = UserRepository(session)
+    user = await users.upsert_from_bale(actor, None, None, None)
+    await users.set_admin(user.id, True)
+    ctx.runtime_admin_ids.add(actor)
+    await stored.set("owner_user_id", actor, updated_by=actor)
+    await stored.set("admin_notify_chat_id", actor, updated_by=actor)
+    ctx.admin_notify_chat_id = actor
+    audit = AuditRepository(session)
+    await audit.record(
+        "owner_claimed",
+        actor,
+        "user",
+        str(actor),
+        {"previous_owner_user_id": owner_id},
+    )
+    await ctx.api.send_message(chat_id, fa.CLAIMOWNER_DONE)
 
 
 async def persist_archive_chat(

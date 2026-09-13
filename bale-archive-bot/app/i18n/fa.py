@@ -673,7 +673,8 @@ HELP_ADMIN_FOOTER = (
     "/admins — فهرست مدیران\n"
     "/addadmin شناسه — افزودن مدیر جدید\n"
     "/removeadmin شناسه — حذف مدیر\n"
-    "/transferadmin شناسه — انتقال مالکیت"
+    "/transferadmin شناسه — انتقال مالکیت\n"
+    "/claimowner — ثبت خود به‌عنوان مالک (فقط اگر مالکی نباشد)"
 )
 
 MY_EMPTY = (
@@ -1086,6 +1087,15 @@ TRANSFERADMIN_CONFIRM = "آیا مالکیت ربات به این کاربر م�
 TRANSFERADMIN_DONE = "✅ مالکیت منتقل شد."
 TRANSFERADMIN_CANCELLED = "انتقال مالکیت لغو شد."
 TRANSFERADMIN_SELF = "نمی‌توان مالکیت را به خودتان منتقل کرد."
+
+CLAIMOWNER_DONE = "✅ شما به‌عنوان مالک ربات ثبت شدید."
+CLAIMOWNER_DENIED = (
+    "مالک از قبل ثبت شده است. فقط کاربرهای داخل ADMIN_USER_IDS می‌توانند دوباره "
+    "مالکیت را ادعا کنند."
+)
+REMOVEADMIN_OWNER = (
+    "مالک ربات را نمی‌توان با /removeadmin حذف کرد. برای واگذاری از /transferadmin استفاده کنید."
+)
 
 DIGEST_HEADER = "📬 گزارش دوره‌ای آرشیو"
 

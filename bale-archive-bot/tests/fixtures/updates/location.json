@@ -1,0 +1,23 @@
+{
+  "update_id": 9,
+  "message": {
+    "message_id": 19,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "location": {
+      "latitude": 35.6892,
+      "longitude": 51.389
+    }
+  }
+}

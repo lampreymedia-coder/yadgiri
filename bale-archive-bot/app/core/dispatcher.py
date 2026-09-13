@@ -465,6 +465,8 @@ class Dispatcher:
             await admin.send_groups(ctx, session, chat_id)
         elif command == "health":
             await admin.send_health(ctx, session, chat_id)
+        elif command == "disk":
+            await admin.send_disk(ctx, session, chat_id)
         elif command == "settings":
             await admin.handle_settings(ctx, session, chat_id, args, actor)
         elif command == "broadcast":

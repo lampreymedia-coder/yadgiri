@@ -674,7 +674,8 @@ HELP_ADMIN_FOOTER = (
     "/addadmin شناسه — افزودن مدیر جدید\n"
     "/removeadmin شناسه — حذف مدیر\n"
     "/transferadmin شناسه — انتقال مالکیت\n"
-    "/claimowner — ثبت خود به‌عنوان مالک (فقط اگر مالکی نباشد)"
+    "/claimowner — ثبت خود به‌عنوان مالک (فقط اگر مالکی نباشد)\n"
+    "/disk — فضای دیسک و صرفه‌جویی رسانه"
 )
 
 MY_EMPTY = (
@@ -1096,6 +1097,39 @@ CLAIMOWNER_DENIED = (
 REMOVEADMIN_OWNER = (
     "مالک ربات را نمی‌توان با /removeadmin حذف کرد. برای واگذاری از /transferadmin استفاده کنید."
 )
+
+DISK_HEADER = "💾 وضعیت فضای ذخیره‌سازی رسانه"
+DISK_USAGE = (
+    "آزاد روی دیسک: {free}\n"
+    "کل دیسک: {total}\n"
+    "پوشه رسانه: {root}\n"
+    "حجم فایل‌های ذخیره‌شده: {stored} ({stored_n} فایل)\n"
+    "صرفه‌جویی فشرده‌سازی: {comp_saved} ({comp_n} ویدیو)\n"
+    "صرفه‌جویی حذف تکراری: {dedup_saved} ({dedup_n} مورد)\n"
+    "جمع صرفه‌جویی: {total_saved}"
+)
+DISK_LARGEST_HEADER = "بزرگ‌ترین فایل‌ها:"
+
+
+def format_bytes(num: int) -> str:
+    value = float(max(0, int(num)))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            if unit == "B":
+                return f"{fa_digits(int(value))} {unit}"
+            return f"{fa_digits(round(value, 1))} {unit}"
+        value /= 1024
+    return f"{fa_digits(int(num))} B"
+
+
+def disk_largest_line(
+    rank: int, size_bytes: int, name: str, status: str, compressed: bool
+) -> str:
+    flag = " [فشرده]" if compressed else ""
+    return (
+        f"{fa_digits(rank)}. {name} — {format_bytes(size_bytes)} "
+        f"({status}{flag})"
+    )
 
 DIGEST_HEADER = "📬 گزارش دوره‌ای آرشیو"
 

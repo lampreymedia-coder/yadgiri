@@ -405,6 +405,44 @@ async def send_health(ctx: BotContext, session: AsyncSession, chat_id: int) -> N
     )
 
 
+async def send_disk(ctx: BotContext, session: AsyncSession, chat_id: int) -> None:
+    from pathlib import Path
+
+    from app.domain.disk_report import build_disk_report
+
+    root = ctx.settings.media_root_path
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    report = await build_disk_report(session, root)
+    total_saved = report.compression_saved_bytes + report.dedup_saved_bytes
+    lines = [
+        fa.DISK_HEADER,
+        fa.DISK_USAGE.format(
+            free=fa.format_bytes(report.free_bytes),
+            total=fa.format_bytes(report.total_disk_bytes),
+            root=report.media_root,
+            stored=fa.format_bytes(report.stored_bytes),
+            stored_n=fa.fa_digits(report.stored_count),
+            comp_saved=fa.format_bytes(report.compression_saved_bytes),
+            comp_n=fa.fa_digits(report.compressed_count),
+            dedup_saved=fa.format_bytes(report.dedup_saved_bytes),
+            dedup_n=fa.fa_digits(report.duplicate_count),
+            total_saved=fa.format_bytes(total_saved),
+        ),
+    ]
+    if report.largest:
+        lines.append("")
+        lines.append(fa.DISK_LARGEST_HEADER)
+        for index, row in enumerate(report.largest, start=1):
+            name = row.file_name or row.storage_key or f"#{row.media_id}"
+            lines.append(
+                fa.disk_largest_line(
+                    index, row.size_bytes, name, row.status, row.is_compressed
+                )
+            )
+    await ctx.api.send_message(chat_id, "\n".join(lines))
+
+
 async def send_export(
     ctx: BotContext, session: AsyncSession, chat_id: int, args: list[str]
 ) -> None:

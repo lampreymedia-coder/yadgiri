@@ -144,6 +144,9 @@ class MediaRepository:
         storage_key: str | None = None,
         error: str | None = None,
         increment_attempts: bool = True,
+        original_size_bytes: int | None = None,
+        stored_size_bytes: int | None = None,
+        is_compressed: bool | None = None,
     ) -> None:
         values: dict[str, Any] = {"storage_status": status}
         if sha256 is not None:
@@ -154,6 +157,12 @@ class MediaRepository:
             values["storage_key"] = storage_key
         if error is not None:
             values["last_error"] = error[:2000]
+        if original_size_bytes is not None:
+            values["original_size_bytes"] = original_size_bytes
+        if stored_size_bytes is not None:
+            values["stored_size_bytes"] = stored_size_bytes
+        if is_compressed is not None:
+            values["is_compressed"] = is_compressed
         if status is StorageStatus.STORED:
             values["stored_at"] = datetime.now(UTC)
         if increment_attempts:

@@ -271,6 +271,11 @@ class MediaFile(Base):
     sha256: Mapped[str | None] = mapped_column(PortableString(64))
     storage_bucket: Mapped[str | None] = mapped_column(PortableText())
     storage_key: Mapped[str | None] = mapped_column(PortableText())
+    # Disk accounting: original download size vs bytes actually kept after
+    # compression; duplicates keep original_size for savings reports.
+    original_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    stored_size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    is_compressed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     storage_status: Mapped[StorageStatus] = mapped_column(
         _enum(StorageStatus, "storage_status_enum"),
         nullable=False,

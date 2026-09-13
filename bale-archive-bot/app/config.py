@@ -102,6 +102,13 @@ class Settings(BaseSettings):
     s3_bucket_media: str = Field(default="bale-archive-media", alias="S3_BUCKET_MEDIA")
     s3_max_download_mb: int = Field(default=20, alias="S3_MAX_DOWNLOAD_MB")
 
+    # ─── Video compression (media worker only; never blocks the wizard) ───
+    video_compression_enabled: bool = Field(default=True, alias="VIDEO_COMPRESSION_ENABLED")
+    video_crf: int = Field(default=24, alias="VIDEO_CRF")
+    video_max_height: int = Field(default=720, alias="VIDEO_MAX_HEIGHT")
+    video_audio_bitrate: str = Field(default="96k", alias="VIDEO_AUDIO_BITRATE")
+    keep_original_video: bool = Field(default=False, alias="KEEP_ORIGINAL_VIDEO")
+
     # ─── Limits ───
     rate_global_rps: float = Field(default=20.0, alias="RATE_GLOBAL_RPS")
     rate_per_chat_per_sec: float = Field(default=1.0, alias="RATE_PER_CHAT_PER_SEC")

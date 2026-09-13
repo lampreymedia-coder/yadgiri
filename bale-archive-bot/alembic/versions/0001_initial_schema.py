@@ -173,7 +173,15 @@ def upgrade() -> None:
         sa.Column("hashtag", indexed_text, nullable=False, unique=True),
         sa.Column("description", text_col),
         sa.Column("emoji", text_col),
-        sa.Column("parent_id", sa.Integer(), sa.ForeignKey("tags.id", ondelete="SET NULL")),
+        # SQL Server rejects ON DELETE SET NULL on self-referencing FKs (1785).
+        # App clears children in TagRepository.delete(); other dialects keep SET NULL.
+        sa.Column(
+            "parent_id",
+            sa.Integer(),
+            sa.ForeignKey("tags.id")
+            if is_mssql
+            else sa.ForeignKey("tags.id", ondelete="SET NULL"),
+        ),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("requires_approval", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),

@@ -31,7 +31,14 @@ from sqlalchemy.dialects.mssql import NVARCHAR
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, BigIntPK, PortableJSON, PortableString, PortableText
+from app.db.base import (
+    Base,
+    BigIntPK,
+    PortableJSON,
+    PortableString,
+    PortableText,
+    SelfReferentialFK,
+)
 
 
 def utcnow() -> datetime:
@@ -158,7 +165,7 @@ class Tag(Base):
     description: Mapped[str | None] = mapped_column(PortableText())
     emoji: Mapped[str | None] = mapped_column(PortableText())
     parent_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("tags.id", ondelete="SET NULL")
+        Integer, SelfReferentialFK("tags.id")
     )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     requires_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

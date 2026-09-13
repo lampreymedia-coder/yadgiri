@@ -59,6 +59,19 @@ class TagRepository:
     async def set_active(self, tag_id: int, is_active: bool) -> None:
         await self._session.execute(update(Tag).where(Tag.id == tag_id).values(is_active=is_active))
 
+    async def delete(self, tag_id: int) -> None:
+        """Hard-delete a tag after nulling self-referential ``parent_id`` links.
+
+        SQL Server cannot declare ON DELETE SET NULL on ``tags.parent_id``, so
+        this application-level clear is required there and is safe everywhere.
+        """
+        await self._session.execute(
+            update(Tag).where(Tag.parent_id == tag_id).values(parent_id=None)
+        )
+        tag = await self.get(tag_id)
+        if tag is not None:
+            await self._session.delete(tag)
+
     async def update_fields(
         self,
         tag_id: int,

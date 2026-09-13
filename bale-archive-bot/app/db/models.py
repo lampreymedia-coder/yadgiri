@@ -31,7 +31,7 @@ from sqlalchemy.dialects.mssql import NVARCHAR
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.db.base import Base, BigIntPK, PortableJSON, PortableText
+from app.db.base import Base, BigIntPK, PortableJSON, PortableString, PortableText
 
 
 def utcnow() -> datetime:
@@ -152,9 +152,9 @@ class Tag(Base):
     __tablename__ = "tags"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    slug: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
+    slug: Mapped[str] = mapped_column(PortableString(255), unique=True, nullable=False)
     title_fa: Mapped[str] = mapped_column(PortableText(), nullable=False)
-    hashtag: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
+    hashtag: Mapped[str] = mapped_column(PortableString(255), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(PortableText())
     emoji: Mapped[str | None] = mapped_column(PortableText())
     parent_id: Mapped[int | None] = mapped_column(
@@ -173,7 +173,7 @@ class Submission(Base):
     __tablename__ = "submissions"
 
     id: Mapped[int] = mapped_column(BigIntPK(), primary_key=True, autoincrement=True)
-    short_id: Mapped[str] = mapped_column(PortableText(), unique=True, nullable=False)
+    short_id: Mapped[str] = mapped_column(PortableString(32), unique=True, nullable=False)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id"))
     status: Mapped[SubmissionStatus] = mapped_column(
@@ -271,7 +271,7 @@ class MediaFile(Base):
     duration_seconds: Mapped[int | None] = mapped_column(Integer)
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
-    sha256: Mapped[str | None] = mapped_column(PortableText())
+    sha256: Mapped[str | None] = mapped_column(PortableString(64))
     storage_bucket: Mapped[str | None] = mapped_column(PortableText())
     storage_key: Mapped[str | None] = mapped_column(PortableText())
     storage_status: Mapped[StorageStatus] = mapped_column(
@@ -361,7 +361,7 @@ class AuditLog(Base):
 class AppSetting(Base):
     __tablename__ = "app_settings"
 
-    key: Mapped[str] = mapped_column(PortableText(), primary_key=True)
+    key: Mapped[str] = mapped_column(PortableString(128), primary_key=True)
     value: Mapped[Any] = mapped_column(PortableJSON(), nullable=False)
     updated_by: Mapped[int | None] = mapped_column(BigInteger)
     updated_at: Mapped[datetime] = mapped_column(

@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import signal
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -33,6 +32,7 @@ from app.core.context import BotContext
 from app.core.dispatcher import Dispatcher
 from app.core.ratelimit import OutboundRateLimiter
 from app.core.receive import should_register_webhook, webhook_needs_reregister
+from app.core.signals import install_stop_signals
 from app.core.watchdog import StallWatchdog
 from app.db.session import Database
 from app.observability import metrics as app_metrics
@@ -531,8 +531,7 @@ async def _run_polling_mode(app_instance: Application) -> None:
     server = uvicorn.Server(config)
 
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, app_instance.stop_event.set)
+    install_stop_signals(loop, app_instance.stop_event.set)
 
     server_task = asyncio.create_task(server.serve())
     # Wait for startup() inside lifespan before polling begins.

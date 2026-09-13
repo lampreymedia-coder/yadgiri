@@ -60,13 +60,26 @@ def upgrade() -> None:
     json_array = _n_literal("[]", is_mssql=is_mssql)
 
     # Explicit unicode text: NVARCHAR on SQL Server, UnicodeText elsewhere.
+    # Indexed / UNIQUE / PK key columns cannot be NVARCHAR(max) on SQL Server.
     text_col: sa.types.TypeEngine[object]
+    indexed_text: sa.types.TypeEngine[object]
+    short_id_col: sa.types.TypeEngine[object]
+    sha256_col: sa.types.TypeEngine[object]
+    settings_key_col: sa.types.TypeEngine[object]
     enum_col: sa.types.TypeEngine[object]
     if is_mssql:
         text_col = NVARCHAR(None)
+        indexed_text = NVARCHAR(255)
+        short_id_col = NVARCHAR(32)
+        sha256_col = NVARCHAR(64)
+        settings_key_col = NVARCHAR(128)
         enum_col = NVARCHAR(30)
     else:
         text_col = sa.UnicodeText()
+        indexed_text = sa.Unicode(255)
+        short_id_col = sa.Unicode(32)
+        sha256_col = sa.Unicode(64)
+        settings_key_col = sa.Unicode(128)
         enum_col = sa.Unicode(30)
 
     if is_pg:
@@ -155,9 +168,9 @@ def upgrade() -> None:
     op.create_table(
         "tags",
         sa.Column("id", sa.Integer(), sa.Identity(), primary_key=True),
-        sa.Column("slug", text_col, nullable=False, unique=True),
+        sa.Column("slug", indexed_text, nullable=False, unique=True),
         sa.Column("title_fa", text_col, nullable=False),
-        sa.Column("hashtag", text_col, nullable=False, unique=True),
+        sa.Column("hashtag", indexed_text, nullable=False, unique=True),
         sa.Column("description", text_col),
         sa.Column("emoji", text_col),
         sa.Column("parent_id", sa.Integer(), sa.ForeignKey("tags.id", ondelete="SET NULL")),
@@ -174,7 +187,7 @@ def upgrade() -> None:
     op.create_table(
         "submissions",
         sa.Column("id", sa.BigInteger(), sa.Identity(), primary_key=True),
-        sa.Column("short_id", text_col, nullable=False, unique=True),
+        sa.Column("short_id", short_id_col, nullable=False, unique=True),
         sa.Column("user_id", sa.BigInteger(), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("group_id", sa.BigInteger(), sa.ForeignKey("groups.id")),
         sa.Column(
@@ -244,7 +257,7 @@ def upgrade() -> None:
         sa.Column("duration_seconds", sa.Integer()),
         sa.Column("width", sa.Integer()),
         sa.Column("height", sa.Integer()),
-        sa.Column("sha256", text_col),
+        sa.Column("sha256", sha256_col),
         sa.Column("storage_bucket", text_col),
         sa.Column("storage_key", text_col),
         sa.Column(
@@ -325,7 +338,7 @@ def upgrade() -> None:
 
     op.create_table(
         "app_settings",
-        sa.Column("key", text_col, primary_key=True),
+        sa.Column("key", settings_key_col, primary_key=True),
         sa.Column("value", json_type, nullable=False),
         sa.Column("updated_by", sa.BigInteger()),
         sa.Column(

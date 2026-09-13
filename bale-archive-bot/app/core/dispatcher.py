@@ -463,6 +463,12 @@ class Dispatcher:
             await admin.handle_forget(ctx, session, chat_id, args, actor)
         elif command == "addadmin":
             await admin.handle_addadmin(ctx, session, chat_id, args, actor)
+        elif command == "admins":
+            await admin.handle_admins(ctx, session, chat_id)
+        elif command == "removeadmin":
+            await admin.handle_removeadmin(ctx, session, chat_id, args, actor)
+        elif command == "transferadmin":
+            await admin.handle_transferadmin(ctx, session, chat_id, args, actor)
         else:
             await ctx.api.send_message(chat_id, fa.ERR_UNKNOWN_COMMAND)
 

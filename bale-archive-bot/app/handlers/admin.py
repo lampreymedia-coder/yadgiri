@@ -28,6 +28,7 @@ from app.db.repositories.submissions import SubmissionRepository
 from app.db.repositories.tags import TagRepository
 from app.db.repositories.users import UserRepository
 from app.domain import reports
+from app.domain.admin_mgmt import can_remove_admin, effective_admin_ids
 from app.domain.group_roles import (
     ROLE_ARCHIVE,
     ROLE_RESEARCH,
@@ -56,6 +57,10 @@ ADMIN_ACTIONS = {
     "srg",
     "stg",
     "srb",
+    "ray",
+    "ran",
+    "tay",
+    "tan",
 }
 
 # Group admins may answer these without being a global bot admin.
@@ -679,6 +684,149 @@ async def handle_addadmin(
     await ctx.api.send_message(chat_id, fa.ADDADMIN_DONE)
 
 
+async def _collect_effective_admin_ids(ctx: BotContext, session: AsyncSession) -> set[int]:
+    users = UserRepository(session)
+    db_admins = await users.list_admins()
+    return effective_admin_ids(
+        db_admin_bale_ids=(u.bale_user_id for u in db_admins),
+        runtime_admin_ids=ctx.runtime_admin_ids,
+        env_admin_ids=ctx.settings.admin_user_ids,
+    )
+
+
+async def handle_admins(ctx: BotContext, session: AsyncSession, chat_id: int) -> None:
+    users = UserRepository(session)
+    db_admins = await users.list_admins()
+    by_bale = {u.bale_user_id: u for u in db_admins}
+    ids = await _collect_effective_admin_ids(ctx, session)
+    if not ids:
+        await ctx.api.send_message(chat_id, fa.ADMINS_EMPTY)
+        return
+    lines = [fa.ADMINS_HEADER]
+    for bale_id in sorted(ids):
+        user = by_bale.get(bale_id) or await users.get_by_bale_id(bale_id)
+        name = user.display_name if user is not None else ""
+        lines.append(fa.admin_list_line(name, bale_id))
+    await ctx.api.send_message(chat_id, "\n".join(lines))
+
+
+async def handle_removeadmin(
+    ctx: BotContext, session: AsyncSession, chat_id: int, args: list[str], actor: int
+) -> None:
+    if not args or not args[0].lstrip("-").isdigit():
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_USAGE)
+        return
+    target_id = int(args[0])
+    if target_id == actor:
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_SELF)
+        return
+    users = UserRepository(session)
+    user = await users.get_by_bale_id(target_id)
+    effective = await _collect_effective_admin_ids(ctx, session)
+    if target_id not in effective and (user is None or not user.is_admin):
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_NOT_ADMIN)
+        return
+    if not can_remove_admin(effective, target_id):
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_LAST)
+        return
+    name = user.display_name if user is not None else ""
+    rows = [
+        [
+            button(fa.BTN_YES, "ray", "", str(target_id)),
+            button(fa.BTN_NO, "ran"),
+        ]
+    ]
+    await ctx.api.send_message(
+        chat_id,
+        f"{fa.admin_list_line(name, target_id)}\n\n{fa.REMOVEADMIN_CONFIRM}",
+        keyboard(rows),
+    )
+
+
+async def confirm_removeadmin(
+    ctx: BotContext, session: AsyncSession, chat_id: int, target_id: int, actor: int
+) -> None:
+    users = UserRepository(session)
+    user = await users.get_by_bale_id(target_id)
+    effective = await _collect_effective_admin_ids(ctx, session)
+    if not can_remove_admin(effective, target_id):
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_LAST)
+        return
+    if user is not None:
+        await users.set_admin(user.id, False)
+    ctx.runtime_admin_ids.discard(target_id)
+    audit = AuditRepository(session)
+    await audit.record(
+        "admin_revoked",
+        actor,
+        "user",
+        str(target_id),
+        {"target_bale_user_id": target_id},
+    )
+    await ctx.api.send_message(chat_id, fa.REMOVEADMIN_DONE)
+
+
+async def handle_transferadmin(
+    ctx: BotContext, session: AsyncSession, chat_id: int, args: list[str], actor: int
+) -> None:
+    if not args or not args[0].lstrip("-").isdigit():
+        await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_USAGE)
+        return
+    target_id = int(args[0])
+    if target_id == actor:
+        await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_SELF)
+        return
+    users = UserRepository(session)
+    target = await users.upsert_from_bale(target_id, None, None, None)
+    rows = [
+        [
+            button(fa.BTN_YES, "tay", "", str(target_id)),
+            button(fa.BTN_NO, "tan"),
+        ]
+    ]
+    await ctx.api.send_message(
+        chat_id,
+        f"{fa.admin_list_line(target.display_name, target_id)}\n\n{fa.TRANSFERADMIN_CONFIRM}",
+        keyboard(rows),
+    )
+
+
+async def confirm_transferadmin(
+    ctx: BotContext, session: AsyncSession, chat_id: int, target_id: int, actor: int
+) -> None:
+    if target_id == actor:
+        await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_SELF)
+        return
+    users = UserRepository(session)
+    target = await users.upsert_from_bale(target_id, None, None, None)
+    await users.set_admin(target.id, True)
+    ctx.runtime_admin_ids.add(target_id)
+
+    actor_user = await users.get_by_bale_id(actor)
+    if actor_user is not None:
+        # Ensure we never demote the last admin: target is already admin.
+        effective = await _collect_effective_admin_ids(ctx, session)
+        if can_remove_admin(effective, actor):
+            await users.set_admin(actor_user.id, False)
+            ctx.runtime_admin_ids.discard(actor)
+
+    settings_repo = AppSettingsRepository(session)
+    await settings_repo.set("owner_user_id", target_id, updated_by=actor)
+    if ctx.admin_notify_chat_id == actor:
+        ctx.admin_notify_chat_id = target_id
+        await settings_repo.set("admin_notify_chat_id", target_id, updated_by=actor)
+
+    audit = AuditRepository(session)
+    await audit.record(
+        "admin_transferred",
+        actor,
+        "user",
+        str(target_id),
+        {"from_bale_user_id": actor, "to_bale_user_id": target_id},
+    )
+    await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_DONE)
+
+
 async def persist_archive_chat(
     ctx: BotContext,
     session: AsyncSession,
@@ -875,6 +1023,24 @@ async def handle_admin_callback(ctx: BotContext, session: AsyncSession, cq: Call
             await ctx.api.send_message(chat_id, fa.TAG_NOT_FOUND)
     elif data.action == "adtn":
         await ctx.api.send_message(chat_id, fa.BROADCAST_CANCELLED)
+    elif data.action == "ray":
+        try:
+            target_id = int(data.arg)
+        except ValueError:
+            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+        else:
+            await confirm_removeadmin(ctx, session, chat_id, target_id, cq.from_user.id)
+    elif data.action == "ran":
+        await ctx.api.send_message(chat_id, fa.REMOVEADMIN_CANCELLED)
+    elif data.action == "tay":
+        try:
+            target_id = int(data.arg)
+        except ValueError:
+            await ctx.api.send_message(chat_id, fa.ERR_GENERIC)
+        else:
+            await confirm_transferadmin(ctx, session, chat_id, target_id, cq.from_user.id)
+    elif data.action == "tan":
+        await ctx.api.send_message(chat_id, fa.TRANSFERADMIN_CANCELLED)
     elif data.action in ("atgy", "atgn", "abcy", "abcn"):
         await _handle_flow_confirm(ctx, session, cq, data.action, chat_id)
     elif data.action == "sar":

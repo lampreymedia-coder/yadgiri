@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import User, utcnow
@@ -62,6 +62,12 @@ class UserRepository:
     async def list_admins(self) -> list[User]:
         result = await self._session.execute(select(User).where(User.is_admin == True))  # noqa: E712
         return list(result.scalars().all())
+
+    async def count_admins(self) -> int:
+        result = await self._session.scalar(
+            select(func.count()).select_from(User).where(User.is_admin == True)  # noqa: E712
+        )
+        return int(result or 0)
 
     async def forget(self, user_id: int) -> None:
         """Soft-delete a user's personal data (GDPR-style /forget)."""

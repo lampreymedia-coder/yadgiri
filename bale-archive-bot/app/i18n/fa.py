@@ -670,7 +670,10 @@ HELP_ADMIN_FOOTER = (
     "/groups — فهرست گروه‌ها\n"
     "/health — سلامت سیستم\n"
     "/search عبارت — جست‌وجو\n"
-    "/addadmin شناسه — افزودن مدیر جدید"
+    "/admins — فهرست مدیران\n"
+    "/addadmin شناسه — افزودن مدیر جدید\n"
+    "/removeadmin شناسه — حذف مدیر\n"
+    "/transferadmin شناسه — انتقال مالکیت"
 )
 
 MY_EMPTY = (
@@ -1059,6 +1062,30 @@ FORGET_USAGE = "قالب: /forget شناسه‌ی عددی کاربر"
 FORGET_DONE = "✅ داده‌های هویتی کاربر پاک و دسترسی او مسدود شد."
 ADDADMIN_USAGE = "برای افزودن مدیر، شناسهٔ عددی بله را بفرستید:\n/addadmin 123456789"
 ADDADMIN_DONE = "✅ این کاربر الان مدیر ربات است. یک‌بار در پی‌وی /start بزند."
+
+ADMINS_HEADER = "👑 مدیران فعلی ربات:"
+ADMINS_EMPTY = "هنوز مدیری در پایگاه داده ثبت نشده."
+ADMINS_USAGE = "فهرست مدیران: /admins"
+
+
+def admin_list_line(name: str, bale_user_id: int) -> str:
+    label = name.strip() if name and name.strip() else "بدون نام"
+    return f"• {label} — {fa_digits(bale_user_id)}"
+
+
+REMOVEADMIN_USAGE = "برای حذف مدیر:\n/removeadmin 123456789"
+REMOVEADMIN_CONFIRM = "آیا از حذف این مدیر مطمئن هستید؟"
+REMOVEADMIN_DONE = "✅ دسترسی مدیریت حذف شد."
+REMOVEADMIN_CANCELLED = "حذف مدیر لغو شد."
+REMOVEADMIN_LAST = "نمی‌توان آخرین مدیر را حذف کرد. حداقل یک مدیر باید بماند."
+REMOVEADMIN_NOT_ADMIN = "این کاربر مدیر نیست."
+REMOVEADMIN_SELF = "برای واگذاری مالکیت از /transferadmin استفاده کنید."
+
+TRANSFERADMIN_USAGE = "برای انتقال مالکیت:\n/transferadmin 123456789"
+TRANSFERADMIN_CONFIRM = "آیا مالکیت ربات به این کاربر منتقل شود؟ شما دیگر مدیر نخواهید بود."
+TRANSFERADMIN_DONE = "✅ مالکیت منتقل شد."
+TRANSFERADMIN_CANCELLED = "انتقال مالکیت لغو شد."
+TRANSFERADMIN_SELF = "نمی‌توان مالکیت را به خودتان منتقل کرد."
 
 DIGEST_HEADER = "📬 گزارش دوره‌ای آرشیو"
 

@@ -31,12 +31,13 @@ def test_portable_json_still_compiles_to_nvarchar_on_mssql() -> None:
 def test_mssql_bind_dumps_dict_and_list_with_persian() -> None:
     col = _PortableJSON()
     dialect = mssql.dialect()
-    payload = {"role": "archive", "عنوان": "یادگیری"}
+    payload = {"نام": "سنجش ربات"}
     bound = col.process_bind_param(payload, dialect)
     assert isinstance(bound, str)
-    assert "یادگیری" in bound
+    assert "سنجش ربات" in bound
     assert "\\u" not in bound  # ensure_ascii=False
     assert json.loads(bound) == payload
+    assert col.process_result_value(bound, dialect) == payload
 
     urls = ["https://a.ir", "https://ب.ir"]
     bound_list = col.process_bind_param(urls, dialect)

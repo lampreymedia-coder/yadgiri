@@ -65,7 +65,7 @@ async def test_photo_without_caption_is_stored_on_disk(h: Harness) -> None:
     assert (mtype, fid, width) == (1, "ph1", 800)
     media_root = h.settings.media_root
     assert path.startswith(str(media_root)) and path.endswith(".jpg")
-    assert Path(path).read_bytes() == b"fake-file-bytes"
+    assert Path(path).read_bytes() == b"fake-file-bytes"  # noqa: ASYNC240
     # Backup copy in the archive group.
     assert any(int(p["chat_id"]) == ARCHIVE_ID for p in h.fake.calls_for("copyMessage"))
 

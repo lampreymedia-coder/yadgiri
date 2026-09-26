@@ -28,8 +28,8 @@ DATA_DIR=/var/lib/balebot
 ENV_DIR=/etc/balebot
 ENV_FILE="$ENV_DIR/balebot.env"
 SERVICE=balebot
-MIRROR="https://mirror-pypi.runflare.com/simple"
-MIRROR_HOST="mirror-pypi.runflare.com"
+MIRROR="${PIP_MIRROR:-https://mirror-pypi.runflare.com/simple}"
+MIRROR_HOST="$(printf '%s' "$MIRROR" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')"
 
 step() { echo; echo "==> $*"; }
 fail() { echo; echo "❌ $*" >&2; exit 1; }
@@ -73,7 +73,8 @@ echo "✅ نسخه: $(git -C "$SRC" log -1 --oneline)"
 step "۴) محیط پایتون و بسته‌ها (از آینه‌ی $MIRROR_HOST)"
 [[ -x "$VENV/bin/python" ]] || python3 -m venv "$VENV"
 "$VENV/bin/pip" install -q --disable-pip-version-check \
-  --index-url "$MIRROR" --trusted-host "$MIRROR_HOST" -r "$APP_DIR/requirements.txt"
+  --index-url "$MIRROR" --trusted-host "$MIRROR_HOST" -r "$APP_DIR/requirements.txt" \
+  || fail "نصب بسته‌ها از آینه‌ی $MIRROR_HOST ناموفق بود. اینترنت سرور را بررسی کنید و دوباره اجرا کنید."
 echo "✅ بسته‌ها نصب شدند"
 
 step "۵) فایل تنظیمات $ENV_FILE"
@@ -89,12 +90,19 @@ else
   [[ "$admin_id" =~ ^[0-9]+$ ]] || fail "شناسه‌ی ادمین باید فقط عدد باشد."
   encoded="$(printf '%s' "$dbpass" | python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))')"
   unset dbpass
+  # Prefer the local socket (account 'balebot'@'localhost'); fall back to TCP.
+  socket=/var/run/mysqld/mysqld.sock
+  if sudo -u balebot test -w "$socket"; then
+    db_url="mysql+aiomysql://balebot:${encoded}@localhost/Bale_Archive?charset=utf8mb4&unix_socket=$socket"
+  else
+    db_url="mysql+aiomysql://balebot:${encoded}@127.0.0.1:3306/Bale_Archive?charset=utf8mb4"
+  fi
   tmp="$(mktemp)"
   chmod 600 "$tmp"
   cat > "$tmp" <<EOF
 # تنظیمات ربات آرشیو — فقط کاربر balebot می‌تواند این فایل را بخواند (600).
 BALE_BOT_TOKEN="$token"
-DATABASE_URL="mysql+aiomysql://balebot:${encoded}@localhost/Bale_Archive?charset=utf8mb4&unix_socket=/var/run/mysqld/mysqld.sock"
+DATABASE_URL="$db_url"
 ADMIN_USER_IDS=$admin_id
 # شناسه‌ی عددی گروه آرشیو (پشتیبان داخل بله)؛ اگر ندارید خالی بماند.
 ARCHIVE_CHAT_ID=

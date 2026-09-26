@@ -1,0 +1,28 @@
+[Unit]
+Description=Bale archive bot (Bale_Archive MySQL)
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=balebot
+Group=balebot
+WorkingDirectory=/opt/balebot/src/bale-archive-bot
+Environment=BALEBOT_ENV_FILE=/etc/balebot/balebot.env
+Environment=PYTHONUTF8=1
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=Asia/Tehran
+Environment=RUN_MODE=polling
+ExecStart=/opt/balebot/venv/bin/python -m app.main
+Restart=on-failure
+RestartSec=5
+# Exit code 78 = preflight failed: do not restart in a loop, wait for the owner.
+RestartPreventExitStatus=78
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/balebot
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+{
+  "update_id": 4,
+  "message": {
+    "message_id": 14,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "video": {
+      "file_id": "vid1",
+      "file_unique_id": "u3",
+      "width": 1920,
+      "height": 1080,
+      "duration": 42,
+      "mime_type": "video/mp4",
+      "file_size": 8000000
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "update_id": 3,
+  "message": {
+    "message_id": 13,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "caption": "توضیح تصویر",
+    "photo": [
+      {
+        "file_id": "ph_small",
+        "file_unique_id": "u1",
+        "width": 90,
+        "height": 60,
+        "file_size": 1200
+      },
+      {
+        "file_id": "ph_big",
+        "file_unique_id": "u2",
+        "width": 1280,
+        "height": 720,
+        "file_size": 250000
+      }
+    ]
+  }
+}

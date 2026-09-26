@@ -1,0 +1,27 @@
+{
+  "update_id": 7,
+  "message": {
+    "message_id": 17,
+    "date": 1755600000,
+    "chat": {
+      "id": -100200300,
+      "type": "group",
+      "title": "گروه رصد"
+    },
+    "from": {
+      "id": 12345,
+      "is_bot": false,
+      "first_name": "علی",
+      "last_name": "احمدی",
+      "username": "ali_ahmadi"
+    },
+    "audio": {
+      "file_id": "aud1",
+      "file_unique_id": "u6",
+      "duration": 180,
+      "file_name": "song.mp3",
+      "mime_type": "audio/mpeg",
+      "file_size": 4000000
+    }
+  }
+}

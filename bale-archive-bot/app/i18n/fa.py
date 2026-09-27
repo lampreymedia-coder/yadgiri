@@ -177,10 +177,12 @@ def unregister_done(name: str) -> str:
 # ─── Private commands ───
 
 START = (
-    "سلام! من ربات آرشیو هستم.\n"
-    "وقتی در یکی از گروه‌های ثبت‌شده پیامی بفرستید، همین‌جا از شما می‌پرسم آیا در آرشیو "
-    "ذخیره شود و زیر کدام هشتگ‌ها.\n"
-    "تا وقتی «تأیید نهایی» را نزنید، هیچ چیزی ذخیره نمی‌شود."
+    "سلام 🌱 خوش آمدید!\n"
+    "من ربات آرشیو گروه‌های رصد و تحقیق هستم.\n\n"
+    "هر وقت در یکی از گروه‌ها متن، عکس، صدا، ویدیو یا فایلی بفرستید، همین‌جا آرام از شما "
+    "می‌پرسم: «در آرشیو بماند؟ زیر کدام هشتگ؟»\n"
+    "تا «تأیید نهایی» را نزنید، هیچ چیزی ذخیره نمی‌شود؛ و پیام شما در گروه همیشه سر جایش می‌ماند.\n\n"
+    "از دکمه‌های پایین صفحه ارسال‌ها و آمار خودتان را ببینید."
 )
 
 HELP = (
@@ -190,6 +192,10 @@ HELP = (
     "۳. هشتگ‌ها را انتخاب کنید و «ادامه» را بزنید.\n"
     "۴. در پیش‌نمایش «تأیید نهایی» را بزنید.\n"
     "«خیر» یا «انصراف» یعنی هیچ چیزی ذخیره نشود.\n\n"
+    "دکمه‌های پایین صفحه:\n"
+    "📥 ارسال‌های من — آخرین ثبت‌های شما\n"
+    "📊 آمار من — تعداد ثبت‌ها به تفکیک هشتگ و نوع\n"
+    "↩️ لغو آخرین ارسال — تا ۱۰ دقیقه بعد از ثبت، از آرشیو برداشته می‌شود\n\n"
     "دستورها: /start /help /id /tags"
 )
 
@@ -524,4 +530,44 @@ def disk_status(total: int, free: int, media_size: int, files: int) -> str:
         f"فضای آزاد: {_size(free)} از {_size(total)}\n"
         f"{text_bar(used_share)} {fa_digits(round(used_share * 100))}٪ پر\n"
         f"پوشه‌ی media: {_size(media_size)} در {fa_digits(files)} فایل"
+    )
+
+
+# ─── User private menu (2-5) ───
+
+BTN_MY_POSTS = "📥 ارسال‌های من"
+BTN_MY_STATS = "📊 آمار من"
+BTN_UNDO_LAST = "↩️ لغو آخرین ارسال"
+BTN_HELP = "❓ راهنما"
+BTN_ADMIN_PANEL = "🛠 پنل مدیر"
+BTN_UNDO_CONFIRM = "🗑 بله، لغو شود"
+BTN_UNDO_KEEP = "نه، بماند"
+NOTHING_YET = "هنوز چیزی از شما در آرشیو ثبت نشده است."
+UNDO_NOTHING = "در ۱۰ دقیقه‌ی اخیر ارسالی از شما ثبت نشده که بشود لغوش کرد."
+UNDO_TOO_LATE = "مهلت ۱۰ دقیقه‌ای لغو گذشته یا این ارسال دیگر موجود نیست."
+UNDO_DONE = "✅ آخرین ارسال شما از آرشیو برداشته شد. پیام شما در گروه دست نخورده است."
+
+
+def my_posts(posts: list[object]) -> str:
+    if not posts:
+        return NOTHING_YET
+    lines = ["📥 آخرین ارسال‌های شما:"]
+    for post in posts:
+        tags = " ".join(hashtag_label(t) for t in str(getattr(post, "hashtags", "")).split() if t)
+        lines.append(
+            f"• #{fa_digits(post.id)} — {jalali(post.created_at, with_time=True)} — "  # type: ignore[attr-defined]
+            f"{post.group_name} — {content_label(post.content_type)}"  # type: ignore[attr-defined]
+        )
+        body = excerpt(post.content_text, 60)  # type: ignore[attr-defined]
+        detail = " ".join(part for part in (tags, body) if part)
+        if detail:
+            lines.append("   " + detail)
+    return "\n".join(lines)
+
+
+def undo_question(post: object) -> str:
+    return (
+        "این ارسال از آرشیو برداشته شود؟\n"
+        f"#{fa_digits(post.id)} — {post.group_name} — {content_label(post.content_type)}\n"  # type: ignore[attr-defined]
+        + excerpt(post.content_text, 100)  # type: ignore[attr-defined]
     )

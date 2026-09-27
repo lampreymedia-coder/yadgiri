@@ -10,7 +10,7 @@ from app.bale.models import CallbackQuery, Message, Update
 from app.core.albums import AlbumBuffer
 from app.core.context import BotContext
 from app.domain.classify import normalize_fa
-from app.handlers import admin, intake, panel, wizard
+from app.handlers import admin, intake, panel, user_menu, wizard
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -25,6 +25,15 @@ _PERSIAN_COMMANDS = {
 }
 
 
+_BUTTON_COMMANDS = {
+    fa.BTN_MY_POSTS: "my",
+    fa.BTN_MY_STATS: "mystats",
+    fa.BTN_UNDO_LAST: "undo",
+    fa.BTN_HELP: "help",
+    fa.BTN_ADMIN_PANEL: "panel",
+}
+
+
 def parse_command(text: str | None) -> tuple[str, list[str]] | None:
     """'/cmd@bot arg1 arg2' or a whole-word Persian alias → (cmd, args)."""
     stripped = (text or "").strip()
@@ -34,6 +43,8 @@ def parse_command(text: str | None) -> tuple[str, list[str]] | None:
         parts = stripped.split()
         command = parts[0][1:].split("@")[0].lower()
         return (command, parts[1:]) if command else None
+    if stripped in _BUTTON_COMMANDS:
+        return _BUTTON_COMMANDS[stripped], []
     words = stripped.split()
     alias = _PERSIAN_COMMANDS.get(normalize_fa(words[0]).replace(" ", ""))
     if alias is not None and len(words) == 1:
@@ -117,13 +128,16 @@ class Dispatcher:
         else:
             ctx.pending_input.pop(message.from_user.id, None)
         if name == "start":
-            await self._send(message.chat.id, fa.START)
+            await user_menu.send_start(ctx, message.from_user.id)
             await wizard.resume_pending(ctx, message.from_user.id)
         elif name == "help":
-            text = fa.HELP
-            if ctx.is_admin(message.from_user.id):
-                text = f"{text}\n\n{fa.ADMIN_HELP}"
-            await self._send(message.chat.id, text)
+            await user_menu.send_help(ctx, message.from_user.id)
+        elif name == "my":
+            await user_menu.send_my_posts(ctx, message.from_user.id)
+        elif name == "mystats":
+            await user_menu.send_my_stats(ctx, message.from_user.id)
+        elif name == "undo":
+            await user_menu.ask_undo(ctx, message.from_user.id)
         elif name == "id":
             await self._send(message.chat.id, fa.your_id(message.from_user.id))
         elif name == "tags":
@@ -162,6 +176,10 @@ class Dispatcher:
         if data.action == admin.ACT_LEVEL:
             # Registration must work in a group that is not registered yet.
             await admin.handle_level_callback(self.ctx, cq, data.sid, data.arg)
+            return
+        if data.action == user_menu.ACT_UNDO:
+            async with self.ctx.user_locks.get(("undo", cq.from_user.id)):
+                await user_menu.handle_undo_callback(self.ctx, cq, data.arg)
             return
         if data.action == panel.ACT_PANEL:
             await panel.handle_callback(self.ctx, cq, data.sid, data.arg)

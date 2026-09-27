@@ -426,3 +426,67 @@ async def set_group_active(conn: AsyncConnection, group_id: int, active: bool) -
         text("UPDATE EhyaGroup SET is_active = :active, updated_at = :now WHERE id = :id"),
         {"active": 1 if active else 0, "now": tehran_now(), "id": group_id},
     )
+
+
+# ─── A user's own posts (private menu) ───
+
+
+@dataclass(frozen=True, slots=True)
+class OwnPost:
+    id: int
+    created_at: datetime
+    content_type: int
+    content_text: str
+    group_name: str
+    hashtags: str
+
+
+async def own_posts(conn: AsyncConnection, person_id: int, limit: int = 10) -> list[OwnPost]:
+    result = await conn.execute(
+        text(
+            "SELECT p.id, p.created_at, p.content_type, p.content_text, g.bale_group_name, "
+            "(SELECT GROUP_CONCAT(h.name ORDER BY h.id SEPARATOR ' ') FROM PostHashtag ph "
+            " JOIN Hashtag h ON h.id = ph.hashtag_id WHERE ph.post_id = p.id) AS tags "
+            "FROM Post p JOIN EhyaGroup g ON g.id = p.ehya_group_id "
+            "WHERE p.person_id = :pid ORDER BY p.id DESC LIMIT :lim"
+        ),
+        {"pid": person_id, "lim": limit},
+    )
+    return [
+        OwnPost(
+            int(row.id),
+            row.created_at,
+            int(row.content_type),
+            str(row.content_text or ""),
+            str(row.bale_group_name),
+            str(row.tags or ""),
+        )
+        for row in result
+    ]
+
+
+async def delete_own_post(conn: AsyncConnection, post_id: int, person_id: int) -> list[str] | None:
+    """Undo one post of this person on the caller's transaction.
+
+    Order: PostHashtag, PostMedia, then Post. Returns the storage paths of the
+    removed files, or None when the post is not this person's.
+    """
+    owner = await conn.execute(
+        text("SELECT 1 FROM Post WHERE id = :id AND person_id = :pid"),
+        {"id": post_id, "pid": person_id},
+    )
+    if owner.first() is None:
+        return None
+    paths = [
+        str(row.storage_path)
+        for row in await conn.execute(
+            text("SELECT storage_path FROM PostMedia WHERE post_id = :id"), {"id": post_id}
+        )
+    ]
+    await conn.execute(text("DELETE FROM PostHashtag WHERE post_id = :id"), {"id": post_id})
+    await conn.execute(text("DELETE FROM PostMedia WHERE post_id = :id"), {"id": post_id})
+    await conn.execute(
+        text("DELETE FROM Post WHERE id = :id AND person_id = :pid"),
+        {"id": post_id, "pid": person_id},
+    )
+    return paths

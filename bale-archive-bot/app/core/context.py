@@ -13,6 +13,7 @@ from app.core.notify import AdminNotifier
 from app.core.ratelimit import InboundSpamGuard
 from app.core.wizard_store import WizardStore
 from app.db.session import Database
+from app.domain.video_compress import CompressionLog
 
 
 class KeyedLocks:
@@ -47,6 +48,9 @@ class BotContext:
     user_locks: KeyedLocks = field(default_factory=KeyedLocks)
     spam_guard: InboundSpamGuard = field(init=False)
     notifier: AdminNotifier = field(init=False)
+    compression_log: CompressionLog = field(init=False)
+    # Only one ffmpeg job at a time (2 GB RAM server).
+    compress_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     bot_username: str = ""
     bot_user_id: int = 0
     background: set[asyncio.Task[None]] = field(default_factory=set)
@@ -56,6 +60,7 @@ class BotContext:
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)
         self.notifier = AdminNotifier(self.api, self.admins)
+        self.compression_log = CompressionLog(self.settings.data_path / "compression.json")
 
     @property
     def archive_chat_id(self) -> int | None:

@@ -144,5 +144,6 @@ async def handle_undo_callback(ctx: BotContext, cq: CallbackQuery, arg: str) -> 
         await _send(ctx, user_id, fa.UNDO_TOO_LATE)
         return
     removed = _remove_files(ctx, paths)
+    ctx.compression_log.forget_paths(paths)
     logger.info("post_undone", post_id=post_id, user_id=user_id, files_removed=removed)
     await _send(ctx, user_id, fa.UNDO_DONE)

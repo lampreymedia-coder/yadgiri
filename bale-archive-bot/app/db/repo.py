@@ -490,3 +490,11 @@ async def delete_own_post(conn: AsyncConnection, post_id: int, person_id: int) -
         {"id": post_id, "pid": person_id},
     )
     return paths
+
+
+async def set_media_file(conn: AsyncConnection, media_id: int, storage_path: str, size: int) -> None:
+    """After compression: only the two existing columns storage_path and file_size."""
+    await conn.execute(
+        text("UPDATE PostMedia SET storage_path = :path, file_size = :size WHERE id = :id"),
+        {"path": _cut(storage_path, 1000), "size": size, "id": media_id},
+    )

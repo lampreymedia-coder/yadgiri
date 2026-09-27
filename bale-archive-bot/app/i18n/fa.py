@@ -571,3 +571,10 @@ def undo_question(post: object) -> str:
         f"#{fa_digits(post.id)} — {post.group_name} — {content_label(post.content_type)}\n"  # type: ignore[attr-defined]
         + excerpt(post.content_text, 100)  # type: ignore[attr-defined]
     )
+
+
+def compression_line(before: int, after: int) -> str:
+    if not before:
+        return ""
+    saved = before - after
+    return f"\nفشرده‌سازی ویدیو: {_size(saved)} صرفه‌جویی ({fa_digits(round(100 * saved / before))}٪)"

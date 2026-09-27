@@ -411,7 +411,8 @@ async def _disk_text(ctx: BotContext) -> str:
         return usage.total, usage.free, size, files
 
     total, free, media_size, files = await asyncio.to_thread(measure)
-    return fa.disk_status(total, free, media_size, files)
+    before, after = ctx.compression_log.totals()
+    return fa.disk_status(total, free, media_size, files) + fa.compression_line(before, after)
 
 
 # ─── Excel export (2-4) ───

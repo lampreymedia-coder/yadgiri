@@ -17,7 +17,7 @@ from app.db import repo
 from app.domain.classify import classify
 from app.domain.media_store import PendingDownload, bale_ref, download_all, local_path
 from app.i18n import fa
-from app.mapping import media_type
+from app.mapping import MEDIA_VIDEO, media_type
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
@@ -68,10 +68,10 @@ async def _drop_archive_copies(ctx: BotContext, copies: dict[int, int]) -> None:
 
 def _build_media(
     ctx: BotContext, session: WizardSession, copies: dict[int, int]
-) -> tuple[list[repo.NewMedia], list[tuple[int, str, object, str]]]:
+) -> tuple[list[repo.NewMedia], list[tuple[int, str, object, str, bool]]]:
     """Rows for PostMedia plus the downloads to start after the commit."""
     rows: list[repo.NewMedia] = []
-    planned: list[tuple[int, str, object, str]] = []  # (row index, file_id, path, fallback)
+    planned: list[tuple[int, str, object, str, bool]] = []  # (row, file_id, path, fallback, video)
     for message in session.messages:
         classified = classify(message)
         code = media_type(classified.content_type)
@@ -87,7 +87,7 @@ def _build_media(
             if ctx.settings.media_download_enabled and small:
                 path = local_path(ctx.settings.media_root, classified.content_type, info)
                 storage = str(path)
-                planned.append((len(rows), info.file_id, path, ref))
+                planned.append((len(rows), info.file_id, path, ref, code == MEDIA_VIDEO))
             else:
                 storage = ref
             rows.append(
@@ -166,8 +166,8 @@ async def save_confirmed(ctx: BotContext, session: WizardSession) -> SaveResult:
             logger.info("archive_footer_failed", error=str(exc))
 
     jobs = [
-        PendingDownload(media_ids[index], file_id, path, fallback)  # type: ignore[arg-type]
-        for index, file_id, path, fallback in planned
+        PendingDownload(media_ids[index], file_id, path, fallback, video)  # type: ignore[arg-type]
+        for index, file_id, path, fallback, video in planned
     ]
     if jobs:
         ctx.spawn(download_all(ctx, jobs))

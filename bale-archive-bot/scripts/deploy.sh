@@ -44,6 +44,9 @@ apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates curl
 if ! command -v mysqldump >/dev/null 2>&1; then
   apt-get install -y -qq mysql-client >/dev/null || echo "⚠️ mysqldump نصب نشد؛ پشتیبان‌گیری ممکن نیست."
 fi
+if ! command -v ffmpeg >/dev/null 2>&1; then
+  apt-get install -y ffmpeg >/dev/null || echo "⚠️ ffmpeg نصب نشد؛ ویدیوها بدون فشرده‌سازی نگه داشته می‌شوند."
+fi
 echo "✅ انجام شد"
 
 step "۲) کاربر لینوکسی balebot"

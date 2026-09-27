@@ -67,6 +67,7 @@ class PendingDownload:
     file_id: str
     path: Path
     fallback_ref: str
+    is_video: bool = False
 
 
 async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
@@ -82,9 +83,15 @@ async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
         tmp.write_bytes(data)
         tmp.replace(job.path)
         logger.info("media_stored", media_id=job.media_id, path=str(job.path), size=len(data))
-        return True
     except (BaleAPIError, NetworkError, OSError) as exc:
         logger.warning("media_download_failed", media_id=job.media_id, error=str(exc))
+    else:
+        if job.is_video:
+            try:
+                await compress_stored_video(ctx, job.media_id, job.path)
+            except Exception:  # noqa: BLE001 — the original file is kept
+                logger.exception("video_compress_crashed", media_id=job.media_id)
+        return True
     try:
         async with ctx.db.tx() as conn:
             await repo.set_storage_path(conn, job.media_id, job.fallback_ref)
@@ -96,3 +103,30 @@ async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
 async def download_all(ctx: BotContext, jobs: list[PendingDownload]) -> None:
     for job in jobs:
         await download_one(ctx, job)
+
+
+async def compress_stored_video(ctx: BotContext, media_id: int, path: Path) -> None:
+    """One ffmpeg at a time; updates only storage_path and file_size of this row."""
+    from app.domain.video_compress import compress_video
+
+    async with ctx.compress_lock:
+        try:
+            result = await compress_video(path)
+        except OSError as exc:
+            logger.warning("video_compress_failed", media_id=media_id, error=str(exc))
+            return
+    ctx.compression_log.record(media_id, result)
+    logger.info(
+        "video_compress_done",
+        media_id=media_id,
+        replaced=result.replaced,
+        reason=result.reason,
+        saved_pct=result.saved_pct,
+    )
+    if not result.replaced:
+        return
+    try:
+        async with ctx.db.tx() as conn:
+            await repo.set_media_file(conn, media_id, str(result.path), result.new_size)
+    except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
+        logger.error("video_compress_row_update_failed", media_id=media_id, error=str(exc))

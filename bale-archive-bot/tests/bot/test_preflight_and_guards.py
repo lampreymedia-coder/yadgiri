@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import text
 
 from app.core.offset import OffsetStore
 from app.domain.content import ContentType
@@ -84,16 +83,25 @@ def test_grant_parser() -> None:
     assert not _grant_is_too_wide("GRANT ALL PRIVILEGES ON `other`.* TO `b`@`%`", "Bale_Archive")
 
 
-async def test_bot_database_user_cannot_create_tables(db: RootDB) -> None:
-    from app.db.session import Database
+def test_bot_database_user_cannot_create_tables(db: RootDB) -> None:
+    """Negative test run straight through PyMySQL (not SQLAlchemy), so the guard's
+    SQL recorder only ever sees what the bot code itself executes."""
+    import os
 
-    database = Database(bot_url(MAIN_DB))
+    import pymysql
+
+    conn = pymysql.connect(
+        host=os.environ.get("TEST_MYSQL_HOST", "127.0.0.1"),
+        port=int(os.environ.get("TEST_MYSQL_PORT", "3306")),
+        user="balebot_test",
+        password="test-pass",  # noqa: S106 — local throw-away test user
+        database=MAIN_DB,
+    )
     try:
-        with pytest.raises(Exception, match="denied"):
-            async with database.tx() as conn:
-                await conn.execute(text("CREATE TABLE should_not_exist (id INT)"))
+        with conn.cursor() as cur, pytest.raises(pymysql.err.OperationalError, match="denied"):
+            cur.execute("CREATE TABLE should_not_exist (id INT)")
     finally:
-        await database.dispose()
+        conn.close()
     assert db.execute(
         "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_NAME = 'should_not_exist'"
     ) == [(0,)]

@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from app.bale.models import Message, Update
-from app.domain.content import ContentType
 from app.domain.classify import (
     classify,
     document_subtype,
@@ -16,6 +15,7 @@ from app.domain.classify import (
     extract_urls,
     normalize_fa,
 )
+from app.domain.content import ContentType
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "updates"
 

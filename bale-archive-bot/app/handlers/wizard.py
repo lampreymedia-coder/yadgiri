@@ -182,7 +182,7 @@ async def resume_pending(ctx: BotContext, user_id: int) -> int:
 
 
 async def expire_and_remind(ctx: BotContext) -> None:
-    """Periodic: drop wizards older than the TTL; one reminder before that."""
+    """Periodic: discard wizards older than the TTL; one reminder before that."""
     ttl = ctx.settings.wizard_ttl_minutes * 60
     for s in ctx.wizards.expired(ttl):
         logger.info("wizard_expired", sid=s.sid)

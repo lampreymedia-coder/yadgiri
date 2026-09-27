@@ -128,7 +128,7 @@ class BaleClient:
         )
 
     async def reset(self) -> None:
-        """Drop a stalled TLS session (NAT/DPI idle-kill) and open a fresh one."""
+        """Discard a stalled TLS session (NAT/DPI idle-kill) and open a fresh one."""
         try:
             await self._http.aclose()
         except Exception:  # noqa: BLE001 — close must not block reconnect

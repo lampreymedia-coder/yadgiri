@@ -214,12 +214,20 @@ async def ensure_person(
 
 
 async def ensure_membership(conn: AsyncConnection, person_id: int, ehya_group_id: int) -> None:
-    """One PersonGroup row per (person, group); an existing row is left as is."""
+    """One PersonGroup row per (person, group); an existing row is left as is.
+
+    Callers hold the per-user lock, so check-then-insert cannot race here.
+    """
+    existing = await conn.execute(
+        text("SELECT 1 FROM PersonGroup WHERE person_id = :pid AND ehya_group_id = :gid"),
+        {"pid": person_id, "gid": ehya_group_id},
+    )
+    if existing.first() is not None:
+        return
     await conn.execute(
         text(
             "INSERT INTO PersonGroup (person_id, ehya_group_id, created_at, is_active) "
-            "VALUES (:pid, :gid, :now, 1) "
-            "ON DUPLICATE KEY UPDATE person_id = person_id"
+            "VALUES (:pid, :gid, :now, 1)"
         ),
         {"pid": person_id, "gid": ehya_group_id, "now": tehran_now()},
     )

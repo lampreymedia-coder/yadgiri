@@ -20,6 +20,7 @@ from app.core.context import BotContext
 from app.db import repo
 from app.domain.classify import MediaInfo
 from app.domain.content import ContentType
+from app.mapping import MEDIA_IMAGE, MEDIA_VIDEO
 from app.observability.logging import get_logger
 from app.timeutil import tehran_now
 
@@ -67,7 +68,7 @@ class PendingDownload:
     file_id: str
     path: Path
     fallback_ref: str
-    is_video: bool = False
+    media_type: int = 0  # PostMedia.media_type code (app.mapping)
 
 
 async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
@@ -86,11 +87,13 @@ async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
     except (BaleAPIError, NetworkError, OSError) as exc:
         logger.warning("media_download_failed", media_id=job.media_id, error=str(exc))
     else:
-        if job.is_video:
-            try:
+        try:
+            if job.media_type == MEDIA_VIDEO:
                 await compress_stored_video(ctx, job.media_id, job.path)
-            except Exception:  # noqa: BLE001 — the original file is kept
-                logger.exception("video_compress_crashed", media_id=job.media_id)
+            elif job.media_type == MEDIA_IMAGE:
+                await compress_stored_image(ctx, job.media_id, job.path)
+        except Exception:  # noqa: BLE001 — the original file is kept
+            logger.exception("compress_crashed", media_id=job.media_id)
         return True
     try:
         async with ctx.db.tx() as conn:
@@ -130,3 +133,34 @@ async def compress_stored_video(ctx: BotContext, media_id: int, path: Path) -> N
             await repo.set_media_file(conn, media_id, str(result.path), result.new_size)
     except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
         logger.error("video_compress_row_update_failed", media_id=media_id, error=str(exc))
+
+
+async def compress_stored_image(ctx: BotContext, media_id: int, path: Path) -> None:
+    """Same one-at-a-time queue as videos; updates only existing PostMedia columns."""
+    from app.domain.image_compress import compress_image
+
+    async with ctx.compress_lock:
+        result = await compress_image(path)
+    ctx.compression_log.record(media_id, result)
+    logger.info(
+        "image_compress_done",
+        media_id=media_id,
+        replaced=result.replaced,
+        reason=result.reason,
+        saved_pct=result.saved_pct,
+    )
+    if not result.replaced:
+        return
+    try:
+        async with ctx.db.tx() as conn:
+            await repo.set_media_image(
+                conn,
+                media_id,
+                str(result.path),
+                result.new_size,
+                result.width,
+                result.height,
+                result.mime_type,
+            )
+    except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
+        logger.error("image_compress_row_update_failed", media_id=media_id, error=str(exc))

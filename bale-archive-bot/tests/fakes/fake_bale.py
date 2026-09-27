@@ -39,6 +39,8 @@ class FakeBaleServer:
     forbidden_private_chats: set[int] = field(default_factory=set)
     chat_member_statuses: dict[tuple[int, int], str] = field(default_factory=dict)
     member_counts: dict[int, int] = field(default_factory=dict)
+    # Bytes served for a downloaded file_id (default b"fake-file-bytes").
+    file_bytes: dict[str, bytes] = field(default_factory=dict)
     _message_seq: itertools.count[int] = field(default_factory=lambda: itertools.count(1000))
 
     last_request: httpx.Request | None = None
@@ -129,7 +131,8 @@ class FakeBaleServer:
             self.calls.append(("downloadFile", {"path": request.url.path}))
             if "downloadFile" in self.fail_methods and self._maybe_fail("downloadFile"):
                 return httpx.Response(500, content=b"")
-            return httpx.Response(200, content=b"fake-file-bytes")
+            file_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(200, content=self.file_bytes.get(file_id, b"fake-file-bytes"))
         method = request.url.path.rsplit("/", 1)[-1]
         self.last_request = request
         self.last_http_method = request.method

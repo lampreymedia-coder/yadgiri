@@ -216,7 +216,7 @@ async def ensure_person(
 async def ensure_membership(conn: AsyncConnection, person_id: int, ehya_group_id: int) -> None:
     """One PersonGroup row per (person, group); an existing row is left as is.
 
-    Callers hold the per-user lock, so check-then-insert cannot race here.
+    Two messages at the same moment can race; the duplicate-key error is ignored.
     """
     existing = await conn.execute(
         text("SELECT 1 FROM PersonGroup WHERE person_id = :pid AND ehya_group_id = :gid"),
@@ -224,13 +224,18 @@ async def ensure_membership(conn: AsyncConnection, person_id: int, ehya_group_id
     )
     if existing.first() is not None:
         return
-    await conn.execute(
-        text(
-            "INSERT INTO PersonGroup (person_id, ehya_group_id, created_at, is_active) "
-            "VALUES (:pid, :gid, :now, 1)"
-        ),
-        {"pid": person_id, "gid": ehya_group_id, "now": tehran_now()},
-    )
+    try:
+        await conn.execute(
+            text(
+                "INSERT INTO PersonGroup (person_id, ehya_group_id, created_at, is_active) "
+                "VALUES (:pid, :gid, :now, 1)"
+            ),
+            {"pid": person_id, "gid": ehya_group_id, "now": tehran_now()},
+        )
+    except DBAPIError as exc:
+        # Two messages at the same moment: the other one already added the row.
+        if mysql_errno(exc) != ER_DUP_ENTRY:
+            raise
 
 
 # ─── Hashtag ───
@@ -492,9 +497,37 @@ async def delete_own_post(conn: AsyncConnection, post_id: int, person_id: int) -
     return paths
 
 
-async def set_media_file(conn: AsyncConnection, media_id: int, storage_path: str, size: int) -> None:
+async def set_media_file(
+    conn: AsyncConnection, media_id: int, storage_path: str, size: int
+) -> None:
     """After compression: only the two existing columns storage_path and file_size."""
     await conn.execute(
         text("UPDATE PostMedia SET storage_path = :path, file_size = :size WHERE id = :id"),
         {"path": _cut(storage_path, 1000), "size": size, "id": media_id},
+    )
+
+
+async def set_media_image(
+    conn: AsyncConnection,
+    media_id: int,
+    storage_path: str,
+    size: int,
+    width: int | None,
+    height: int | None,
+    mime_type: str | None,
+) -> None:
+    """After picture compression: only existing PostMedia columns."""
+    await conn.execute(
+        text(
+            "UPDATE PostMedia SET storage_path = :path, file_size = :size, width = :w, "
+            "height = :h, mime_type = :mime WHERE id = :id"
+        ),
+        {
+            "path": _cut(storage_path, 1000),
+            "size": size,
+            "w": width,
+            "h": height,
+            "mime": _cut(mime_type, 100),
+            "id": media_id,
+        },
     )

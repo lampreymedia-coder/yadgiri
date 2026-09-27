@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from app.bale.methods import BaleAPI
 from app.config import Settings
 from app.core.admins import AdminStore
+from app.core.notify import AdminNotifier
 from app.core.ratelimit import InboundSpamGuard
 from app.core.wizard_store import WizardStore
 from app.db.session import Database
@@ -45,12 +46,14 @@ class BotContext:
     wizards: WizardStore = field(default_factory=WizardStore)
     user_locks: KeyedLocks = field(default_factory=KeyedLocks)
     spam_guard: InboundSpamGuard = field(init=False)
+    notifier: AdminNotifier = field(init=False)
     bot_username: str = ""
     bot_user_id: int = 0
     background: set[asyncio.Task[None]] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)
+        self.notifier = AdminNotifier(self.api, self.admins)
 
     @property
     def archive_chat_id(self) -> int | None:

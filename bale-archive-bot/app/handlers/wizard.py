@@ -220,11 +220,7 @@ async def _edit(ctx: BotContext, s: WizardSession, text: str, markup: InlineKeyb
 
 
 async def _notify_admins(ctx: BotContext, text: str) -> None:
-    for admin_id in sorted(ctx.admins.all):
-        try:
-            await ctx.api.send_message(admin_id, text)
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning("admin_notify_failed", admin_id=admin_id, error=str(exc))
+    await ctx.notifier.send_all(text)
 
 
 async def _tell_user(ctx: BotContext, s: WizardSession, text: str) -> None:
@@ -325,9 +321,11 @@ async def _final_confirm(ctx: BotContext, s: WizardSession) -> None:
         except (BaleAPIError, NetworkError) as exc:
             logger.info("saved_notice_skipped", user_id=s.user_id, error=str(exc))
         assert result.post_id is not None
-        await _notify_admins(
-            ctx,
+        await ctx.notifier.post_saved(
             fa.admin_saved(
+                s.sender_name, s.group.name, s.content_type, result.hashtag_names, result.post_id
+            ),
+            fa.admin_saved_short(
                 s.sender_name, s.group.name, s.content_type, result.hashtag_names, result.post_id
             ),
         )

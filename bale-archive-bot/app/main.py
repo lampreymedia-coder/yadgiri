@@ -134,6 +134,7 @@ class Application:
             await self._sleep(30)
             try:
                 await expire_and_remind(self.ctx)
+                await self.ctx.notifier.flush_due()
             except Exception:
                 logger.exception("sweeper_failed")
 
@@ -155,6 +156,7 @@ class Application:
         logger.info("shutdown_started")
         self.watchdog.stop()
         await self.dispatcher.albums.drain()
+        await self.ctx.notifier.flush_due(force=True)
         pending = self._inflight | self.ctx.background
         if pending:
             done, still = await asyncio.wait(pending, timeout=30)

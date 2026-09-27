@@ -93,6 +93,22 @@ def saved_reply(tags: list[str]) -> str:
     return "✅ ثبت شد\n" + hashtags_line(tags)
 
 
+def admin_saved_short(
+    sender: str, group_name: str, content_code: int, tags: list[str], post_id: int
+) -> str:
+    return (
+        f"• {sender} — {group_name} — {content_label(content_code)} — "
+        f"{hashtags_line(tags) or '—'} — #{fa_digits(post_id)}"
+    )
+
+
+def admin_saved_batch(lines: list[str]) -> str:
+    return (
+        "🆕 " + fa_digits(len(lines)) + " ثبت جدید در چند دقیقه‌ی اخیر (اعلان تجمیعی):\n"
+        + "\n".join(lines)
+    )
+
+
 def admin_saved(
     sender: str, group_name: str, content_code: int, tags: list[str], post_id: int
 ) -> str:

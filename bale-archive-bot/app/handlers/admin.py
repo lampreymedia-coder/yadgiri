@@ -10,7 +10,6 @@ from __future__ import annotations
 from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.keyboards import button, grid, keyboard
 from app.bale.models import CallbackQuery, Message
-from app.core.admins import RemoveResult
 from app.core.context import BotContext
 from app.db import repo
 from app.domain.reports import build_report
@@ -135,12 +134,23 @@ async def _answer(ctx: BotContext, cq: CallbackQuery, text: str | None = None) -
 
 # ─── Private commands ───
 
-PRIVATE_ADMIN_COMMANDS = {"groups", "stats", "admins", "addadmin", "removeadmin", "admin"}
+PRIVATE_ADMIN_COMMANDS = {
+    "groups",
+    "stats",
+    "admins",
+    "addadmin",
+    "removeadmin",
+    "transferowner",
+    "admin",
+    "panel",
+}
 
 
 async def handle_private_command(
     ctx: BotContext, message: Message, command: str, args: list[str]
 ) -> None:
+    from app.handlers import panel
+
     assert message.from_user is not None
     chat_id = message.chat.id
     actor = message.from_user.id
@@ -149,8 +159,8 @@ async def handle_private_command(
         return
     logger.info("admin_action", action=command, actor=actor, args=args)
 
-    if command == "admin":
-        await _send(ctx, chat_id, fa.ADMIN_HELP)
+    if command in {"admin", "panel"}:
+        await panel.open_home(ctx, chat_id, actor)
     elif command == "groups":
         async with ctx.db.tx() as conn:
             groups = await repo.list_groups(conn)
@@ -161,27 +171,23 @@ async def handle_private_command(
             report = await build_report(conn)
         await _send(ctx, chat_id, fa.report_text(report))
     elif command == "admins":
-        await _send(ctx, chat_id, fa.admins_list(sorted(ctx.admins.all), ctx.admins.env_ids))
-    elif command == "addadmin":
+        await panel.screen_admins(ctx, chat_id, actor, None)
+    elif command in {"addadmin", "removeadmin", "transferowner"}:
         target = _parse_id(args)
         if target is None:
-            await _send(ctx, chat_id, fa.ADMIN_USAGE_ADD)
+            usage = {
+                "addadmin": fa.ADMIN_USAGE_ADD,
+                "removeadmin": fa.ADMIN_USAGE_REMOVE,
+                "transferowner": fa.OWNER_USAGE,
+            }[command]
+            await _send(ctx, chat_id, usage)
             return
-        added = ctx.admins.add(target)
-        await _send(ctx, chat_id, fa.admin_added(target) if added else fa.admin_already(target))
-    elif command == "removeadmin":
-        target = _parse_id(args)
-        if target is None:
-            await _send(ctx, chat_id, fa.ADMIN_USAGE_REMOVE)
-            return
-        result = ctx.admins.remove(target)
-        text = {
-            RemoveResult.REMOVED: fa.admin_removed(target),
-            RemoveResult.NOT_ADMIN: fa.admin_not_found(target),
-            RemoveResult.FROM_ENV: fa.admin_from_env(target),
-            RemoveResult.LAST_ADMIN: fa.ADMIN_LAST,
-        }[result]
-        await _send(ctx, chat_id, text)
+        action = {
+            "addadmin": panel.add_admin,
+            "removeadmin": panel.remove_admin,
+            "transferowner": panel.transfer_owner,
+        }[command]
+        await _send(ctx, chat_id, action(ctx, actor, target))
 
 
 def _parse_id(args: list[str]) -> int | None:

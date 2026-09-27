@@ -10,7 +10,7 @@ from app.bale.models import CallbackQuery, Message, Update
 from app.core.albums import AlbumBuffer
 from app.core.context import BotContext
 from app.domain.classify import normalize_fa
-from app.handlers import admin, intake, wizard
+from app.handlers import admin, intake, panel, wizard
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -109,6 +109,13 @@ class Dispatcher:
         command = parse_command(message.text)
         name = command[0] if command is not None else ""
         args = command[1] if command is not None else []
+        if command is None:
+            waiting = panel.take_input(ctx, message.from_user.id)
+            if waiting is not None:
+                await panel.handle_input(ctx, message, *waiting)
+                return
+        else:
+            ctx.pending_input.pop(message.from_user.id, None)
         if name == "start":
             await self._send(message.chat.id, fa.START)
             await wizard.resume_pending(ctx, message.from_user.id)
@@ -155,6 +162,9 @@ class Dispatcher:
         if data.action == admin.ACT_LEVEL:
             # Registration must work in a group that is not registered yet.
             await admin.handle_level_callback(self.ctx, cq, data.sid, data.arg)
+            return
+        if data.action == panel.ACT_PANEL:
+            await panel.handle_callback(self.ctx, cq, data.sid, data.arg)
             return
         if data.action in wizard.WIZARD_ACTIONS:
             async with self.ctx.user_locks.get(("wizard", cq.from_user.id)):

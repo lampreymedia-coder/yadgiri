@@ -50,6 +50,8 @@ class BotContext:
     bot_username: str = ""
     bot_user_id: int = 0
     background: set[asyncio.Task[None]] = field(default_factory=set)
+    # Panel questions waiting for a typed answer: user id → (kind, arg, started).
+    pending_input: dict[int, tuple[str, str, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)

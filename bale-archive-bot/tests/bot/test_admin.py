@@ -106,8 +106,8 @@ async def test_add_and_remove_admin_via_file(h: Harness) -> None:
 def test_admin_store_keeps_at_least_one(tmp_path) -> None:  # type: ignore[no-untyped-def]
     store = AdminStore(tmp_path / "admins.json", [])
     assert store.add(5)
-    assert store.remove(5) is RemoveResult.LAST_ADMIN
+    assert store.remove(5) is RemoveResult.IS_OWNER  # the only admin is the owner
     assert store.add(6)
-    assert store.remove(5) is RemoveResult.REMOVED
+    assert store.remove(6) is RemoveResult.REMOVED
     reloaded = AdminStore(tmp_path / "admins.json", [])
-    assert reloaded.all == {6}
+    assert reloaded.all == {5}

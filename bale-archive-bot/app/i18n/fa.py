@@ -200,8 +200,10 @@ ADMIN_HELP = (
     "/groups — فهرست گروه‌ها\n"
     "/stats — گزارش آرشیو\n"
     "/admins — فهرست مدیران\n"
-    "/addadmin <شناسه عددی> — افزودن مدیر\n"
-    "/removeadmin <شناسه عددی> — حذف مدیر"
+    "/panel — پنل مدیر با دکمه\n"
+    "/addadmin <شناسه عددی> — افزودن مدیر (فقط مالک)\n"
+    "/removeadmin <شناسه عددی> — حذف مدیر (فقط مالک)\n"
+    "/transferowner <شناسه عددی> — انتقال مالکیت (فقط مالک)"
 )
 
 UNKNOWN_COMMAND = "این دستور را نمی‌شناسم. /help را بزنید."
@@ -262,6 +264,49 @@ def admin_from_env(user_id: int) -> str:
 
 
 ADMIN_LAST = "حداقل یک مدیر باید باقی بماند."
+ADMIN_IS_OWNER = "مالک را نمی‌شود حذف کرد. اول مالکیت را منتقل کنید."
+OWNER_ONLY = "فقط مالک ربات می‌تواند مدیران را اضافه یا حذف کند یا مالکیت را منتقل کند."
+OWNER_ALREADY = "شما همین حالا مالک هستید."
+OWNER_USAGE = "روش استفاده: /transferowner 123456789"
+ASK_ADMIN_ID = "شناسه‌ی عددی مدیر جدید را بفرستید. (هر کس می‌تواند شناسه‌اش را با /id در پیوی ربات ببیند.)"
+ASK_ADMIN_FORWARD = "یک پیام از مدیر جدید را همین‌جا فوروارد کنید."
+FORWARD_HAS_NO_USER = "این پیام فوروارد، شناسه‌ی فرستنده را ندارد (احتمالاً به خاطر تنظیمات حریم خصوصی). از «افزودن با شناسه» استفاده کنید."
+PICK_PERSON = "یک نفر را از افراد ثبت‌شده انتخاب کنید:"
+NO_PEOPLE = "فرد دیگری در جدول Person نیست."
+PICK_NEW_OWNER = "مالک جدید را انتخاب کنید (فقط از بین مدیران فعلی):"
+BTN_YES_TRANSFER = "✅ بله، منتقل شود"
+BTN_ADMIN_ADD_ID = "➕ افزودن با شناسه"
+BTN_ADMIN_ADD_FWD = "➕ افزودن با فوروارد پیام"
+BTN_ADMIN_ADD_PICK = "➕ انتخاب از افراد"
+BTN_OWNER_TRANSFER = "👑 انتقال مالکیت"
+BTN_PANEL_ADMINS = "👥 مدیران"
+BTN_PANEL_BACK = "↩️ بازگشت"
+PANEL_HOME = "🛠 پنل مدیر\nیکی از بخش‌ها را انتخاب کنید."
+
+
+def btn_admin_remove(user_id: int) -> str:
+    return f"❌ حذف {user_id}"
+
+
+def confirm_transfer(user_id: int) -> str:
+    return f"مالکیت ربات به {user_id} منتقل شود؟ شما مدیر باقی می‌مانید."
+
+
+def owner_transferred(user_id: int) -> str:
+    return f"👑 مالکیت به {user_id} منتقل شد."
+
+
+def admins_panel(ids: list[int], owner: int | None, env_ids: set[int]) -> str:
+    lines = ["👥 مدیران ربات:"]
+    for admin_id in ids:
+        tags = []
+        if admin_id == owner:
+            tags.append("👑 مالک")
+        if admin_id in env_ids:
+            tags.append("از .env")
+        suffix = f" ({'، '.join(tags)})" if tags else ""
+        lines.append(f"• {admin_id}{suffix}")
+    return "\n".join(lines)
 
 
 _BLOCKS = "█▉▊▋▌▍▎▏"

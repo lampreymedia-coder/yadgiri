@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from app.mapping import POST_CONTENT_LABELS
 
 _FA_DIGITS = str.maketrans("0123456789", "۰۱۲۳۴۵۶۷۸۹")
@@ -260,6 +262,60 @@ def admin_from_env(user_id: int) -> str:
 
 
 ADMIN_LAST = "حداقل یک مدیر باید باقی بماند."
+
+
+_BLOCKS = "█▉▊▋▌▍▎▏"
+
+
+def text_bar(share: float, width: int = 10) -> str:
+    """Text bar like ████▌░░░░░ for a share between 0 and 1."""
+    share = max(0.0, min(1.0, share))
+    eighths = round(share * width * 8)
+    full, remainder = divmod(eighths, 8)
+    bar = _BLOCKS[0] * full + (_BLOCKS[8 - remainder] if remainder else "")
+    return bar + "░" * (width - full - (1 if remainder else 0))
+
+
+def jalali(value: object, with_time: bool = False) -> str:
+    """Shamsi date (and time) for a datetime/date, in Persian digits."""
+    import jdatetime
+
+    if value is None:
+        return ""
+    if with_time:
+        converted = jdatetime.datetime.fromgregorian(datetime=value)
+        return fa_digits(converted.strftime("%Y/%m/%d %H:%M"))
+    day = value.date() if isinstance(value, datetime) else value
+    return fa_digits(jdatetime.date.fromgregorian(date=day).strftime("%Y/%m/%d"))
+
+
+def bar_lines(items: list[tuple[str, int]]) -> list[str]:
+    top = max((count for _, count in items), default=0)
+    return [
+        f"{name}\n{text_bar(count / top if top else 0)} {fa_digits(count)}" for name, count in items
+    ]
+
+
+def daily_digest(now: object, report: object) -> str:
+    from app.domain.reports import Report
+
+    assert isinstance(report, Report)
+    lines = [
+        "📅 گزارش روزانه — " + jalali(now),
+        "ثبت‌های امروز: " + fa_digits(report.total_posts),
+    ]
+    if report.total_posts:
+        lines += ["", "هشتگ‌ها:"] + bar_lines(
+            [(hashtag_label(name), count) for name, count in report.by_hashtag]
+        )
+        lines += ["", "نوع محتوا:"] + [
+            f"{content_label(code)}: {fa_digits(count)}" for code, count in report.by_content_type
+        ]
+        lines += ["", "فعال‌ترین‌ها:"] + [
+            f"{fa_digits(i)}. {name} — {fa_digits(count)}"
+            for i, (name, count) in enumerate(report.top_users, start=1)
+        ]
+    return "\n".join(lines)
 
 
 def report_text(report: object) -> str:

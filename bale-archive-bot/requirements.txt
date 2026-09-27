@@ -11,3 +11,5 @@ pydantic>=2.7
 pydantic-settings>=2.3
 greenlet>=3.0
 tzdata>=2024.1
+jdatetime>=5.0
+openpyxl>=3.1

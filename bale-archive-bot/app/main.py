@@ -24,6 +24,7 @@ from app.bale.methods import BaleAPI
 from app.config import Settings, get_settings
 from app.core.admins import AdminStore
 from app.core.context import BotContext
+from app.core.digest import maybe_send_daily_digest
 from app.core.dispatcher import Dispatcher
 from app.core.offset import OffsetStore
 from app.core.ratelimit import OutboundRateLimiter
@@ -135,6 +136,7 @@ class Application:
             try:
                 await expire_and_remind(self.ctx)
                 await self.ctx.notifier.flush_due()
+                await maybe_send_daily_digest(self.ctx)
             except Exception:
                 logger.exception("sweeper_failed")
 

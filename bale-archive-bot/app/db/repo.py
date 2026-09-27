@@ -357,3 +357,72 @@ async def set_storage_path(conn: AsyncConnection, media_id: int, storage_path: s
         text("UPDATE PostMedia SET storage_path = :path WHERE id = :id"),
         {"path": _cut(storage_path, 1000), "id": media_id},
     )
+
+
+# ─── Admin panel: hashtag and group upkeep (single-row INSERT/UPDATE only) ───
+
+
+async def all_hashtags(conn: AsyncConnection) -> list[tuple[int, str, bool]]:
+    result = await conn.execute(text("SELECT id, name, is_active FROM Hashtag ORDER BY id"))
+    return [(int(row.id), str(row.name), bool(row.is_active)) for row in result]
+
+
+async def add_hashtag(conn: AsyncConnection, name: str) -> bool:
+    """False when the name already exists (UQ_Hashtag_name)."""
+    try:
+        await conn.execute(
+            text("INSERT INTO Hashtag (name, is_active) VALUES (:name, 1)"),
+            {"name": _cut(name, 100)},
+        )
+    except DBAPIError as exc:
+        if mysql_errno(exc) == ER_DUP_ENTRY:
+            return False
+        raise
+    return True
+
+
+async def rename_hashtag(conn: AsyncConnection, hashtag_id: int, name: str) -> bool:
+    try:
+        result = await conn.execute(
+            text("UPDATE Hashtag SET name = :name WHERE id = :id"),
+            {"name": _cut(name, 100), "id": hashtag_id},
+        )
+    except DBAPIError as exc:
+        if mysql_errno(exc) == ER_DUP_ENTRY:
+            return False
+        raise
+    return bool(result.rowcount)
+
+
+async def set_hashtag_active(conn: AsyncConnection, hashtag_id: int, active: bool) -> None:
+    """Hashtags are never deleted, only switched off."""
+    await conn.execute(
+        text("UPDATE Hashtag SET is_active = :active WHERE id = :id"),
+        {"active": 1 if active else 0, "id": hashtag_id},
+    )
+
+
+async def get_group_by_id(conn: AsyncConnection, group_id: int) -> GroupRow | None:
+    result = await conn.execute(
+        text(
+            "SELECT id, bale_group_id, bale_group_name, level, is_active "
+            "FROM EhyaGroup WHERE id = :id"
+        ),
+        {"id": group_id},
+    )
+    row = result.first()
+    return _group(row) if row is not None else None
+
+
+async def set_group_level(conn: AsyncConnection, group_id: int, level: int) -> None:
+    await conn.execute(
+        text("UPDATE EhyaGroup SET level = :level, updated_at = :now WHERE id = :id"),
+        {"level": level, "now": tehran_now(), "id": group_id},
+    )
+
+
+async def set_group_active(conn: AsyncConnection, group_id: int, active: bool) -> None:
+    await conn.execute(
+        text("UPDATE EhyaGroup SET is_active = :active, updated_at = :now WHERE id = :id"),
+        {"active": 1 if active else 0, "now": tehran_now(), "id": group_id},
+    )

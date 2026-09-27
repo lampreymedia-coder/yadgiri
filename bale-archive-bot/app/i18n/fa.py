@@ -419,3 +419,109 @@ BOT_COMMANDS = [
     {"command": "id", "description": "شناسه عددی من"},
     {"command": "tags", "description": "هشتگ‌های فعال"},
 ]
+
+
+# ─── Admin panel (2-4) ───
+
+BTN_PANEL_STATS = "📊 آمار کلی"
+BTN_PANEL_TAG_REPORT = "🏷 گزارش هشتگ‌ها"
+BTN_PANEL_USERS = "🙋 کاربران فعال"
+BTN_PANEL_GROUPS = "📂 گروه‌ها"
+BTN_PANEL_EXPORT = "📥 خروجی اکسل"
+BTN_PANEL_TAGS = "✏️ مدیریت هشتگ‌ها"
+BTN_PANEL_DISK = "💾 وضعیت دیسک"
+BTN_GROUP_DISABLE = "⛔️ غیرفعال کردن گروه"
+BTN_GROUP_ENABLE = "✅ فعال کردن گروه"
+BTN_EXPORT_ALL = "همه‌ی ثبت‌ها"
+BTN_EXPORT_TAG = "یک هشتگ"
+BTN_EXPORT_GROUP = "یک گروه"
+BTN_EXPORT_RANGE = "بازه‌ی زمانی"
+BTN_TAG_RENAME = "✏️ تغییر نام"
+BTN_TAG_ADD = "➕ هشتگ جدید"
+
+GROUPS_PICK = "📂 یک گروه را انتخاب کنید (گزارش، سطح، فعال/غیرفعال):"
+NO_GROUPS = "هیچ گروهی ثبت نشده است. داخل گروه /register را بزنید."
+EXPORT_MENU = "📥 خروجی اکسل — کدام ثبت‌ها؟"
+EXPORT_PICK_TAG = "هشتگ را انتخاب کنید:"
+EXPORT_PICK_GROUP = "گروه را انتخاب کنید:"
+EXPORT_PICK_RANGE = "بازه را انتخاب کنید:"
+EXPORT_EMPTY = "در این فیلتر هیچ ثبتی نیست."
+EXPORT_FAILED = "ارسال فایل اکسل ناموفق بود. کمی بعد دوباره امتحان کنید."
+TAG_MANAGE = (
+    "✏️ مدیریت هشتگ‌ها\n"
+    "روی نام هر هشتگ بزنید تا فعال/غیرفعال شود. هشتگ‌ها هیچ‌وقت حذف نمی‌شوند."
+)
+ASK_TAG_NAME = "نام هشتگ جدید را بفرستید (مثلاً: گزارش میدانی)."
+ASK_TAG_RENAME = "نام تازه‌ی این هشتگ را بفرستید."
+TAG_NAME_INVALID = "نام هشتگ خالی یا بیش از ۱۰۰ حرف است."
+TAG_NAME_TAKEN = "هشتگی با این نام از قبل هست."
+
+
+def tag_saved(name: str) -> str:
+    return "✅ ذخیره شد: " + hashtag_label(name)
+
+
+def range_label(days: int) -> str:
+    return "امروز" if days == 1 else f"{fa_digits(days)} روز اخیر"
+
+
+def export_caption(label: str, count: int) -> str:
+    return f"خروجی اکسل ({label}) — {fa_digits(count)} ثبت"
+
+
+def tag_bars(report: object) -> str:
+    from app.domain.reports import Report
+
+    assert isinstance(report, Report)
+    lines = ["🏷 گزارش هشتگ‌ها", ""] + bar_lines(
+        [(hashtag_label(name), count) for name, count in report.by_hashtag]
+    )
+    return "\n".join(lines)
+
+
+def active_users(people: list[tuple[int, str, int]]) -> str:
+    if not people:
+        return "🙋 هنوز ثبتی انجام نشده است."
+    lines = ["🙋 کاربران فعال (برای گزارش هر نفر روی نامش بزنید):"]
+    lines += [f"{fa_digits(i)}. {name} — {fa_digits(n)}" for i, (_, name, n) in enumerate(people, 1)]
+    return "\n".join(lines)
+
+
+def scoped_report(title: str, report: object) -> str:
+    from app.domain.reports import Report
+
+    assert isinstance(report, Report)
+    lines = [
+        title,
+        "کل ثبت‌ها: " + fa_digits(report.total_posts),
+        "ثبت‌های امروز: " + fa_digits(report.today_posts),
+        "",
+        "هشتگ‌ها:",
+    ] + bar_lines([(hashtag_label(name), count) for name, count in report.by_hashtag])
+    lines += ["", "نوع محتوا:"] + (
+        [f"{content_label(code)}: {fa_digits(n)}" for code, n in report.by_content_type] or ["—"]
+    )
+    return "\n".join(lines)
+
+
+def group_detail(name: str, level: int, active: bool) -> str:
+    return f"📂 {name}\nسطح: {fa_digits(level)}\nوضعیت: {'فعال' if active else 'غیرفعال'}"
+
+
+def _size(nbytes: int) -> str:
+    value = float(nbytes)
+    for unit in ("بایت", "کیلوبایت", "مگابایت", "گیگابایت", "ترابایت"):
+        if value < 1024 or unit == "ترابایت":
+            return fa_digits(f"{value:.1f}" if unit != "بایت" else f"{int(value)}") + " " + unit
+        value /= 1024
+    return ""
+
+
+def disk_status(total: int, free: int, media_size: int, files: int) -> str:
+    used_share = (total - free) / total if total else 0
+    return (
+        "💾 وضعیت دیسک\n"
+        f"فضای آزاد: {_size(free)} از {_size(total)}\n"
+        f"{text_bar(used_share)} {fa_digits(round(used_share * 100))}٪ پر\n"
+        f"پوشه‌ی media: {_size(media_size)} در {fa_digits(files)} فایل"
+    )

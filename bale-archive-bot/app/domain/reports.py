@@ -86,7 +86,9 @@ async def build_report(
     where, params = flt.sql()
     report = Report()
     report.total_posts = int(
-        (await conn.execute(text(f"SELECT COUNT(*) FROM Post p WHERE {where}"), params)).scalar_one()
+        (
+            await conn.execute(text(f"SELECT COUNT(*) FROM Post p WHERE {where}"), params)
+        ).scalar_one()
     )
     start, end = today_range()
     report.today_posts = int(

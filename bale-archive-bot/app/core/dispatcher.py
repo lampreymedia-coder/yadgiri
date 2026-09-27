@@ -148,11 +148,16 @@ class Dispatcher:
         try:
             data = parse_callback(cq.data or "")
         except CallbackDataError:
-            logger.info("malformed_callback", data=cq.data)
+            logger.info("callback_dropped", reason="malformed", data=cq.data)
             return
+        chat_id = cq.message.chat.id if cq.message is not None else None
+        logger.info("callback_received", action=data.action, actor=cq.from_user.id, chat_id=chat_id)
         if data.action == admin.ACT_LEVEL:
-            await admin.handle_level_callback(self.ctx, cq, data.arg)
+            # Registration must work in a group that is not registered yet.
+            await admin.handle_level_callback(self.ctx, cq, data.sid, data.arg)
             return
         if data.action in wizard.WIZARD_ACTIONS:
             async with self.ctx.user_locks.get(("wizard", cq.from_user.id)):
                 await wizard.handle_callback(self.ctx, cq, data.action, data.sid, data.arg)
+            return
+        logger.info("callback_dropped", reason="unknown_action", action=data.action)

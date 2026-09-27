@@ -93,6 +93,19 @@ def saved_reply(tags: list[str]) -> str:
     return "✅ ثبت شد\n" + hashtags_line(tags)
 
 
+def admin_saved(
+    sender: str, group_name: str, content_code: int, tags: list[str], post_id: int
+) -> str:
+    return (
+        "🆕 ثبت جدید\n"
+        "فرستنده: " + sender + "\n"
+        "گروه: " + group_name + "\n"
+        "نوع: " + content_label(content_code) + "\n"
+        "هشتگ‌ها: " + (hashtags_line(tags) or "—") + "\n"
+        "شماره Post: " + fa_digits(post_id)
+    )
+
+
 SAVE_FAILED = "متأسفانه ثبت انجام نشد. پیام شما سر جایش هست؛ کمی بعد دوباره بفرستید."
 TYPE_NOT_ALLOWED = "این نوع فایل فعلاً قابل ثبت نیست."
 PERSON_INACTIVE = "حساب شما در آرشیو غیرفعال است و فعلاً ثبت از طرف شما پذیرفته نمی‌شود."

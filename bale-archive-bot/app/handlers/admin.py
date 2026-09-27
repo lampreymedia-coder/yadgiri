@@ -30,9 +30,13 @@ async def _send(ctx: BotContext, chat_id: int, text: str, **kwargs: object) -> N
         logger.warning("admin_send_failed", chat_id=chat_id, error=str(exc))
 
 
-def level_keyboard() -> object:
+def level_keyboard(chat_id: int) -> object:
+    """The group id rides in callback_data, so the tap works even without cq.message."""
     return keyboard(
-        grid([button(fa.fa_digits(level), ACT_LEVEL, "", str(level)) for level in LEVELS], 4)
+        grid(
+            [button(fa.fa_digits(level), ACT_LEVEL, str(chat_id), str(level)) for level in LEVELS],
+            4,
+        )
     )
 
 
@@ -51,7 +55,11 @@ async def handle_group_command(ctx: BotContext, message: Message, command: str) 
         return
     if command == "register":
         await _send(
-            ctx, chat_id, fa.REGISTER_PICK_LEVEL, reply_markup=level_keyboard(), is_group=True
+            ctx,
+            chat_id,
+            fa.REGISTER_PICK_LEVEL,
+            reply_markup=level_keyboard(chat_id),
+            is_group=True,
         )
         logger.info("admin_action", action="register_started", actor=actor, chat_id=chat_id)
         return
@@ -68,36 +76,54 @@ async def handle_group_command(ctx: BotContext, message: Message, command: str) 
         )
 
 
-async def handle_level_callback(ctx: BotContext, cq: CallbackQuery, arg: str) -> None:
-    if cq.message is None:
-        return
-    chat_id = cq.message.chat.id
+async def handle_level_callback(ctx: BotContext, cq: CallbackQuery, sid: str, arg: str) -> None:
+    """Level tap after /register. Deliberately NOT behind the unregistered-group silence."""
     actor = cq.from_user.id
-    if not ctx.is_admin(actor):
-        await _answer(ctx, cq, fa.REGISTER_ONLY_ADMIN)
-        return
-    if not arg.isdigit() or int(arg) not in LEVELS or chat_id >= 0:
+    chat_id: int | None = None
+    if sid.lstrip("-").isdigit():
+        chat_id = int(sid)
+    elif cq.message is not None:
+        chat_id = cq.message.chat.id
+    if chat_id is None:
+        logger.info("callback_dropped", reason="level_without_chat", actor=actor, data=cq.data)
         await _answer(ctx, cq)
         return
+    if not ctx.is_admin(actor):
+        logger.info("callback_dropped", reason="level_not_admin", actor=actor, chat_id=chat_id)
+        await _answer(ctx, cq, fa.REGISTER_ONLY_ADMIN)
+        return
+    if not arg.isdigit() or int(arg) not in LEVELS:
+        logger.info("callback_dropped", reason="level_invalid", actor=actor, arg=arg)
+        await _answer(ctx, cq)
+        return
+    if chat_id == actor or (cq.message is not None and cq.message.is_private_message):
+        logger.info("callback_dropped", reason="level_in_private_chat", actor=actor)
+        await _answer(ctx, cq, fa.REGISTER_IN_GROUP_ONLY)
+        return
     if ctx.archive_chat_id is not None and chat_id == ctx.archive_chat_id:
+        logger.info("callback_dropped", reason="level_archive_group", actor=actor)
         await _answer(ctx, cq, fa.REGISTER_ARCHIVE_REFUSED)
         return
     level = int(arg)
-    name = cq.message.chat.title or str(chat_id)
+    name = cq.message.chat.title if cq.message is not None else None
+    if not name:
+        try:
+            name = (await ctx.api.get_chat(chat_id)).title
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("register_get_chat_failed", chat_id=chat_id, error=str(exc))
+    name = name or str(chat_id)
     async with ctx.db.tx() as conn:
         group = await repo.register_group(conn, chat_id, name, level)
     await _answer(ctx, cq)
+    logger.info("admin_action", action="register", actor=actor, chat_id=chat_id, level=level)
+    text = fa.register_done(group.name, group.level)
     try:
-        await ctx.api.safe_edit(
-            chat_id,
-            cq.message.message_id,
-            fa.register_done(group.name, group.level),
-            None,
-            is_group=True,
-        )
+        if cq.message is not None:
+            await ctx.api.safe_edit(chat_id, cq.message.message_id, text, None, is_group=True)
+        else:
+            await ctx.api.send_message(chat_id, text, is_group=True)
     except (BaleAPIError, NetworkError) as exc:
         logger.info("register_edit_failed", error=str(exc))
-    logger.info("admin_action", action="register", actor=actor, chat_id=chat_id, level=level)
 
 
 async def _answer(ctx: BotContext, cq: CallbackQuery, text: str | None = None) -> None:

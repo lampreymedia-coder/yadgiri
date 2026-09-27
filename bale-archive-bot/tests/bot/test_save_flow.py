@@ -33,15 +33,48 @@ async def test_text_full_flow(h: Harness) -> None:
     person = h.root.rows("SELECT id, bale_user_id, bale_username, firstname, is_active FROM Person")
     assert person == [(person_id, USER["id"], "ali", "علی", 1)]
 
-    # «✅ ثبت شد» + hashtags as a reply under the original message in the group.
-    replies = [p for p in h.fake.calls_for("sendMessage") if int(p["chat_id"]) == GROUP_ID]
-    assert replies[-1]["text"] == "✅ ثبت شد\n#یادگیری #سند"
-    assert int(replies[-1]["reply_to_message_id"]) == origin
+    # Nothing is sent to the group; the sender and the admin are told privately.
+    assert h.texts_to(GROUP_ID) == []
+    assert h.texts_to(USER["id"])[-1] == "✅ ثبت شد\n#یادگیری #سند"
+    admin_notes = [t for t in h.texts_to(ADMIN_ID) if t.startswith("🆕 ثبت جدید")]
+    assert len(admin_notes) == 1
+    note = admin_notes[0]
+    assert "علی رضایی" in note and "گروه رصد" in note and "متن" in note
+    assert "#یادگیری #سند" in note and f"شماره Post: {fa.fa_digits(post_id)}" in note
     # Wizard messages removed, original untouched.
     deleted = h.deleted()
     assert (USER["id"], wizard_id) in deleted
     assert (GROUP_ID, origin) not in deleted
     assert h.ctx.wizards.get(sid) is None
+
+
+async def test_saved_notice_never_falls_back_to_group(h: Harness) -> None:
+    """If the private chat closes before the final notice, stay silent in the group."""
+    h.register_group()
+    await h.text(GROUP, USER, "متن")
+    sid = h.sid()
+    await h.press(USER, "y", sid)
+    await h.press(USER, "t", sid, "1")
+    await h.press(USER, "c", sid)
+    h.fake.forbidden_private_chats.add(USER["id"])
+    await h.press(USER, "f", sid)
+    assert h.count("Post") == 1
+    assert h.texts_to(GROUP_ID) == []
+    assert len([t for t in h.texts_to(ADMIN_ID) if t.startswith("🆕")]) == 1
+
+
+async def test_group_hint_is_removed_after_save(h: Harness) -> None:
+    h.register_group()
+    h.fake.forbidden_private_chats.add(USER["id"])
+    await h.text(GROUP, USER, "متن")
+    hint = h.ctx.wizards.for_user(USER["id"])[0].hint_message_id
+    assert hint is not None
+    h.fake.forbidden_private_chats.clear()
+    await h.private(USER, "/start")
+    await h.confirm([2])
+    assert (GROUP_ID, hint) in h.deleted()
+    group_msgs = [m for m in h.fake.messages.values() if m.chat_id == GROUP_ID and not m.deleted]
+    assert group_msgs == []
 
 
 async def test_person_found_by_user_id_not_username(h: Harness) -> None:

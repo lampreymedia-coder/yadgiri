@@ -21,6 +21,31 @@ async def test_register_asks_level_and_adds_one_row(h: Harness) -> None:
     assert len(h.ctx.wizards) == 1
 
 
+def _level_button(h: Harness, label: str) -> str:
+    markup = h.fake.last_markup(GROUP_ID)
+    assert markup is not None
+    return next(b["callback_data"] for row in markup["inline_keyboard"] for b in row if b["text"] == label)
+
+
+async def test_register_in_unregistered_group_real_button_level_3(h: Harness) -> None:
+    """Regression: the level tap must not be swallowed by the unregistered-group silence."""
+    await h.text(GROUP, ADMIN, "/register")
+    data = _level_button(h, "۳")
+    _, action, sid, arg = data.split("|")
+    assert sid == str(GROUP_ID)
+    await h.press(ADMIN, action, sid, arg, chat_id=GROUP_ID, message_id=1)
+    rows = h.root.rows("SELECT bale_group_id, level, is_active FROM EhyaGroup")
+    assert rows == [(GROUP_ID, 3, 1)]
+
+
+async def test_register_level_tap_without_message_field(h: Harness) -> None:
+    """Some Bale callbacks carry no ``message``; the group id comes from callback_data."""
+    await h.text(GROUP, ADMIN, "/register")
+    data = _level_button(h, "۳")
+    await h.feed({"callback_query": {"id": "cq-x", "from": ADMIN, "data": data}})
+    assert h.root.rows("SELECT bale_group_id, level FROM EhyaGroup") == [(GROUP_ID, 3)]
+
+
 async def test_non_admin_register_is_silent(h: Harness) -> None:
     await h.text(GROUP, USER, "/register")
     await h.press(USER, "lv", "", "2", chat_id=GROUP_ID)

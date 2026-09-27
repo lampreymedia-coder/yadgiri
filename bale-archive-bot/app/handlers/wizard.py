@@ -239,6 +239,7 @@ async def handle_callback(
 ) -> None:
     s = ctx.wizards.get(sid)
     if s is None:
+        logger.info("callback_dropped", reason="wizard_expired", sid=sid, actor=cq.from_user.id)
         await _answer(ctx, cq, fa.ERR_EXPIRED)
         if cq.message is not None:
             try:
@@ -247,6 +248,7 @@ async def handle_callback(
                 logger.info("stale_wizard_delete_failed", error=str(exc))
         return
     if cq.from_user.id != s.user_id:
+        logger.info("callback_dropped", reason="not_sender", sid=sid, actor=cq.from_user.id)
         await _answer(ctx, cq, fa.ERR_NOT_YOURS)
         return
     if s.step == STEP_SAVING:
@@ -315,16 +317,20 @@ async def _final_confirm(ctx: BotContext, s: WizardSession) -> None:
     logger.info("wizard_final", sid=s.sid, outcome=result.outcome.value, post_id=result.post_id)
 
     if result.outcome is Outcome.SAVED:
-        try:
-            await ctx.api.send_message(
-                s.origin_chat_id,
-                fa.saved_reply(result.hashtag_names),
-                reply_to_message_id=s.primary_message_id,
-                is_group=True,
-            )
-        except (BaleAPIError, NetworkError) as exc:
-            logger.warning("saved_reply_failed", error=str(exc))
+        # Nothing is posted in the group: wizard leftovers (incl. a group hint)
+        # are removed, the sender and the admins are told in private chat.
         await close_wizard(ctx, s)
+        try:
+            await ctx.api.send_message(s.user_id, fa.saved_reply(result.hashtag_names))
+        except (BaleAPIError, NetworkError) as exc:
+            logger.info("saved_notice_skipped", user_id=s.user_id, error=str(exc))
+        assert result.post_id is not None
+        await _notify_admins(
+            ctx,
+            fa.admin_saved(
+                s.sender_name, s.group.name, s.content_type, result.hashtag_names, result.post_id
+            ),
+        )
         return
 
     if result.outcome is Outcome.DUPLICATE:

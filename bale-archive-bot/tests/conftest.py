@@ -26,6 +26,25 @@ os.environ.setdefault("BALE_BOT_TOKEN", "test-token")
 os.environ.setdefault("DATABASE_URL", "mysql+aiomysql://x:y@127.0.0.1/Bale_Archive")
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+# Every SQL statement the bot code sends through SQLAlchemy during the whole
+# test session (RootDB below uses raw PyMySQL and is not recorded).
+EXECUTED_SQL: list[str] = []
+
+
+def _record_sql(conn: Any, cursor: Any, statement: str, *args: Any) -> None:
+    EXECUTED_SQL.append(statement)
+
+
+def _install_sql_recorder() -> None:
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    if not event.contains(Engine, "before_cursor_execute", _record_sql):
+        event.listen(Engine, "before_cursor_execute", _record_sql)
+
+
+_install_sql_recorder()
 SCHEMA = FIXTURES / "schema_appendix_a.sql"
 SCHEMA_5_11 = FIXTURES / "schema_5_11.sql"
 

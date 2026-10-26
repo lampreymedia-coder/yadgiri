@@ -14,6 +14,12 @@ from app.db import repo
 from tests.bot.harness import GROUP, USER, Harness
 from tests.conftest import EXECUTED_SQL
 
+COMPRESSED_UPDATE = (
+    "UPDATE PostMedia SET storage_path = %s, file_size = %s, "
+    "mime_type = COALESCE(%s, mime_type), width = COALESCE(%s, width), "
+    "height = COALESCE(%s, height) WHERE id = %s"
+)
+
 
 def _noisy_jpeg(width: int, height: int, quality: int = 100) -> bytes:
     import random
@@ -75,21 +81,21 @@ async def test_large_photo_becomes_1920x1440_and_smaller(h: Harness) -> None:
     with Image.open(path) as saved:
         assert saved.size == (1920, 1440)
         assert not saved.getexif()  # metadata removed
-    assert _media_writes(start) == [
-        "UPDATE PostMedia SET storage_path = %s, file_size = %s, width = %s, "
-        "height = %s, mime_type = %s WHERE id = %s"
-    ]
+    assert _media_writes(start) == [COMPRESSED_UPDATE]
     entry = next(iter(json.loads((h.settings.data_path / "compression.json").read_text()).values()))
     assert entry["replaced"] is True and entry["new_size"] == size
 
 
-async def test_small_optimized_photo_is_untouched(h: Harness) -> None:
-    data = _smooth(800, 600, "JPEG", quality=70, optimize=True)
+async def test_small_jpeg_is_not_processed_at_all(h: Harness) -> None:
+    # Even a quality-100 JPEG ≤ 1920 px is left alone (re-encoding could make it bigger).
+    data = _noisy_jpeg(800, 600, quality=100)
     start = await _save_photo(h, data, 800, 600)
     (path, size, width), = h.root.rows("SELECT storage_path, file_size, width FROM PostMedia")
     assert Path(path).read_bytes() == data
     assert (size, width) == (len(data), 800)
     assert _media_writes(start) == []
+    entry = next(iter(json.loads((h.settings.data_path / "compression.json").read_text()).values()))
+    assert entry["reason"] == "jpeg_small_skip" and entry["replaced"] is False
 
 
 async def test_transparent_png_stays_png(h: Harness) -> None:

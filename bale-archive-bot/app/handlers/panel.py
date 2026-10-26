@@ -20,12 +20,11 @@ from app.bale.models import CallbackQuery, InlineKeyboardButton, Message
 from app.core.admins import RemoveResult
 from app.core.context import BotContext
 from app.db import repo
-from app.domain.excel import build_workbook
+from app.domain.excel import build_export
 from app.domain.reports import (
     PostFilter,
     Report,
     build_report,
-    export_rows,
     person_label,
     today_range,
 )
@@ -101,7 +100,7 @@ def home_rows(ctx: BotContext, user_id: int) -> list[list[InlineKeyboardButton]]
         [btn(fa.BTN_PANEL_USERS, "us"), btn(fa.BTN_PANEL_GROUPS, "gr")],
         [btn(fa.BTN_PANEL_EXPORT, "xl")],
         [btn(fa.BTN_PANEL_TAGS, "hm"), btn(fa.BTN_PANEL_ADMINS, "adm")],
-        [btn(fa.BTN_PANEL_DISK, "dk")],
+        [btn(fa.BTN_PANEL_PENDING, "pu"), btn(fa.BTN_PANEL_DISK, "dk")],
     ]
 
 
@@ -342,6 +341,8 @@ async def _report_callback(
         await show(ctx, chat_id, message_id, fa.GROUPS_PICK if groups else fa.NO_GROUPS, rows)
     elif screen in {"grs", "grl", "grt"}:
         await _group_screen(ctx, chat_id, actor, message_id, screen, arg)
+    elif screen == "pu":
+        await show(ctx, chat_id, message_id, await _pending_text(ctx), [back()])
     elif screen == "dk":
         await show(ctx, chat_id, message_id, await _disk_text(ctx), [back()])
     else:
@@ -391,6 +392,19 @@ async def _group_screen(
     )
     rows = [levels[:4], levels[4:], [toggle], back("gr")]
     await show(ctx, chat_id, message_id, body, rows)
+
+
+async def _pending_text(ctx: BotContext) -> str:
+    from app.media_links import build_upload_url, parse_bale_ref
+
+    async with ctx.db.tx() as conn:
+        rows = await repo.pending_upload_rows(conn, limit=30)
+    items = []
+    for row in rows:
+        ref = parse_bale_ref(row.storage_path)
+        url = build_upload_url(row.id, ctx.settings) if ctx.settings.media_link_secret else ""
+        items.append((row.post_id, row.media_type, row.file_size, ref[1] if ref else None, url))
+    return fa.pending_list(items)
 
 
 async def _disk_text(ctx: BotContext) -> str:
@@ -465,21 +479,20 @@ async def _export_callback(
 
 async def send_export(ctx: BotContext, chat_id: int, flt: PostFilter, label: str) -> bool:
     async with ctx.db.tx() as conn:
-        rows = await export_rows(conn, flt)
-    if not rows:
+        data, count = await build_export(conn, flt, ctx.settings)
+    if not count:
         await say(ctx, chat_id, fa.EXPORT_EMPTY)
         return False
-    data = build_workbook(rows)
     file_name = f"archive-{tehran_now():%Y%m%d-%H%M}.xlsx"
     try:
         await ctx.api.send_document(
-            chat_id, data, caption=fa.export_caption(label, len(rows)), file_name=file_name
+            chat_id, data, caption=fa.export_caption(label, count), file_name=file_name
         )
     except (BaleAPIError, NetworkError) as exc:
         logger.warning("export_send_failed", error=str(exc))
         await say(ctx, chat_id, fa.EXPORT_FAILED)
         return False
-    logger.info("admin_action", action="export", chat_id=chat_id, rows=len(rows), label=label)
+    logger.info("admin_action", action="export", chat_id=chat_id, rows=count, label=label)
     return True
 
 

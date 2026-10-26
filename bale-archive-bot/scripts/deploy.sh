@@ -40,12 +40,20 @@ ask() { local reply; read -r -p "$1" reply < /dev/tty; printf '%s' "$reply"; }
 step "۱) نصب پیش‌نیازهای سیستم"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates curl sudo >/dev/null
+apt-get install -y -qq python3 python3-venv python3-pip git ca-certificates curl sudo openssl >/dev/null
 if ! command -v mysqldump >/dev/null 2>&1; then
   apt-get install -y -qq mysql-client >/dev/null || echo "⚠️ mysqldump نصب نشد؛ پشتیبان‌گیری ممکن نیست."
 fi
-if ! command -v ffmpeg >/dev/null 2>&1; then
-  apt-get install -y ffmpeg >/dev/null || echo "⚠️ ffmpeg نصب نشد؛ ویدیوها بدون فشرده‌سازی نگه داشته می‌شوند."
+# ffmpeg (ffprobe is in the same package) lives in Ubuntu's "universe" section.
+# Errors are shown, not hidden; a missing ffmpeg stops the script further below.
+if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+  if ! apt-get install -y ffmpeg; then
+    echo "⚠️ نصب ffmpeg ناموفق بود؛ بخش universe اوبونتو فعال می‌شود و دوباره امتحان می‌شود."
+    apt-get install -y software-properties-common
+    add-apt-repository -y universe
+    apt-get update -qq
+    apt-get install -y ffmpeg || true
+  fi
 fi
 echo "✅ انجام شد"
 
@@ -72,6 +80,16 @@ else
 fi
 [[ -f "$APP_DIR/requirements.txt" ]] || fail "پوشه‌ی bale-archive-bot در کد پیدا نشد."
 echo "✅ نسخه: $(git -C "$SRC" log -1 --oneline)"
+
+# This script runs from a copy made BEFORE the code above was updated. If the
+# update brought a newer deploy.sh, start over with it once — otherwise new
+# steps (like installing ffmpeg) would only run on the next deploy.
+if [[ -z "${BALEBOT_DEPLOY_RELOADED:-}" ]] && ! cmp -s "$0" "$APP_DIR/scripts/deploy.sh"; then
+  echo "↻ deploy.sh تازه شد؛ از اول با نسخه‌ی جدید اجرا می‌شود."
+  fresh="$(mktemp /tmp/balebot-deploy.XXXXXX.sh)"
+  cp "$APP_DIR/scripts/deploy.sh" "$fresh"
+  BALEBOT_DEPLOY_COPY=1 BALEBOT_DEPLOY_RELOADED=1 exec bash "$fresh" "$@"
+fi
 
 step "۴) محیط پایتون و بسته‌ها (از آینه‌ی $MIRROR_HOST)"
 [[ -x "$VENV/bin/python" ]] || python3 -m venv "$VENV"
@@ -119,6 +137,12 @@ EOF
   rm -f "$tmp"
   echo "✅ ساخته شد"
 fi
+# Secret for signed file links: created once, appended; other lines untouched.
+if ! grep -q '^MEDIA_LINK_SECRET=.\+' "$ENV_FILE"; then
+  [[ -z "$(tail -c1 "$ENV_FILE")" ]] || echo >> "$ENV_FILE"
+  echo "MEDIA_LINK_SECRET=$(openssl rand -hex 32)" >> "$ENV_FILE"
+  echo "✅ MEDIA_LINK_SECRET ساخته و به انتهای فایل اضافه شد."
+fi
 chown balebot:balebot "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
@@ -142,7 +166,17 @@ if ! (cd "$APP_DIR" && sudo -u balebot env BALEBOT_ENV_FILE="$ENV_FILE" PYTHONUT
   exit 1
 fi
 
-step "۸) سرویس systemd"
+step "۸) ffmpeg/ffprobe و پورت لینک فایل‌ها"
+if [[ -z "$(command -v ffmpeg)" || -z "$(command -v ffprobe)" ]]; then
+  fail "ffmpeg یا ffprobe نصب نیست (which ffmpeg / which ffprobe خالی است). خروجی apt بالا را ببینید یا دستی بزنید: sudo apt-get install -y ffmpeg"
+fi
+echo "✅ $(command -v ffmpeg)  $(command -v ffprobe)"
+# Open the public file-link port. ufw is not switched on or off here.
+if command -v ufw >/dev/null 2>&1; then
+  ufw allow 8090/tcp || echo "⚠️ ufw allow 8090/tcp ناموفق بود."
+fi
+
+step "۹) سرویس systemd"
 install -m 644 "$APP_DIR/deploy/balebot.service" "/etc/systemd/system/$SERVICE.service"
 systemctl daemon-reload
 systemctl enable -q "$SERVICE"

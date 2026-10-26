@@ -497,37 +497,145 @@ async def delete_own_post(conn: AsyncConnection, post_id: int, person_id: int) -
     return paths
 
 
-async def set_media_file(
-    conn: AsyncConnection, media_id: int, storage_path: str, size: int
-) -> None:
-    """After compression: only the two existing columns storage_path and file_size."""
-    await conn.execute(
-        text("UPDATE PostMedia SET storage_path = :path, file_size = :size WHERE id = :id"),
-        {"path": _cut(storage_path, 1000), "size": size, "id": media_id},
-    )
-
-
-async def set_media_image(
+async def set_media_compressed(
     conn: AsyncConnection,
     media_id: int,
     storage_path: str,
     size: int,
+    mime_type: str | None,
     width: int | None,
     height: int | None,
-    mime_type: str | None,
 ) -> None:
-    """After picture compression: only existing PostMedia columns."""
+    """After compression/conversion: only existing PostMedia columns (NULL = keep)."""
     await conn.execute(
         text(
-            "UPDATE PostMedia SET storage_path = :path, file_size = :size, width = :w, "
-            "height = :h, mime_type = :mime WHERE id = :id"
+            "UPDATE PostMedia SET storage_path = :path, file_size = :size, "
+            "mime_type = COALESCE(:mime, mime_type), width = COALESCE(:w, width), "
+            "height = COALESCE(:h, height) WHERE id = :id"
         ),
         {
             "path": _cut(storage_path, 1000),
             "size": size,
+            "mime": _cut(mime_type, 100),
             "w": width,
             "h": height,
-            "mime": _cut(mime_type, 100),
             "id": media_id,
         },
     )
+
+
+async def set_media_uploaded(
+    conn: AsyncConnection,
+    media_id: int,
+    storage_path: str,
+    size: int,
+    mime_type: str | None,
+    width: int | None,
+    height: int | None,
+    duration: int | None,
+) -> bool:
+    """A file the admin uploaded by hand replaces its bale: reference (only that row)."""
+    result = await conn.execute(
+        text(
+            "UPDATE PostMedia SET storage_path = :path, file_size = :size, mime_type = :mime, "
+            "width = COALESCE(:w, width), height = COALESCE(:h, height), "
+            "duration = COALESCE(:d, duration) "
+            "WHERE id = :id AND storage_path LIKE 'bale:%'"
+        ),
+        {
+            "path": _cut(storage_path, 1000),
+            "size": size,
+            "mime": _cut(mime_type, 100),
+            "w": width,
+            "h": height,
+            "d": duration,
+            "id": media_id,
+        },
+    )
+    return bool(result.rowcount)
+
+
+@dataclass(frozen=True, slots=True)
+class MediaRow:
+    id: int
+    post_id: int
+    media_type: int
+    file_name: str | None
+    file_size: int | None
+    mime_type: str | None
+    storage_path: str
+    duration: int | None
+
+
+def _media(row: object) -> MediaRow:
+    return MediaRow(
+        id=int(row.id),  # type: ignore[attr-defined]
+        post_id=int(row.post_id),  # type: ignore[attr-defined]
+        media_type=int(row.media_type),  # type: ignore[attr-defined]
+        file_name=row.file_name,  # type: ignore[attr-defined]
+        file_size=row.file_size,  # type: ignore[attr-defined]
+        mime_type=row.mime_type,  # type: ignore[attr-defined]
+        storage_path=str(row.storage_path),  # type: ignore[attr-defined]
+        duration=row.duration,  # type: ignore[attr-defined]
+    )
+
+
+_MEDIA_COLUMNS = (
+    "id, post_id, media_type, file_name, file_size, mime_type, storage_path, duration"
+)
+
+
+async def get_media(conn: AsyncConnection, media_id: int) -> MediaRow | None:
+    result = await conn.execute(
+        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE id = :id"), {"id": media_id}
+    )
+    row = result.first()
+    return _media(row) if row is not None else None
+
+
+async def pending_upload_rows(
+    conn: AsyncConnection, media_ids: list[int] | None = None, limit: int = 50
+) -> list[MediaRow]:
+    """Files only held in Bale (storage_path 'bale:…'), newest first."""
+    where = "storage_path LIKE 'bale:%'"
+    params: dict[str, object] = {"lim": limit}
+    if media_ids is not None:
+        if not media_ids:
+            return []
+        keys = []
+        for index, media_id in enumerate(media_ids):
+            params[f"m{index}"] = media_id
+            keys.append(f":m{index}")
+        where += f" AND id IN ({', '.join(keys)})"
+    result = await conn.execute(
+        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE {where} ORDER BY id DESC LIMIT :lim"),
+        params,
+    )
+    return [_media(row) for row in result]
+
+
+async def media_for_posts(conn: AsyncConnection, post_ids: list[int]) -> dict[int, list[MediaRow]]:
+    if not post_ids:
+        return {}
+    params = {f"p{i}": pid for i, pid in enumerate(post_ids)}
+    keys = ", ".join(f":p{i}" for i in range(len(post_ids)))
+    result = await conn.execute(
+        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE post_id IN ({keys}) ORDER BY id"),
+        params,
+    )
+    grouped: dict[int, list[MediaRow]] = {}
+    for row in result:
+        media = _media(row)
+        grouped.setdefault(media.post_id, []).append(media)
+    return grouped
+
+
+async def local_media_rows(conn: AsyncConnection) -> list[MediaRow]:
+    """Every PostMedia row whose file should be on this server's disk."""
+    result = await conn.execute(
+        text(
+            f"SELECT {_MEDIA_COLUMNS} FROM PostMedia "
+            "WHERE storage_path NOT LIKE 'bale:%' ORDER BY id"
+        )
+    )
+    return [_media(row) for row in result]

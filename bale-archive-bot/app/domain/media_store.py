@@ -10,17 +10,22 @@ storage_path is never empty.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import fcntl
 import mimetypes
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from app.bale.errors import BaleAPIError, NetworkError
 from app.core.context import BotContext
 from app.db import repo
 from app.domain.classify import MediaInfo
 from app.domain.content import ContentType
-from app.mapping import MEDIA_IMAGE, MEDIA_VIDEO
+from app.mapping import MEDIA_AUDIO, MEDIA_IMAGE, MEDIA_VIDEO
 from app.observability.logging import get_logger
 from app.timeutil import tehran_now
 
@@ -88,10 +93,7 @@ async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
         logger.warning("media_download_failed", media_id=job.media_id, error=str(exc))
     else:
         try:
-            if job.media_type == MEDIA_VIDEO:
-                await compress_stored_video(ctx, job.media_id, job.path)
-            elif job.media_type == MEDIA_IMAGE:
-                await compress_stored_image(ctx, job.media_id, job.path)
+            await compress_stored(ctx, job.media_id, job.path, job.media_type)
         except Exception:  # noqa: BLE001 — the original file is kept
             logger.exception("compress_crashed", media_id=job.media_id)
         return True
@@ -100,6 +102,8 @@ async def download_one(ctx: BotContext, job: PendingDownload) -> bool:
             await repo.set_storage_path(conn, job.media_id, job.fallback_ref)
     except Exception as exc:  # noqa: BLE001 — the post itself is already saved
         logger.error("media_fallback_update_failed", media_id=job.media_id, error=str(exc))
+        return False
+    await notify_pending_uploads(ctx, [job.media_id])
     return False
 
 
@@ -108,59 +112,89 @@ async def download_all(ctx: BotContext, jobs: list[PendingDownload]) -> None:
         await download_one(ctx, job)
 
 
-async def compress_stored_video(ctx: BotContext, media_id: int, path: Path) -> None:
-    """One ffmpeg at a time; updates only storage_path and file_size of this row."""
-    from app.domain.video_compress import compress_video
+async def notify_pending_uploads(ctx: BotContext, media_ids: list[int]) -> None:
+    """Tell the admins (private chat) where to upload files the bot could not download."""
+    from app.i18n import fa
+    from app.media_links import build_upload_url, parse_bale_ref
 
-    async with ctx.compress_lock:
+    if not media_ids or not ctx.settings.media_link_secret:
+        return
+    async with ctx.db.tx() as conn:
+        rows = await repo.pending_upload_rows(conn, media_ids)
+    for row in rows:
+        ref = parse_bale_ref(row.storage_path)
+        text = fa.pending_upload_notice(
+            row.post_id,
+            row.media_type,
+            row.file_size,
+            ref[1] if ref else None,
+            build_upload_url(row.id, ctx.settings),
+        )
+        await ctx.notifier.send_all(text)
+
+
+@contextlib.asynccontextmanager
+async def compression_slot(deps: Any) -> AsyncIterator[None]:
+    """One compression job at a time: in this process (asyncio lock) and across
+    processes such as scripts/compress_existing.py (a file lock)."""
+    lock_path = deps.settings.data_path / "compress.lock"
+
+    def acquire() -> Any:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(lock_path, "a+")  # noqa: SIM115 — closed in release()
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        return handle
+
+    def release(handle: Any) -> None:
+        fcntl.flock(handle, fcntl.LOCK_UN)
+        handle.close()
+
+    async with deps.compress_lock:
+        handle = await asyncio.to_thread(acquire)
         try:
-            result = await compress_video(path)
-        except OSError as exc:
-            logger.warning("video_compress_failed", media_id=media_id, error=str(exc))
-            return
-    ctx.compression_log.record(media_id, result)
-    logger.info(
-        "video_compress_done",
-        media_id=media_id,
-        replaced=result.replaced,
-        reason=result.reason,
-        saved_pct=result.saved_pct,
-    )
-    if not result.replaced:
-        return
-    try:
-        async with ctx.db.tx() as conn:
-            await repo.set_media_file(conn, media_id, str(result.path), result.new_size)
-    except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
-        logger.error("video_compress_row_update_failed", media_id=media_id, error=str(exc))
+            yield
+        finally:
+            await asyncio.to_thread(release, handle)
 
 
-async def compress_stored_image(ctx: BotContext, media_id: int, path: Path) -> None:
-    """Same one-at-a-time queue as videos; updates only existing PostMedia columns."""
+async def compress_stored(deps: Any, media_id: int, path: Path, media_type: int) -> Any:
+    """Compress/convert one stored file by its PostMedia.media_type.
+
+    ``deps`` needs ``settings``, ``db``, ``compression_log`` and ``compress_lock``
+    (the bot context, or a small stand-in in scripts). Documents are left as is.
+    Only existing PostMedia columns are updated.
+    """
     from app.domain.image_compress import compress_image
+    from app.domain.video_compress import compress_video, convert_audio
 
-    async with ctx.compress_lock:
-        result = await compress_image(path)
-    ctx.compression_log.record(media_id, result)
+    worker = {MEDIA_VIDEO: compress_video, MEDIA_AUDIO: convert_audio, MEDIA_IMAGE: compress_image}.get(
+        media_type
+    )
+    if worker is None:
+        return None
+    async with compression_slot(deps):
+        result = await worker(path)
+    deps.compression_log.record(media_id, result)
     logger.info(
-        "image_compress_done",
+        "compress_done",
         media_id=media_id,
+        media_type=media_type,
         replaced=result.replaced,
         reason=result.reason,
         saved_pct=result.saved_pct,
     )
-    if not result.replaced:
-        return
-    try:
-        async with ctx.db.tx() as conn:
-            await repo.set_media_image(
-                conn,
-                media_id,
-                str(result.path),
-                result.new_size,
-                result.width,
-                result.height,
-                result.mime_type,
-            )
-    except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
-        logger.error("image_compress_row_update_failed", media_id=media_id, error=str(exc))
+    if result.replaced:
+        try:
+            async with deps.db.tx() as conn:
+                await repo.set_media_compressed(
+                    conn,
+                    media_id,
+                    str(result.path),
+                    result.new_size,
+                    result.mime_type,
+                    result.width,
+                    result.height,
+                )
+        except Exception as exc:  # noqa: BLE001 — the post is saved; file already replaced
+            logger.error("compress_row_update_failed", media_id=media_id, error=str(exc))
+    return result

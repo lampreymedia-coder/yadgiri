@@ -578,3 +578,84 @@ def compression_line(before: int, after: int) -> str:
         return ""
     saved = before - after
     return f"\nفشرده‌سازی ویدیو: {_size(saved)} صرفه‌جویی ({fa_digits(round(100 * saved / before))}٪)"
+
+
+# ─── Files larger than the bot's 20 MB download limit ───
+
+MEDIA_KIND_LABELS = {1: "تصویر", 2: "ویدیو", 3: "صوت", 4: "سند"}
+
+
+def media_kind(code: int) -> str:
+    return MEDIA_KIND_LABELS.get(code, fa_digits(code))
+
+
+def size_mb(nbytes: int | None) -> str:
+    if not nbytes:
+        return "نامعلوم"
+    return fa_digits(f"{nbytes / 1024 / 1024:.1f}") + " مگابایت"
+
+
+def pending_upload_notice(
+    post_id: int, media_type: int, size: int | None, archive_message: int | None, url: str
+) -> str:
+    where = (
+        f"در گروه آرشیو بله: پیام شماره‌ی {fa_digits(archive_message)}"
+        if archive_message
+        else "در گروه آرشیو بله"
+    )
+    return (
+        "📦 فایل بزرگ منتظر بارگذاری\n"
+        f"پست #{fa_digits(post_id)} — {media_kind(media_type)} — {size_mb(size)}\n"
+        f"{where}\n"
+        "ربات فقط تا ۲۰ مگابایت را خودش دانلود می‌کند. فایل را از بله بگیرید و اینجا بارگذاری کنید:\n"
+        + url
+    )
+
+
+def big_file_not_uploaded(archive_message: int | None) -> str:
+    number = fa_digits(archive_message) if archive_message else "—"
+    return (
+        "این فایل بزرگ‌تر از ۲۰ مگابایت است و هنوز روی سرور بارگذاری نشده؛ "
+        f"در گروه آرشیو بله پیام شماره‌ی {number} موجود است."
+    )
+
+
+def upload_form_info(post_id: int, media_type: int, size: int | None, archive_message: int | None) -> str:
+    where = f"پیام شماره‌ی {fa_digits(archive_message)} در گروه آرشیو بله" if archive_message else "گروه آرشیو بله"
+    return (
+        f"پست: #{fa_digits(post_id)}\n"
+        f"نوع: {media_kind(media_type)}\n"
+        f"حجم اصلی: {size_mb(size)}\n"
+        f"اصل فایل: {where}\n"
+        "همان فایل را از بله دانلود کنید و اینجا بارگذاری کنید."
+    )
+
+
+def upload_wrong_type(media_type: int) -> str:
+    return f"این فایل با نوع ثبت‌شده ({media_kind(media_type)}) نمی‌خواند. همان فایل اصلی را بارگذاری کنید."
+
+
+def upload_size_warning(received: int, expected: int) -> str:
+    return (
+        f"حجم فایل بارگذاری‌شده ({size_mb(received)}) بیش از ۵٪ با حجم ثبت‌شده در بله "
+        f"({size_mb(expected)}) فرق دارد. پذیرفته شد؛ لطفاً مطمئن شوید همان فایل است."
+    )
+
+
+UPLOAD_DONE = "✅ فایل روی سرور ذخیره شد و لینک مشاهده‌ی آن از این به بعد کار می‌کند."
+
+
+BTN_PANEL_PENDING = "📦 فایل‌های بزرگ منتظر بارگذاری"
+
+
+def pending_list(items: list[tuple[int, int, int | None, int | None, str]]) -> str:
+    """items: (post id, media type, size, archive message, upload url)."""
+    if not items:
+        return "📦 هیچ فایل بزرگی منتظر بارگذاری نیست."
+    lines = ["📦 فایل‌های بزرگ منتظر بارگذاری:"]
+    for post_id, media_type, size, message, url in items:
+        where = f"پیام {fa_digits(message)}" if message else "—"
+        lines.append(f"• پست #{fa_digits(post_id)} — {media_kind(media_type)} — {size_mb(size)} — {where}")
+        if url:
+            lines.append("  " + url)
+    return "\n".join(lines)

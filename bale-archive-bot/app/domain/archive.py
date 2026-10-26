@@ -15,7 +15,13 @@ from app.core.context import BotContext
 from app.core.wizard_store import WizardSession
 from app.db import repo
 from app.domain.classify import classify
-from app.domain.media_store import PendingDownload, bale_ref, download_all, local_path
+from app.domain.media_store import (
+    PendingDownload,
+    bale_ref,
+    download_all,
+    local_path,
+    notify_pending_uploads,
+)
 from app.i18n import fa
 from app.mapping import media_type
 from app.observability.logging import get_logger
@@ -171,4 +177,11 @@ async def save_confirmed(ctx: BotContext, session: WizardSession) -> SaveResult:
     ]
     if jobs:
         ctx.spawn(download_all(ctx, jobs))
+    waiting = [
+        media_ids[index]
+        for index, row in enumerate(media_rows)
+        if row.storage_path.startswith("bale:")
+    ]
+    if waiting:
+        ctx.spawn(notify_pending_uploads(ctx, waiting))
     return SaveResult(Outcome.SAVED, post_id, names)

@@ -2,6 +2,7 @@
 
 * EXIF rotation is applied first, then all metadata is dropped.
 * Longest side above 1920 px → scaled down to 1920, aspect ratio kept.
+* A JPEG whose longest side is ≤ 1920 px is not touched at all.
 * Pictures are saved as JPEG quality 85, optimize=True — except transparent
   PNGs, which stay PNG (optimize=True).
 * The original stays when saving is below 15 % or anything fails.
@@ -13,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -27,11 +27,7 @@ MAX_SIDE = 1920
 JPEG_QUALITY = 85
 
 
-@dataclass(slots=True)
-class ImageResult(CompressResult):
-    width: int | None = None
-    height: int | None = None
-    mime_type: str | None = None
+ImageResult = CompressResult
 
 
 def _has_alpha(image: Image.Image) -> bool:
@@ -44,6 +40,9 @@ def _compress_sync(src: Path) -> ImageResult:
     original = src.stat().st_size
     with Image.open(src) as opened:
         source_format = opened.format
+        if source_format == "JPEG" and max(opened.size) <= MAX_SIDE:
+            # Already a modest JPEG: re-encoding would only risk making it bigger.
+            return ImageResult(False, src, original, original, "jpeg_small_skip")
         image = ImageOps.exif_transpose(opened)
         keep_png = source_format == "PNG" and _has_alpha(image)
         if max(image.size) > MAX_SIDE:

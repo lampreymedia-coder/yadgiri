@@ -186,17 +186,40 @@ async def run(settings: Settings) -> int:
     )
     server = uvicorn.Server(config)
     server_task = asyncio.create_task(server.serve())
+    media_server: uvicorn.Server | None = None
+    media_task: asyncio.Task[None] | None = None
+    if settings.media_link_secret:
+        from app.media_server import create_media_app
+
+        # Public file links. access_log off: request paths contain the signature.
+        media_server = uvicorn.Server(
+            uvicorn.Config(
+                create_media_app(app.ctx),
+                host=settings.media_host,
+                port=settings.media_port,
+                log_level="warning",
+                access_log=False,
+            )
+        )
+        media_task = asyncio.create_task(media_server.serve())
+    else:
+        logger.warning("media_server_disabled", reason="MEDIA_LINK_SECRET is empty")
     sweeper = asyncio.create_task(app.run_sweeper())
     try:
         await app.run_polling()
     finally:
         app.stop_event.set()
         server.should_exit = True
+        if media_server is not None:
+            media_server.should_exit = True
         sweeper.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await sweeper
         with contextlib.suppress(Exception):
             await server_task
+        if media_task is not None:
+            with contextlib.suppress(Exception):
+                await media_task
         await app.shutdown()
     return 0
 

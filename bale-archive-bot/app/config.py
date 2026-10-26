@@ -62,6 +62,14 @@ class Settings(BaseSettings):
     http_host: str = Field(default="127.0.0.1", alias="HTTP_HOST")
     http_port: int = Field(default=8000, alias="HTTP_PORT")
 
+    # ─── Public file links (signed; served from the media folder only) ───
+    media_host: str = Field(default="0.0.0.0", alias="MEDIA_HOST")  # noqa: S104 — public on purpose
+    media_port: int = Field(default=8090, alias="MEDIA_PORT")
+    media_public_base: str = Field(default="http://95.38.191.89:8090", alias="MEDIA_PUBLIC_BASE")
+    media_link_secret: str = Field(default="", alias="MEDIA_LINK_SECRET")
+    max_upload_mb: int = Field(default=60, alias="MAX_UPLOAD_MB")
+    media_requests_per_minute: int = Field(default=60, alias="MEDIA_REQUESTS_PER_MINUTE")
+
     # ─── Limits ───
     rate_global_rps: float = Field(default=20.0, alias="RATE_GLOBAL_RPS")
     rate_per_chat_per_sec: float = Field(default=1.0, alias="RATE_PER_CHAT_PER_SEC")

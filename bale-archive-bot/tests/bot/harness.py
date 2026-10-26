@@ -37,6 +37,8 @@ def make_settings(data_dir: Path, db_name: str = MAIN_DB, **extra: Any) -> Setti
         "ADMIN_USER_IDS": [ADMIN_ID],
         "DATA_DIR": str(data_dir),
         "ALBUM_WINDOW_MS": 50,
+        "MEDIA_LINK_SECRET": "test-link-secret",
+        "MEDIA_PUBLIC_BASE": "http://95.38.191.89:8090",
     }
     values.update(extra)
     return Settings(_env_file=None, **values)  # type: ignore[call-arg]

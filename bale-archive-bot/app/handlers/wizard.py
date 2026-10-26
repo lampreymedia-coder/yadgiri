@@ -54,10 +54,8 @@ WIZARD_ACTIONS = {
 
 def render_decision(s: WizardSession) -> tuple[str, InlineKeyboardMarkup]:
     text = fa.decision_prompt(s.group.name, s.content_type, s.content_text)
-    rows = [
-        [button(fa.BTN_SAVE_YES, ACT_YES, s.sid)],
-        [button(fa.BTN_SAVE_NO, ACT_NO, s.sid), button(fa.BTN_CANCEL, ACT_CANCEL, s.sid)],
-    ]
+    # Only «بله» and «خیر». An old «انصراف» tap (ACT_CANCEL) still works like «خیر».
+    rows = [[button(fa.BTN_SAVE_YES, ACT_YES, s.sid), button(fa.BTN_SAVE_NO, ACT_NO, s.sid)]]
     return text, keyboard(rows)
 
 

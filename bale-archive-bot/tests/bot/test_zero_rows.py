@@ -147,3 +147,24 @@ async def test_inactive_person_gets_no_wizard(h: Harness) -> None:
     await h.text(GROUP, USER, "متن")
     assert len(h.ctx.wizards) == 0
     assert_no_post(h)
+
+
+async def test_first_question_has_only_yes_and_no(h: Harness) -> None:
+    from app.i18n import fa
+
+    h.register_group()
+    await h.text(GROUP, USER, "متن")
+    labels = h.fake.markup_labels(h.fake.last_markup(USER["id"]))
+    assert labels == [fa.BTN_SAVE_YES, fa.BTN_SAVE_NO]
+
+
+async def test_old_cancel_callback_acts_like_no(h: Harness) -> None:
+    """A «انصراف» button on a wizard message sent by an older version."""
+    h.register_group()
+    await h.text(GROUP, USER, "متن")
+    sid = h.sid()
+    await h.press(USER, "x", sid)
+    assert_no_post(h)
+    assert h.ctx.wizards.get(sid) is None
+    await h.press(USER, "x", sid)  # a second tap on the stale button: no error, still nothing
+    assert_no_post(h)

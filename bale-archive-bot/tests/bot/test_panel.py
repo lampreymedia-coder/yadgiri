@@ -57,35 +57,39 @@ async def test_stats_bars_and_users(h: Harness) -> None:
     assert "#یادگیری\n██████████ ۲" in bars and "#شبکه_و_منبع\n█████░░░░░ ۱" in bars
     await h.press(ADMIN, "pa", "us", message_id=panel_id(h))
     assert "علی رضایی (@ali) — ۲" in last_text(h, ADMIN_ID)
-    (person_id,), = h.root.rows("SELECT id FROM Person")
+    (person_id,), = h.root.rows("SELECT Id FROM Users")
     await h.press(ADMIN, "pa", "usr", str(person_id), message_id=panel_id(h))
     assert "👤 علی رضایی" in last_text(h, ADMIN_ID) and "کل ثبت‌ها: ۲" in last_text(h, ADMIN_ID)
 
 
-async def test_group_report_level_and_disable(h: Harness) -> None:
+async def test_group_report_unit_and_disable(h: Harness) -> None:
     await _seed(h)
-    (group_id,), = h.root.rows("SELECT id FROM EhyaGroup")
+    (group_id,), = h.root.rows("SELECT Id FROM BaleGroups")
     await h.private(ADMIN, "/panel")
     await h.press(ADMIN, "pa", "grs", str(group_id), message_id=panel_id(h))
-    assert "کل ثبت‌ها: ۲" in last_text(h, ADMIN_ID)
-    await h.press(ADMIN, "pa", "grl", f"{group_id}:6", message_id=panel_id(h))
+    assert "کل ثبت‌ها: ۲" in last_text(h, ADMIN_ID) and "واحد سازمانی: واحد 03" in last_text(h, ADMIN_ID)
+    await h.press(ADMIN, "pa", "gro", f"{group_id}:1", message_id=panel_id(h))
+    labels = h.fake.markup_labels(h.fake.last_markup(ADMIN_ID))
+    assert any(label.startswith("✅ واحد 03") for label in labels)
+    await h.press(ADMIN, "pa", "gru", f"{group_id}:6", message_id=panel_id(h))
+    await h.press(ADMIN, "pa", "gru", f"{group_id}:11", message_id=panel_id(h))  # inactive unit: ignored
     await h.press(ADMIN, "pa", "grt", f"{group_id}:0", message_id=panel_id(h))
-    assert h.root.rows("SELECT level, is_active FROM EhyaGroup") == [(6, 0)]
-    assert h.count("EhyaGroup") == 1
+    assert h.root.rows("SELECT OrgUnitId, IsActive FROM BaleGroups") == [(6, 0)]
+    assert h.count("BaleGroups") == 1
 
 
 async def test_hashtag_add_rename_toggle_never_delete(h: Harness) -> None:
     await h.private(ADMIN, "/panel")
     await h.press(ADMIN, "pa", "ha")
     await h.private(ADMIN, "گزارش میدانی")
-    assert h.root.rows("SELECT name, is_active FROM Hashtag WHERE id > 4") == [("گزارش میدانی", 1)]
+    assert h.root.rows("SELECT Name, IsActive FROM Hashtags WHERE Id > 4") == [("گزارش میدانی", 1)]
     await h.press(ADMIN, "pa", "ha")
     await h.private(ADMIN, "سند")  # duplicate name
     assert "از قبل هست" in h.texts_to(ADMIN_ID)[-2] or "از قبل هست" in h.texts_to(ADMIN_ID)[-1]
     await h.press(ADMIN, "pa", "hr", "3")
     await h.private(ADMIN, "محتوای ویژه")
     await h.press(ADMIN, "pa", "ht", "2:0")
-    rows = h.root.rows("SELECT id, name, is_active FROM Hashtag ORDER BY id")
+    rows = h.root.rows("SELECT Id, Name, IsActive FROM Hashtags ORDER BY Id")
     assert rows[1] == (2, "شبکه و منبع", 0)
     assert rows[2] == (3, "محتوای ویژه", 1)
     assert len(rows) == 5
@@ -97,7 +101,7 @@ async def test_export_sends_a_document(h: Harness) -> None:
     for screen, arg in (("xa", ""), ("xhs", "2"), ("xrs", "7")):
         await h.press(ADMIN, "pa", screen, arg)
     assert len(h.fake.calls_for("sendDocument")) == 3
-    (group_id,), = h.root.rows("SELECT id FROM EhyaGroup")
+    (group_id,), = h.root.rows("SELECT Id FROM BaleGroups")
     await h.press(ADMIN, "pa", "xgs", str(group_id + 99))  # empty filter
     assert "هیچ ثبتی نیست" in h.texts_to(ADMIN_ID)[-1]
 

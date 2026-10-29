@@ -5,10 +5,10 @@
 
 ## روند کار
 
-1. ادمین داخل گروه `/register` را می‌زند و سطح گروه (۱ تا ۷) را انتخاب می‌کند. نتیجه: یک ردیف در `EhyaGroup`.
+1. ادمین داخل گروه `/register` را می‌زند و **واحد سازمانی** گروه را از فهرست `OrgUnits` انتخاب می‌کند. نتیجه: یک ردیف در `BaleGroups`.
 2. عضو گروه پیامی می‌فرستد. ربات در **پیام خصوصی** از او می‌پرسد: «بله / خیر / انصراف».
-3. «بله»، سپس انتخاب حداقل یک هشتگ (از جدول `Hashtag`)، سپس پیش‌نمایش، سپس **«تأیید نهایی»**.
-4. فقط در این لحظه `Post` و `PostHashtag` و `PostMedia` در **یک تراکنش** نوشته می‌شوند.
+3. «بله»، سپس انتخاب حداقل یک هشتگ (از جدول `Hashtags`) و در صورت تمایل «📝 توضیحات» (پاسخ Reply به پیام ربات)، سپس پیش‌نمایش، سپس **«تأیید نهایی»**.
+4. فقط در این لحظه `Posts` (با `Source='bale'`، `OrgUnitId` گروه و `UserNote`) و `PostHashtags` و `PostMedia` در **یک تراکنش** نوشته می‌شوند.
    ربات زیر پیام اصلی در گروه می‌نویسد «✅ ثبت شد» و هشتگ‌ها را می‌آورد، و پیام‌های ویزارد پاک می‌شوند.
 5. «خیر»، «انصراف»، منقضی شدن ویزارد (۳۰ دقیقه) یا ری‌استارت: **هیچ ردیفی** ثبت نمی‌شود.
 
@@ -24,7 +24,7 @@ sudo git clone -b claude/magical-tesla-sb2d7n --depth 1 https://github.com/lampr
 sudo bash /opt/balebot/src/bale-archive-bot/scripts/deploy.sh
 ```
 
-برای به‌روزرسانی فقط خط آخر را دوباره بزنید. `deploy.sh` این کارها را انجام می‌دهد:
+برای به‌روزرسانی فقط خط آخر را دوباره بزنید. برای عوض کردن شاخه: `... deploy.sh --branch claude/merged-schema` (بعد از آن، اجرای بدون `--branch` روی همان شاخه می‌ماند). `deploy.sh` این کارها را انجام می‌دهد:
 
 - نصب پیش‌نیازها
 - ساخت کاربر لینوکسی `balebot`
@@ -40,8 +40,8 @@ sudo bash /opt/balebot/src/bale-archive-bot/scripts/deploy.sh
 | مسیر | کار |
 |---|---|
 | `app/mapping.py` | نگاشت نوع محتوا به کدهای `content_type` و `media_type` |
-| `app/db/repo.py` | تنها جای SQL: خواندن و نوشتن ردیف در ۷ جدول ربات |
-| `app/domain/archive.py` | تنها کدی که `Post` می‌نویسد (بعد از تأیید نهایی) |
+| `app/db/` | تنها جای SQL و نام جدول/ستون‌ها (`repo.py`، `reports.py`، `schema.py`) |
+| `app/domain/archive.py` | تنها کدی که `Posts` می‌نویسد (بعد از تأیید نهایی) |
 | `app/preflight.py`، `scripts/preflight.py` | بررسی فقط‌خواندنی دیتابیس هنگام شروع |
 | `scripts/deploy.sh`، `backup.sh`، `run.sh` | نصب، پشتیبان‌گیری، اجرای دستی |
 | `deploy/balebot.service` | سرویس systemd (کاربر `balebot`، `TZ=Asia/Tehran`، `PYTHONUTF8=1`) |
@@ -53,6 +53,15 @@ sudo bash /opt/balebot/src/bale-archive-bot/scripts/deploy.sh
 - `media/<سال>/<ماه>/`
 
 صفحه‌ی سلامت فقط روی `http://127.0.0.1:8000/healthz` در دسترس است.
+
+## ساختار دیتابیس (ادغام‌شده)
+
+ربات فقط با این ۸ جدول کار می‌کند:
+`Users`، `BaleGroups`، `BaleGroupMembers`، `Hashtags`، `Posts`، `PostHashtags`، `PostMedia`، `OrgUnits` (فقط خواندن).
+
+- ربات کاربر را فقط با `BaleChatId` پیدا می‌کند و ردیف‌های `Users` را تغییر نمی‌دهد. تنها استثنا پر کردن `BaleUsername` خالی است.
+- ربات فقط پست‌های `Source='bale'` را می‌سازد، گزارش می‌گیرد و لغو می‌کند.
+- جدول‌های `zz_old_*` و `DatabankItems` خوانده نمی‌شوند.
 
 ## لینک فایل‌ها و فایل‌های بزرگ
 

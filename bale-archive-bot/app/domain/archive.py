@@ -1,7 +1,7 @@
-"""Final save of one confirmed wizard: the ONLY code that writes Post rows.
+"""Final save of one confirmed wizard: the ONLY code that writes Posts rows.
 
 Called only after the sender pressed «بله»، picked at least one hashtag and
-pressed «تأیید نهایی». Post + PostHashtag + PostMedia are one transaction.
+pressed «تأیید نهایی». Posts + PostHashtags + PostMedia are one transaction.
 The user's original message is never deleted or re-posted.
 """
 
@@ -141,6 +141,8 @@ async def save_confirmed(ctx: BotContext, session: WizardSession) -> SaveResult:
         content_text=session.content_text or "",
         posted_at=session.posted_at,
         hashtag_ids=chosen,
+        org_unit_id=group.org_unit_id,
+        user_note=session.note,
         media=media_rows,
     )
     try:

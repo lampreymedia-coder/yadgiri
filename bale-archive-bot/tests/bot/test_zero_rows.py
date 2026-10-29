@@ -18,8 +18,8 @@ from tests.bot.harness import (
 
 
 def assert_no_post(h: Harness) -> None:
-    assert h.count("Post") == 0
-    assert h.count("PostHashtag") == 0
+    assert h.count("Posts") == 0
+    assert h.count("PostHashtags") == 0
     assert h.count("PostMedia") == 0
 
 
@@ -109,8 +109,8 @@ async def test_unregistered_group_is_completely_silent(h: Harness) -> None:
     await h.text(UNKNOWN_GROUP, USER, "متن در گروه ثبت‌نشده")
     await h.send(UNKNOWN_GROUP, USER, photo=[{"file_id": "p9", "file_size": 10}])
     assert_no_post(h)
-    assert h.count("Person") == 0
-    assert h.count("PersonGroup") == 0
+    assert h.count("Users") == 0
+    assert h.count("BaleGroupMembers") == 0
     assert h.outbound_calls() == []
     assert len(h.ctx.wizards) == 0
 
@@ -119,14 +119,14 @@ async def test_inactive_group_is_completely_silent(h: Harness) -> None:
     h.register_group(active=0)
     await h.text(GROUP, USER, "متن")
     assert_no_post(h)
-    assert h.count("Person") == 0
+    assert h.count("Users") == 0
     assert h.outbound_calls() == []
 
 
 async def test_archive_group_is_never_recorded(h: Harness) -> None:
     await h.text(ARCHIVE, USER, "پیام در گروه آرشیو")
     assert_no_post(h)
-    assert h.count("Person") == 0
+    assert h.count("Users") == 0
     assert h.outbound_calls() == []
 
 
@@ -134,16 +134,13 @@ async def test_archive_group_is_ignored_even_if_someone_registered_it(h: Harness
     h.register_group(bale_group_id=ARCHIVE_ID, name="آرشیو")
     await h.text(ARCHIVE, USER, "پیام در گروه آرشیو")
     assert_no_post(h)
-    assert h.count("Person") == 0
+    assert h.count("Users") == 0
     assert h.outbound_calls() == []
 
 
 async def test_inactive_person_gets_no_wizard(h: Harness) -> None:
     h.register_group()
-    h.root.execute(
-        "INSERT INTO Person (firstname, bale_user_id, is_active) VALUES (%s, %s, 0)",
-        ("علی", USER["id"]),
-    )
+    h.root.add_user(USER["id"], is_active=0)
     await h.text(GROUP, USER, "متن")
     assert len(h.ctx.wizards) == 0
     assert_no_post(h)

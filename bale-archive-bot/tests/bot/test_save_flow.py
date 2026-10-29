@@ -21,16 +21,16 @@ async def test_text_full_flow(h: Harness) -> None:
     await h.confirm([1, 4])
 
     posts = h.root.rows(
-        "SELECT id, person_id, ehya_group_id, bale_message_id, content_type, content_text, posted_at FROM Post"
+        "SELECT Id, AuthorUserId, BaleGroupId, BaleMessageId, ContentType, Body, PostedAt FROM Posts"
     )
     assert len(posts) == 1
     post_id, person_id, ehya_group_id, message_id, ctype, body, posted_at = posts[0]
     assert (ehya_group_id, message_id, ctype) == (group_row, origin, 1)
     assert body.startswith("سلام")
     assert posted_at == datetime(2025, 9, 26, 13, 30)  # Tehran time, not UTC
-    assert sorted(r[0] for r in h.root.rows("SELECT hashtag_id FROM PostHashtag WHERE post_id=%s", (post_id,))) == [1, 4]
+    assert sorted(r[0] for r in h.root.rows("SELECT HashtagId FROM PostHashtags WHERE PostId=%s", (post_id,))) == [1, 4]
     assert h.count("PostMedia") == 0
-    person = h.root.rows("SELECT id, bale_user_id, bale_username, firstname, is_active FROM Person")
+    person = h.root.rows("SELECT Id, BaleChatId, BaleUsername, FirstName, IsActive FROM Users")
     assert person == [(person_id, USER["id"], "ali", "علی", 1)]
 
     # Nothing is sent to the group; the sender and the admin are told privately.
@@ -58,7 +58,7 @@ async def test_saved_notice_never_falls_back_to_group(h: Harness) -> None:
     await h.press(USER, "c", sid)
     h.fake.forbidden_private_chats.add(USER["id"])
     await h.press(USER, "f", sid)
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
     assert h.texts_to(GROUP_ID) == []
     assert len([t for t in h.texts_to(ADMIN_ID) if t.startswith("🆕")]) == 1
 
@@ -77,14 +77,14 @@ async def test_group_hint_is_removed_after_save(h: Harness) -> None:
     assert group_msgs == []
 
 
-async def test_person_found_by_user_id_not_username(h: Harness) -> None:
+async def test_user_found_by_bale_chat_id_and_never_renamed(h: Harness) -> None:
     h.register_group()
     await h.text(GROUP, USER, "اول")
     renamed = {**USER, "username": "ali_new", "first_name": "علی‌رضا"}
     await h.text(GROUP, renamed, "دوم")
-    rows = h.root.rows("SELECT bale_user_id, bale_username, firstname FROM Person")
-    assert rows == [(USER["id"], "ali_new", "علی‌رضا")]
-    assert h.count("PersonGroup") == 1
+    rows = h.root.rows("SELECT BaleChatId, BaleUsername, FirstName FROM Users")
+    assert rows == [(USER["id"], "ali", "علی")]  # Users belongs to the staff system: no updates
+    assert h.count("BaleGroupMembers") == 1
 
 
 async def test_photo_without_caption_is_stored_on_disk(h: Harness) -> None:
@@ -92,9 +92,9 @@ async def test_photo_without_caption_is_stored_on_disk(h: Harness) -> None:
     await h.send(GROUP, USER, photo=[{"file_id": "ph1", "width": 800, "height": 600, "file_size": 5000}])
     await h.confirm([3])
     await h.settle()
-    (ctype, body), = h.root.rows("SELECT content_type, content_text FROM Post")
+    (ctype, body), = h.root.rows("SELECT ContentType, Body FROM Posts")
     assert (ctype, body) == (2, "")
-    (mtype, path, fid, width), = h.root.rows("SELECT media_type, storage_path, bale_file_id, width FROM PostMedia")
+    (mtype, path, fid, width), = h.root.rows("SELECT MediaType, StoragePath, BaleFileId, Width FROM PostMedia")
     assert (mtype, fid, width) == (1, "ph1", 800)
     media_root = h.settings.media_root
     assert path.startswith(str(media_root)) and path.endswith(".jpg")
@@ -117,20 +117,20 @@ async def test_content_and_media_type_codes(h: Harness, content: dict, post_type
     h.register_group()
     await h.send(GROUP, USER, **content)
     await h.confirm([2])
-    assert h.root.rows("SELECT content_type, content_text FROM Post") == [(post_type, "")]
-    assert [r[0] for r in h.root.rows("SELECT media_type FROM PostMedia")] == [media_type]
+    assert h.root.rows("SELECT ContentType, Body FROM Posts") == [(post_type, "")]
+    assert [r[0] for r in h.root.rows("SELECT MediaType FROM PostMedia")] == [media_type]
 
 
 async def test_big_file_points_to_archive_copy(h: Harness) -> None:
     h.register_group()
     await h.send(GROUP, USER, video={"file_id": "big", "file_size": 50 * MB}, caption="ویدیو بزرگ")
     await h.confirm([1])
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     archive_copies = [p for p in h.fake.calls_for("copyMessage") if int(p["chat_id"]) == ARCHIVE_ID]
     assert len(archive_copies) == 1
     assert path.startswith(f"bale:{ARCHIVE_ID}/")
     assert not h.fake.calls_for("downloadFile")
-    assert h.root.rows("SELECT content_text FROM Post") == [("ویدیو بزرگ",)]
+    assert h.root.rows("SELECT Body FROM Posts") == [("ویدیو بزرگ",)]
 
 
 async def test_failed_download_keeps_post_and_points_to_bale(h: Harness) -> None:
@@ -139,8 +139,8 @@ async def test_failed_download_keeps_post_and_points_to_bale(h: Harness) -> None
     await h.send(GROUP, USER, document={"file_id": "d2", "file_name": "a.docx", "file_size": 100})
     await h.confirm([1])
     await h.settle()
-    assert h.count("Post") == 1
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    assert h.count("Posts") == 1
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     assert path.startswith(f"bale:{ARCHIVE_ID}/")
 
 
@@ -167,39 +167,35 @@ async def test_album_is_one_post_with_all_files(h: Harness) -> None:
     await h.settle()
     assert len(h.ctx.wizards) == 1
     await h.confirm([1])
-    assert h.root.rows("SELECT bale_message_id, content_type FROM Post") == [(7001, 2)]
-    assert sorted(r[0] for r in h.root.rows("SELECT bale_file_id FROM PostMedia")) == ["b1", "b2"]
+    assert h.root.rows("SELECT BaleMessageId, ContentType FROM Posts") == [(7001, 2)]
+    assert sorted(r[0] for r in h.root.rows("SELECT BaleFileId FROM PostMedia")) == ["b1", "b2"]
 
 
 async def test_duplicate_is_skipped_silently(h: Harness) -> None:
     h.register_group()
     origin = await h.text(GROUP, USER, "متن تکراری")
     await h.confirm([1])
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
     # Same group message again (e.g. Bale resends it after a restart).
     await h.send(GROUP, USER, message_id=origin, text="متن تکراری")
     await h.confirm([2])
-    assert h.count("Post") == 1
-    assert h.count("PostHashtag") == 1
+    assert h.count("Posts") == 1
+    assert h.count("PostHashtags") == 1
     assert len(h.ctx.wizards) == 0
 
 
 async def test_check_constraint_rejection(db, api, fake_bale, tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Database still has CHECK 1-4 / 1-3: a document (5/4) is refused, nothing kept."""
+    """A CHECK on Posts.ContentType (1-4) refuses a document (5): nothing is kept."""
     from tests.bot.harness import make_settings
-    from tests.conftest import OLD_CHECK_DB
+    from tests.conftest import CHECKED_DB
 
-    h = Harness(make_settings(tmp_path, OLD_CHECK_DB), api, fake_bale, db)
+    h = Harness(make_settings(tmp_path, CHECKED_DB), api, fake_bale, db)
     try:
-        db.execute(f"USE `{OLD_CHECK_DB}`")
-        db.execute(
-            "INSERT INTO EhyaGroup (bale_group_id, bale_group_name, level) VALUES (%s, %s, 1)",
-            (GROUP_ID, "گروه رصد"),
-        )
+        h.register_group()
         origin = await h.send(GROUP, USER, document={"file_id": "d9", "file_name": "a.zip", "file_size": 10})
         await h.confirm([1])
-        assert h.count("Post") == 0
-        assert h.count("PostHashtag") == 0
+        assert h.count("Posts") == 0
+        assert h.count("PostHashtags") == 0
         assert h.count("PostMedia") == 0
         assert fa.TYPE_NOT_ALLOWED in h.texts_to(USER["id"])
         assert any("CHECK" in text for text in h.texts_to(ADMIN_ID))
@@ -214,8 +210,7 @@ async def test_check_constraint_rejection(db, api, fake_bale, tmp_path) -> None:
 
 async def test_post_hashtag_media_are_one_transaction(h: Harness) -> None:
     group_row = h.register_group()
-    h.root.execute("INSERT INTO Person (firstname, bale_user_id, is_active) VALUES ('x', 1, 1)")
-    (person_id,), = h.root.rows("SELECT id FROM Person")
+    person_id = h.root.add_user(1)
     post = repo.NewPost(
         person_id=person_id,
         ehya_group_id=group_row,
@@ -228,8 +223,8 @@ async def test_post_hashtag_media_are_one_transaction(h: Harness) -> None:
     with pytest.raises(Exception):  # noqa: B017
         async with h.db.tx() as conn:
             await repo.insert_post(conn, post)
-    assert h.count("Post") == 0
-    assert h.count("PostHashtag") == 0
+    assert h.count("Posts") == 0
+    assert h.count("PostHashtags") == 0
 
 
 async def test_private_chat_closed_shows_group_hint_then_resumes(h: Harness) -> None:
@@ -238,21 +233,21 @@ async def test_private_chat_closed_shows_group_hint_then_resumes(h: Harness) -> 
     origin = await h.text(GROUP, USER, "متن")
     hints = [p for p in h.fake.calls_for("sendMessage") if int(p["chat_id"]) == GROUP_ID]
     assert len(hints) == 1 and int(hints[0]["reply_to_message_id"]) == origin
-    assert h.count("Post") == 0
+    assert h.count("Posts") == 0
     h.fake.forbidden_private_chats.clear()
     await h.private(USER, "/start")
     session = h.ctx.wizards.for_user(USER["id"])[0]
     assert session.wizard_message_id is not None
     assert session.hint_message_id is None
     await h.confirm([1])
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
     assert await resume_pending(h.ctx, USER["id"]) == 0
 
 
 async def test_hashtag_keyboard_follows_the_table(h: Harness) -> None:
     h.register_group()
-    h.root.execute("INSERT INTO Hashtag (name, is_active) VALUES ('تازه', 1)")
-    h.root.execute("UPDATE Hashtag SET is_active = 0 WHERE name = 'محتوایی'")
+    h.root.execute("INSERT INTO Hashtags (Name, IsActive) VALUES ('تازه', 1)")
+    h.root.execute("UPDATE Hashtags SET IsActive = 0 WHERE Name = 'محتوایی'")
     await h.text(GROUP, USER, "متن")
     await h.press(USER, "y", h.sid())
     labels = h.fake.markup_labels(h.fake.last_markup(USER["id"]))

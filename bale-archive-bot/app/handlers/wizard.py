@@ -1,7 +1,7 @@
 """The archive wizard, held in the sender's private chat.
 
 decision (بله / خیر / انصراف) → hashtags (multi-select, ≥1) → preview → تأیید نهایی.
-Nothing touches Post/PostHashtag/PostMedia before «تأیید نهایی»; the write
+Nothing touches Posts/PostHashtags/PostMedia before «تأیید نهایی»; the write
 itself is :func:`app.domain.archive.save_confirmed`. The original group
 message is never deleted. When the wizard ends, only its own private
 messages (and a group hint, if one was shown) are removed.
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.keyboards import button, grid, keyboard, url_button
-from app.bale.models import CallbackQuery, InlineKeyboardMarkup
+from app.bale.models import CallbackQuery, InlineKeyboardMarkup, Message
 from app.core.context import BotContext
 from app.core.wizard_store import (
     STEP_DECISION,
@@ -36,8 +36,12 @@ ACT_CONTINUE = "c"
 ACT_BACK = "b"
 ACT_FINAL = "f"
 ACT_EDIT_TAGS = "e"
+ACT_NOTE = "nt"
+ACT_NOTE_DELETE = "nd"
 
 WIZARD_ACTIONS = {
+    ACT_NOTE,
+    ACT_NOTE_DELETE,
     ACT_YES,
     ACT_NO,
     ACT_CANCEL,
@@ -74,6 +78,8 @@ def render_tags(
         for tag in hashtags
     ]
     rows = grid(tag_buttons, 2 if len(hashtags) > 4 else 1)
+    # Optional free text for Posts.UserNote. Not a hashtag; at least one hashtag stays required.
+    rows.append([button(fa.BTN_NOTE_SET if s.note else fa.BTN_NOTE, ACT_NOTE, s.sid)])
     rows.append([button(fa.BTN_CONTINUE, ACT_CONTINUE, s.sid)])
     rows.append([button(fa.BTN_BACK, ACT_BACK, s.sid), button(fa.BTN_CANCEL, ACT_CANCEL, s.sid)])
     return fa.tags_prompt(len(s.selected)), keyboard(rows)
@@ -86,10 +92,16 @@ def _file_count(s: WizardSession) -> int:
 
 
 def render_preview(s: WizardSession, names: list[str]) -> tuple[str, InlineKeyboardMarkup]:
-    text = fa.preview(s.group.name, s.content_type, s.content_text, _file_count(s), names)
+    text = fa.preview(
+        s.group.name, s.content_type, s.content_text, _file_count(s), names, s.note
+    )
+    note_row = [button(fa.BTN_NOTE_EDIT if s.note else fa.BTN_NOTE, ACT_NOTE, s.sid)]
+    if s.note:
+        note_row.append(button(fa.BTN_NOTE_DELETE, ACT_NOTE_DELETE, s.sid))
     rows = [
         [button(fa.BTN_FINAL_CONFIRM, ACT_FINAL, s.sid)],
         [button(fa.BTN_EDIT_TAGS, ACT_EDIT_TAGS, s.sid)],
+        note_row,
         [button(fa.BTN_CANCEL, ACT_CANCEL, s.sid)],
     ]
     return text, keyboard(rows)
@@ -302,6 +314,17 @@ async def handle_callback(
         await _final_confirm(ctx, s)
         return
 
+    if action == ACT_NOTE and s.step in (STEP_TAGS, STEP_PREVIEW):
+        await _answer(ctx, cq)
+        await _ask_for_note(ctx, s)
+        return
+
+    if action == ACT_NOTE_DELETE and s.step == STEP_PREVIEW:
+        await _answer(ctx, cq)
+        s.note = None
+        await _rerender(ctx, s)
+        return
+
     await _answer(ctx, cq)
 
 
@@ -354,3 +377,74 @@ async def _final_confirm(ctx: BotContext, s: WizardSession) -> None:
     elif result.outcome is Outcome.GROUP_INACTIVE:
         await _tell_user(ctx, s, fa.GROUP_NOT_ACTIVE)
     await close_wizard(ctx, s)
+
+
+# ─── «📝 توضیحات» ───
+
+
+async def _rerender(ctx: BotContext, s: WizardSession) -> None:
+    """Redraw the wizard message for its current step (after a note change)."""
+    hashtags = await _hashtags(ctx)
+    if s.step == STEP_PREVIEW:
+        names = {tag.id: tag.name for tag in hashtags}
+        s.selected = [tag_id for tag_id in s.selected if tag_id in names]
+        if s.selected:
+            text, markup = render_preview(s, [names[tag_id] for tag_id in s.selected])
+            await _edit(ctx, s, text, markup)
+            return
+        s.step = STEP_TAGS
+    text, markup = render_tags(s, hashtags)
+    await _edit(ctx, s, text, markup)
+
+
+async def _drop_note_prompt(ctx: BotContext, s: WizardSession) -> None:
+    if s.note_prompt_id is None:
+        return
+    await _try_delete(ctx, s.user_id, s.note_prompt_id)
+    if s.note_prompt_id in s.private_extra_ids:
+        s.private_extra_ids.remove(s.note_prompt_id)
+    s.note_prompt_id = None
+
+
+async def _ask_for_note(ctx: BotContext, s: WizardSession) -> None:
+    await _drop_note_prompt(ctx, s)
+    try:
+        sent = await ctx.api.send_message(
+            s.user_id, fa.NOTE_PROMPT, reply_to_message_id=s.wizard_message_id
+        )
+    except (BaleAPIError, NetworkError) as exc:
+        logger.info("note_prompt_failed", sid=s.sid, error=str(exc))
+        return
+    s.note_prompt_id = sent.message_id
+    s.private_extra_ids.append(sent.message_id)
+
+
+async def handle_note_reply(ctx: BotContext, message: Message) -> bool:
+    """A reply to a «write your note» prompt. True = consumed (never archived).
+
+    Only the wizard's own sender counts; anyone else's reply is handled as usual.
+    """
+    target = message.reply_to_message
+    if target is None or message.from_user is None:
+        return False
+    s = ctx.wizards.find_by_note_prompt(message.chat.id, target.message_id)
+    if s is None:
+        return False
+    if message.from_user.id != s.user_id:
+        logger.info("note_reply_ignored", reason="other_user", sid=s.sid)
+        return False
+    body = (message.text or message.caption or "").strip()
+    if not body:
+        await _tell_user(ctx, s, fa.NOTE_EMPTY)
+        return True
+    if len(body) > fa.NOTE_MAX:
+        await _tell_user(ctx, s, fa.NOTE_TOO_LONG)
+        return True
+    s.note = body
+    logger.info("note_saved", sid=s.sid, length=len(body))
+    if not message.is_private_message:
+        # In a group the note message is removed when the bot is allowed to; otherwise it stays.
+        await _try_delete(ctx, message.chat.id, message.message_id)
+    await _drop_note_prompt(ctx, s)
+    await _rerender(ctx, s)
+    return True

@@ -1,4 +1,4 @@
-"""Preflight (section 5-11), local files, mapping, and the no-DDL guarantees."""
+"""Preflight (merged schema), local files, mapping, and the no-DDL guarantees."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from app.domain.content import ContentType
 from app.mapping import media_type, post_content_type
 from app.preflight import _grant_is_too_wide, run_preflight
 from app.timeutil import tehran_from_unix
-from tests.conftest import MAIN_DB, OLD_CHECK_DB, ORIGINAL_DB, RootDB, bot_url
+from tests.conftest import MAIN_DB, NO_NOTE_DB, OLD_NAMES_DB, RootDB, bot_url
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -22,22 +22,38 @@ ROOT = Path(__file__).resolve().parents[2]
 async def test_preflight_passes_on_prepared_database(db: RootDB) -> None:
     checks = await run_preflight(bot_url(MAIN_DB), expected_db=MAIN_DB)
     assert [c.title for c in checks if not c.ok] == []
-    assert len(checks) == 7
+    assert not any(c.warning for c in checks)  # zz_old_* and DatabankItems are fine
+    titles = "\n".join(c.title for c in checks)
+    assert "OrgUnits" in titles and "UserNote" in titles and "UQ_Post_BaleMsg" in titles
 
 
-async def test_preflight_names_the_missing_alter_commands(db: RootDB) -> None:
-    checks = await run_preflight(bot_url(ORIGINAL_DB), expected_db=ORIGINAL_DB)
+async def test_preflight_names_a_missing_column(db: RootDB) -> None:
+    checks = await run_preflight(bot_url(NO_NOTE_DB), expected_db=NO_NOTE_DB)
     failed = [c for c in checks if not c.ok]
-    fixes = "\n".join(c.fix for c in failed)
-    assert len(failed) == 3
-    assert "CHECK (content_type BETWEEN 1 AND 5)" in fixes
-    assert "CHECK (media_type BETWEEN 1 AND 4)" in fixes
-    assert "MODIFY id INT NOT NULL AUTO_INCREMENT" in fixes
+    assert len(failed) == 1
+    assert "Posts.UserNote" in failed[0].title
+    assert "اسکریپت ادغام" in failed[0].fix
 
 
-async def test_preflight_check_only_constraints(db: RootDB) -> None:
-    checks = await run_preflight(bot_url(OLD_CHECK_DB), expected_db=OLD_CHECK_DB)
-    assert len([c for c in checks if not c.ok]) == 2
+async def test_preflight_names_missing_tables(db: RootDB) -> None:
+    db.execute("CREATE DATABASE IF NOT EXISTS `Bale_Archive_empty`")
+    for host in ("localhost", "127.0.0.1"):
+        db.execute(f"GRANT SELECT ON `Bale_Archive_empty`.* TO 'balebot_test'@'{host}'")
+    try:
+        checks = await run_preflight(bot_url("Bale_Archive_empty"), expected_db="Bale_Archive_empty")
+        failed = [c for c in checks if not c.ok]
+        assert len(failed) == 1
+        for table in ("Users", "BaleGroups", "BaleGroupMembers", "Hashtags", "Posts", "PostHashtags", "PostMedia", "OrgUnits"):
+            assert table in failed[0].title
+    finally:
+        db.execute("DROP DATABASE IF EXISTS `Bale_Archive_empty`")
+
+
+async def test_preflight_warns_about_old_table_names(db: RootDB) -> None:
+    checks = await run_preflight(bot_url(OLD_NAMES_DB), expected_db=OLD_NAMES_DB)
+    assert all(c.ok for c in checks)  # only a warning, the bot still starts
+    warnings = [c for c in checks if c.warning]
+    assert len(warnings) == 1 and "Person" in warnings[0].title
 
 
 async def test_preflight_rejects_wrong_database_name(db: RootDB) -> None:
@@ -45,12 +61,31 @@ async def test_preflight_rejects_wrong_database_name(db: RootDB) -> None:
     assert not checks[0].ok and "bale_archive" in checks[0].title
 
 
-async def test_preflight_needs_an_active_hashtag(db: RootDB) -> None:
-    db.execute(f"UPDATE `{MAIN_DB}`.Hashtag SET is_active = 0")
+async def test_preflight_needs_an_active_hashtag_and_org_unit(db: RootDB) -> None:
+    db.execute(f"UPDATE `{MAIN_DB}`.Hashtags SET IsActive = 0")
+    db.execute(f"UPDATE `{MAIN_DB}`.OrgUnits SET IsActive = 0")
     checks = await run_preflight(bot_url(MAIN_DB), expected_db=MAIN_DB)
-    assert [c.fix for c in checks if not c.ok] == [
-        "INSERT INTO Hashtag (name, is_active) VALUES ('یادگیری', 1);"
-    ]
+    failed = [c.title for c in checks if not c.ok]
+    assert len(failed) == 2
+    assert "Hashtags" in failed[0] and "OrgUnits" in failed[1]
+
+
+async def test_preflight_needs_unique_bale_chat_id(db: RootDB) -> None:
+    db.execute("CREATE DATABASE `Bale_Archive_nouq` CHARACTER SET utf8mb4")
+    try:
+        db.execute("USE `Bale_Archive_nouq`")
+        from tests.conftest import SCHEMA, _statements
+
+        for statement in _statements(SCHEMA):
+            db.execute(statement.replace("UNIQUE KEY UQ_Users_BaleChatId", "KEY IX_Users_BaleChatId"))
+        for host in ("localhost", "127.0.0.1"):
+            db.execute(f"GRANT SELECT ON `Bale_Archive_nouq`.* TO 'balebot_test'@'{host}'")
+        checks = await run_preflight(bot_url("Bale_Archive_nouq"), expected_db="Bale_Archive_nouq")
+        failed = [c.title for c in checks if not c.ok]
+        assert any("Users(BaleChatId)" in title for title in failed)
+    finally:
+        db.execute("DROP DATABASE IF EXISTS `Bale_Archive_nouq`")
+        db.execute(f"USE `{MAIN_DB}`")
 
 
 async def test_preflight_flags_a_user_that_can_create_tables(db: RootDB) -> None:

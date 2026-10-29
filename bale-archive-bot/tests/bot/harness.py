@@ -149,19 +149,26 @@ class Harness:
 
     # ─── Database helpers ───
 
-    def register_group(self, bale_group_id: int = GROUP_ID, name: str = "گروه رصد", level: int = 1, active: int = 1) -> int:
-        self.root.execute(f"USE `{MAIN_DB}`")
+    def db_name(self) -> str:
+        return self.settings.database_url.rsplit("/", 1)[1].split("?")[0]
+
+    def register_group(
+        self, bale_group_id: int = GROUP_ID, name: str = "گروه رصد", org_unit: int = 3, active: int = 1
+    ) -> int:
+        """A BaleGroups row as /register (or the staff migration) would have made it."""
+        self.root.execute(f"USE `{self.db_name()}`")
         self.root.execute(
-            "INSERT INTO EhyaGroup (bale_group_id, bale_group_name, level, is_active) VALUES (%s, %s, %s, %s)",
-            (bale_group_id, name, level, active),
+            "INSERT INTO BaleGroups (BaleChatId, Title, OrgUnitId, IsActive, CreatedAt) "
+            "VALUES (%s, %s, %s, %s, NOW())",
+            (bale_group_id, name, org_unit, active),
         )
-        return int(self.root.execute("SELECT id FROM EhyaGroup WHERE bale_group_id = %s", (bale_group_id,))[0][0])
+        return int(self.root.execute("SELECT Id FROM BaleGroups WHERE BaleChatId = %s", (bale_group_id,))[0][0])
 
     def count(self, table: str) -> int:
-        return self.root.count(table, self.settings.database_url.rsplit("/", 1)[1].split("?")[0])
+        return self.root.count(table, self.db_name())
 
     def post_rows(self) -> int:
-        return self.count("Post") + self.count("PostHashtag") + self.count("PostMedia")
+        return self.count("Posts") + self.count("PostHashtags") + self.count("PostMedia")
 
     # ─── Fake-server helpers ───
 

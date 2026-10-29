@@ -2,7 +2,7 @@
 
 callback_data: ``1|pa|<screen>|<arg>`` (ASCII, ≤ 64 bytes).
 Typed answers (a new hashtag name, an admin id …) wait in memory for 30 min.
-Every read is a SELECT on the seven bot tables; hashtag/group changes are
+Every read is a SELECT on the bot tables (Source='bale' posts); hashtag/group changes are
 single-row INSERT/UPDATE; admins live only in admins.json.
 """
 
@@ -11,8 +11,6 @@ from __future__ import annotations
 import time
 from datetime import timedelta
 from typing import Any
-
-from sqlalchemy import text
 
 from app.bale.errors import BaleAPIError, NetworkError
 from app.bale.keyboards import button, keyboard
@@ -25,9 +23,10 @@ from app.domain.reports import (
     PostFilter,
     Report,
     build_report,
-    person_label,
     today_range,
+    top_people,
 )
+from app.handlers.org_units import unit_label, unit_rows
 from app.i18n import fa
 from app.observability.logging import get_logger
 from app.timeutil import tehran_now
@@ -134,14 +133,7 @@ async def screen_admins(
 
 async def _pickable_people(ctx: BotContext) -> list[tuple[int, str]]:
     async with ctx.db.tx() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT id, firstname, lastname, bale_username, bale_user_id FROM Person "
-                "WHERE bale_user_id IS NOT NULL AND (is_active IS NULL OR is_active = 1) "
-                "ORDER BY id DESC LIMIT 40"
-            )
-        )
-        people = [(int(row.bale_user_id), person_label(row)) for row in result]
+        people = await repo.pickable_people(conn)
     return [(uid, label) for uid, label in people if not ctx.admins.is_admin(uid)][:20]
 
 
@@ -301,16 +293,7 @@ async def _report(ctx: BotContext, flt: PostFilter | None = None, top_n: int = 5
 
 async def _top_people(ctx: BotContext, limit: int = 15) -> list[tuple[int, str, int]]:
     async with ctx.db.tx() as conn:
-        result = await conn.execute(
-            text(
-                "SELECT pe.id, pe.firstname, pe.lastname, pe.bale_username, pe.bale_user_id, "
-                "COUNT(p.id) AS n FROM Person pe JOIN Post p ON p.person_id = pe.id "
-                "GROUP BY pe.id, pe.firstname, pe.lastname, pe.bale_username, pe.bale_user_id "
-                "ORDER BY n DESC, pe.id LIMIT :lim"
-            ),
-            {"lim": limit},
-        )
-        return [(int(row.id), person_label(row), int(row.n)) for row in result]
+        return await top_people(conn, limit)
 
 
 async def _report_callback(
@@ -339,7 +322,7 @@ async def _report_callback(
         rows = [[btn(("" if g.is_active else "⛔️ ") + g.name, "grs", str(g.id))] for g in groups]
         rows.append(back())
         await show(ctx, chat_id, message_id, fa.GROUPS_PICK if groups else fa.NO_GROUPS, rows)
-    elif screen in {"grs", "grl", "grt"}:
+    elif screen in {"grs", "gro", "gru", "grt"}:
         await _group_screen(ctx, chat_id, actor, message_id, screen, arg)
     elif screen == "pu":
         await show(ctx, chat_id, message_id, await _pending_text(ctx), [back()])
@@ -353,16 +336,34 @@ async def _report_callback(
 async def _group_screen(
     ctx: BotContext, chat_id: int, actor: int, message_id: int | None, screen: str, arg: str
 ) -> None:
+    """grs = show; gro = pick unit (arg id:page); gru = set unit (id:unit); grt = (de)activate."""
     group_part, _, value = arg.partition(":")
     if not group_part.isdigit():
         return
     group_id = int(group_part)
+    if screen == "gro":
+        async with ctx.db.tx() as conn:
+            units = await repo.active_org_units(conn)
+            group = await repo.get_group_by_id(conn, group_id)
+        page = int(value) if value.isdigit() else 1
+        rows = unit_rows(
+            units,
+            page,
+            pick=lambda unit: btn(
+                unit_label(unit, group.org_unit_id if group else None), "gru", f"{group_id}:{unit.id}"
+            ),
+            turn=lambda target, label: btn(label, "gro", f"{group_id}:{target}"),
+        )
+        rows.append(back("gr"))
+        await show(ctx, chat_id, message_id, fa.PICK_GROUP_UNIT if units else fa.NO_ORG_UNITS, rows)
+        return
     async with ctx.db.tx() as conn:
-        if screen == "grl" and value.isdigit() and 1 <= int(value) <= 7:
-            await repo.set_group_level(conn, group_id, int(value))
-            logger.info(
-                "admin_action", action="group_level", actor=actor, group=group_id, level=value
-            )
+        if screen == "gru" and value.isdigit():
+            if await repo.get_active_org_unit(conn, int(value)) is not None:
+                await repo.set_group_org_unit(conn, group_id, int(value))
+                logger.info(
+                    "admin_action", action="group_unit", actor=actor, group=group_id, unit=value
+                )
         elif screen == "grt" and value in {"0", "1"}:
             await repo.set_group_active(conn, group_id, value == "1")
             logger.info(
@@ -373,24 +374,16 @@ async def _group_screen(
         return
     report = await _report(ctx, PostFilter(ehya_group_id=group_id))
     body = (
-        fa.group_detail(group.name, group.level, group.is_active)
+        fa.group_detail(group.name, group.org_unit_name, group.is_active)
         + "\n\n"
         + fa.scoped_report("📂 " + group.name, report)
     )
-    levels = [
-        btn(
-            ("✅ " if level == group.level else "") + fa.fa_digits(level),
-            "grl",
-            f"{group_id}:{level}",
-        )
-        for level in range(1, 8)
-    ]
     toggle = (
         btn(fa.BTN_GROUP_DISABLE, "grt", f"{group_id}:0")
         if group.is_active
         else btn(fa.BTN_GROUP_ENABLE, "grt", f"{group_id}:1")
     )
-    rows = [levels[:4], levels[4:], [toggle], back("gr")]
+    rows = [[btn(fa.BTN_GROUP_UNIT, "gro", f"{group_id}:1")], [toggle], back("gr")]
     await show(ctx, chat_id, message_id, body, rows)
 
 

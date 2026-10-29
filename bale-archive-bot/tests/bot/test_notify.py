@@ -25,7 +25,7 @@ async def test_burst_of_saves_is_batched(h: Harness) -> None:
     for index in range(7):
         await h.text(GROUP, USER, f"متن {index}")
         await h.confirm([1])
-    assert h.count("Post") == 7
+    assert h.count("Posts") == 7
     assert len(_admin_texts(h)) == 5  # sixth and seventh wait for the summary
     await h.ctx.notifier.flush_due(force=True)
     notes = _admin_texts(h)
@@ -67,6 +67,6 @@ async def test_admin_send_failure_does_not_break_the_save(h: Harness) -> None:
     h.fake.forbidden_private_chats.add(ADMIN_ID)
     await h.text(GROUP, USER, "متن")
     await h.confirm([1])
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
     delivered = [m for m in h.fake.messages.values() if m.chat_id == ADMIN_ID]
     assert delivered == []  # attempted, refused (403), logged as admin_notify_failed

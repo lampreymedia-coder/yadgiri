@@ -36,14 +36,14 @@ async def test_my_posts_and_my_stats(h: Harness) -> None:
 async def test_undo_removes_rows_and_file(h: Harness) -> None:
     h.register_group()
     await _save_photo(h)
-    (post_id,), = h.root.rows("SELECT id FROM Post")
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    (post_id,), = h.root.rows("SELECT Id FROM Posts")
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     assert Path(path).exists()
     await h.private(USER, fa.BTN_UNDO_LAST)
     await h.press(USER, "un", "", str(post_id))
-    assert h.count("Post") == 0 and h.count("PostHashtag") == 0 and h.count("PostMedia") == 0
+    assert h.count("Posts") == 0 and h.count("PostHashtags") == 0 and h.count("PostMedia") == 0
     assert not Path(path).exists()
-    assert h.count("Person") == 1  # the person row stays
+    assert h.count("Users") == 1  # the person row stays
     assert fa.UNDO_DONE in h.texts_to(USER["id"])
 
 
@@ -51,22 +51,22 @@ async def test_undo_after_10_minutes_is_refused(h: Harness) -> None:
     h.register_group()
     await h.text(GROUP, USER, "متن")
     await h.confirm([1])
-    h.root.execute("UPDATE Post SET created_at = created_at - INTERVAL 11 MINUTE")
-    (post_id,), = h.root.rows("SELECT id FROM Post")
+    h.root.execute("UPDATE Posts SET CreatedAt = CreatedAt - INTERVAL 11 MINUTE")
+    (post_id,), = h.root.rows("SELECT Id FROM Posts")
     await h.private(USER, fa.BTN_UNDO_LAST)
     assert fa.UNDO_NOTHING in h.texts_to(USER["id"])
     await h.press(USER, "un", "", str(post_id))
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
 
 
 async def test_undo_only_own_post(h: Harness) -> None:
     h.register_group()
     await h.text(GROUP, USER, "متن علی")
     await h.confirm([1])
-    (post_id,), = h.root.rows("SELECT id FROM Post")
+    (post_id,), = h.root.rows("SELECT Id FROM Posts")
     await h.private(OTHER_USER, "/start")
     await h.press(OTHER_USER, "un", "", str(post_id))
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1
 
 
 async def test_keep_answer_changes_nothing(h: Harness) -> None:
@@ -75,4 +75,4 @@ async def test_keep_answer_changes_nothing(h: Harness) -> None:
     await h.confirm([1])
     await h.private(USER, fa.BTN_UNDO_LAST)
     await h.press(USER, "un", "", "0")
-    assert h.count("Post") == 1
+    assert h.count("Posts") == 1

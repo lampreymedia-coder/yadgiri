@@ -1,8 +1,13 @@
-"""Reads and writes on the seven bot tables of ``Bale_Archive``.
+"""Row-level SQL on the merged schema — the only place table/column names appear.
 
-Only row-level SQL lives here (SELECT / INSERT / UPDATE). Table and column
-names follow the staff schema exactly (appendix A of CLAUDE-BOT-FIX.md);
-nothing in this module creates or changes a table.
+Tables: Users, BaleGroups, BaleGroupMembers, Hashtags, Posts, PostHashtags,
+PostMedia, OrgUnits (read only). Only SELECT / INSERT / UPDATE / DELETE;
+nothing here creates or changes a table. Results are aliased to the bot's
+snake_case attribute names so the rest of the code does not know the schema.
+
+Sharing rules with the staff system (CLAUDE-MERGE-SCHEMA.md §2):
+* Users rows are never changed, except filling a NULL BaleUsername.
+* The bot only creates, lists and deletes Posts with Source = 'bale'.
 """
 
 from __future__ import annotations
@@ -14,11 +19,16 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from app.db.schema import SOURCE_BALE
 from app.timeutil import tehran_now
 
 # MySQL error numbers.
 ER_DUP_ENTRY = 1062
 ER_CHECK_CONSTRAINT_VIOLATED = 3819
+
+# Values for a Users row the bot creates for a new Bale member.
+NO_LOGIN_PASSWORD_HASH = "!bale-no-login"
+DEFAULT_FIRST_NAME = "کاربر بله"
 
 
 def mysql_errno(exc: BaseException) -> int | None:
@@ -31,11 +41,11 @@ def mysql_errno(exc: BaseException) -> int | None:
 
 
 class DuplicatePost(Exception):
-    """UQ_Post_group_message: this group message is already archived."""
+    """UQ_Post_BaleMsg: this group message is already archived."""
 
 
 class ContentTypeRejected(Exception):
-    """A CHECK constraint refused content_type / media_type."""
+    """A CHECK constraint refused ContentType / MediaType."""
 
 
 def _cut(value: str | None, length: int) -> str | None:
@@ -44,7 +54,47 @@ def _cut(value: str | None, length: int) -> str | None:
     return value[:length]
 
 
-# ─── EhyaGroup ───
+def _in_list(prefix: str, values: list[int], params: dict[str, object]) -> str:
+    keys = []
+    for index, value in enumerate(values):
+        params[f"{prefix}{index}"] = value
+        keys.append(f":{prefix}{index}")
+    return ", ".join(keys)
+
+
+# ─── OrgUnits (read only) ───
+
+
+@dataclass(frozen=True, slots=True)
+class OrgUnitRow:
+    id: int
+    level_no: int
+    name: str
+
+
+async def active_org_units(conn: AsyncConnection) -> list[OrgUnitRow]:
+    result = await conn.execute(
+        text(
+            "SELECT Id AS id, LevelNo AS level_no, Name AS name FROM OrgUnits "
+            "WHERE IsActive = 1 ORDER BY LevelNo, Name, Id"
+        )
+    )
+    return [OrgUnitRow(int(r.id), int(r.level_no or 0), str(r.name)) for r in result]
+
+
+async def get_active_org_unit(conn: AsyncConnection, org_unit_id: int) -> OrgUnitRow | None:
+    result = await conn.execute(
+        text(
+            "SELECT Id AS id, LevelNo AS level_no, Name AS name FROM OrgUnits "
+            "WHERE Id = :id AND IsActive = 1"
+        ),
+        {"id": org_unit_id},
+    )
+    row = result.first()
+    return OrgUnitRow(int(row.id), int(row.level_no or 0), str(row.name)) if row else None
+
+
+# ─── BaleGroups ───
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,27 +102,32 @@ class GroupRow:
     id: int
     bale_group_id: int
     name: str
-    level: int
+    org_unit_id: int
     is_active: bool
+    org_unit_name: str = ""
+
+
+_GROUP_SELECT = (
+    "SELECT g.Id AS id, g.BaleChatId AS bale_group_id, g.Title AS name, "
+    "g.OrgUnitId AS org_unit_id, g.IsActive AS is_active, o.Name AS org_unit_name "
+    "FROM BaleGroups g LEFT JOIN OrgUnits o ON o.Id = g.OrgUnitId"
+)
 
 
 def _group(row: object) -> GroupRow:
     return GroupRow(
         id=int(row.id),  # type: ignore[attr-defined]
         bale_group_id=int(row.bale_group_id),  # type: ignore[attr-defined]
-        name=str(row.bale_group_name),  # type: ignore[attr-defined]
-        level=int(row.level),  # type: ignore[attr-defined]
+        name=str(row.name),  # type: ignore[attr-defined]
+        org_unit_id=int(row.org_unit_id),  # type: ignore[attr-defined]
         is_active=bool(row.is_active),  # type: ignore[attr-defined]
+        org_unit_name=str(row.org_unit_name or ""),  # type: ignore[attr-defined]
     )
 
 
 async def get_group(conn: AsyncConnection, bale_group_id: int) -> GroupRow | None:
     result = await conn.execute(
-        text(
-            "SELECT id, bale_group_id, bale_group_name, level, is_active "
-            "FROM EhyaGroup WHERE bale_group_id = :gid"
-        ),
-        {"gid": bale_group_id},
+        text(f"{_GROUP_SELECT} WHERE g.BaleChatId = :gid"), {"gid": bale_group_id}
     )
     row = result.first()
     return _group(row) if row is not None else None
@@ -85,38 +140,38 @@ async def get_active_group(conn: AsyncConnection, bale_group_id: int) -> GroupRo
     return group
 
 
+async def get_group_by_id(conn: AsyncConnection, group_id: int) -> GroupRow | None:
+    result = await conn.execute(text(f"{_GROUP_SELECT} WHERE g.Id = :id"), {"id": group_id})
+    row = result.first()
+    return _group(row) if row is not None else None
+
+
 async def list_groups(conn: AsyncConnection) -> list[GroupRow]:
-    result = await conn.execute(
-        text(
-            "SELECT id, bale_group_id, bale_group_name, level, is_active "
-            "FROM EhyaGroup ORDER BY is_active DESC, id"
-        )
-    )
+    result = await conn.execute(text(f"{_GROUP_SELECT} ORDER BY g.IsActive DESC, g.Id"))
     return [_group(row) for row in result]
 
 
 async def register_group(
-    conn: AsyncConnection, bale_group_id: int, name: str, level: int
+    conn: AsyncConnection, bale_group_id: int, title: str, org_unit_id: int
 ) -> GroupRow:
-    """Add one EhyaGroup row, or re-activate and update the existing one."""
+    """New group: one BaleGroups row. Known group: only IsActive=1 and OrgUnitId change."""
     existing = await get_group(conn, bale_group_id)
     now = tehran_now()
     if existing is None:
         await conn.execute(
             text(
-                "INSERT INTO EhyaGroup "
-                "(bale_group_id, bale_group_name, level, is_active, created_at) "
-                "VALUES (:gid, :name, :level, 1, :now)"
+                "INSERT INTO BaleGroups (BaleChatId, Title, OrgUnitId, IsActive, CreatedAt) "
+                "VALUES (:gid, :title, :unit, 1, :now)"
             ),
-            {"gid": bale_group_id, "name": _cut(name, 200), "level": level, "now": now},
+            {"gid": bale_group_id, "title": _cut(title, 200), "unit": org_unit_id, "now": now},
         )
     else:
         await conn.execute(
             text(
-                "UPDATE EhyaGroup SET bale_group_name = :name, level = :level, "
-                "is_active = 1, updated_at = :now WHERE id = :id"
+                "UPDATE BaleGroups SET IsActive = 1, OrgUnitId = :unit, UpdatedAt = :now "
+                "WHERE Id = :id"
             ),
-            {"name": _cut(name, 200), "level": level, "now": now, "id": existing.id},
+            {"unit": org_unit_id, "now": now, "id": existing.id},
         )
     group = await get_group(conn, bale_group_id)
     assert group is not None
@@ -124,42 +179,60 @@ async def register_group(
 
 
 async def unregister_group(conn: AsyncConnection, bale_group_id: int) -> bool:
-    """Set is_active = 0. The row is never deleted."""
+    """IsActive = 0. The row is never deleted."""
     result = await conn.execute(
         text(
-            "UPDATE EhyaGroup SET is_active = 0, updated_at = :now "
-            "WHERE bale_group_id = :gid AND is_active = 1"
+            "UPDATE BaleGroups SET IsActive = 0, UpdatedAt = :now "
+            "WHERE BaleChatId = :gid AND IsActive = 1"
         ),
         {"gid": bale_group_id, "now": tehran_now()},
     )
     return bool(result.rowcount)
 
 
-# ─── Person / PersonGroup ───
+async def set_group_org_unit(conn: AsyncConnection, group_id: int, org_unit_id: int) -> None:
+    await conn.execute(
+        text("UPDATE BaleGroups SET OrgUnitId = :unit, UpdatedAt = :now WHERE Id = :id"),
+        {"unit": org_unit_id, "now": tehran_now(), "id": group_id},
+    )
+
+
+async def set_group_active(conn: AsyncConnection, group_id: int, active: bool) -> None:
+    await conn.execute(
+        text("UPDATE BaleGroups SET IsActive = :active, UpdatedAt = :now WHERE Id = :id"),
+        {"active": 1 if active else 0, "now": tehran_now(), "id": group_id},
+    )
+
+
+# ─── Users / BaleGroupMembers ───
 
 
 @dataclass(frozen=True, slots=True)
 class PersonRow:
+    """A Users row as the bot sees it. ``is_active`` = IsActive=1 and IsDeleted=0."""
+
     id: int
     bale_user_id: int
     is_active: bool
 
 
+_USER_SELECT = (
+    "SELECT Id AS id, BaleChatId AS bale_user_id, BaleUsername AS bale_username, "
+    "IsActive AS is_active, IsDeleted AS is_deleted FROM Users"
+)
+
+
+def _person(row: object) -> PersonRow:
+    active = bool(row.is_active) and not bool(row.is_deleted)  # type: ignore[attr-defined]
+    return PersonRow(int(row.id), int(row.bale_user_id), active)  # type: ignore[attr-defined]
+
+
 async def get_person(conn: AsyncConnection, bale_user_id: int) -> PersonRow | None:
     result = await conn.execute(
-        text(
-            "SELECT id, bale_user_id, bale_username, firstname, lastname, is_active "
-            "FROM Person WHERE bale_user_id = :uid ORDER BY id LIMIT 1"
-        ),
-        {"uid": bale_user_id},
+        text(f"{_USER_SELECT} WHERE BaleChatId = :cid"), {"cid": bale_user_id}
     )
     row = result.first()
-    if row is None:
-        return None
-    # NULL is_active (rows typed in by staff) counts as active; only 0 blocks.
-    return PersonRow(
-        int(row.id), int(row.bale_user_id), row.is_active is None or bool(row.is_active)
-    )
+    return _person(row) if row is not None else None
 
 
 async def ensure_person(
@@ -169,76 +242,109 @@ async def ensure_person(
     first_name: str | None,
     last_name: str | None,
 ) -> PersonRow:
-    """Find by bale_user_id only; add or refresh display fields.
+    """Find a Users row by BaleChatId only; create it for a new Bale member.
 
-    ``id`` comes from AUTO_INCREMENT — the bot never computes it.
+    An existing row is never changed, except filling a NULL BaleUsername.
+    Id comes from AUTO_INCREMENT; every NOT NULL column is filled explicitly.
     """
-    first = _cut(first_name or None, 50)
-    last = _cut(last_name or None, 50)
     uname = _cut(username or None, 100)
     result = await conn.execute(
-        text(
-            "SELECT id, bale_username, firstname, lastname, is_active "
-            "FROM Person WHERE bale_user_id = :uid ORDER BY id LIMIT 1"
-        ),
-        {"uid": bale_user_id},
+        text(f"{_USER_SELECT} WHERE BaleChatId = :cid"), {"cid": bale_user_id}
     )
     row = result.first()
-    if row is None:
+    if row is not None:
+        if row.bale_username is None and uname:
+            await conn.execute(
+                text(
+                    "UPDATE Users SET BaleUsername = :uname "
+                    "WHERE Id = :id AND BaleUsername IS NULL"
+                ),
+                {"uname": uname, "id": row.id},
+            )
+        return _person(row)
+    try:
         await conn.execute(
             text(
-                "INSERT INTO Person "
-                "(firstname, lastname, bale_user_id, bale_username, created_at, is_active) "
-                "VALUES (:first, :last, :uid, :uname, :now, 1)"
+                "INSERT INTO Users (Username, PasswordHash, FirstName, LastName, BaleChatId, "
+                "BaleUsername, IsAdmin, IsActor, MustChangePassword, BaleRequireCode, IsDeleted, "
+                "IsActive, NotifyBale, NotifyMeetings, NotifyWeekly, NotifyDelays, FailedLogins, "
+                "CreatedAt) VALUES (:login, :pwd, :first, :last, :cid, :uname, 0, 0, 0, 0, 0, "
+                "1, 1, 0, 0, 0, 0, :now)"
             ),
             {
-                "first": first,
-                "last": last,
-                "uid": bale_user_id,
+                "login": f"bale_{bale_user_id}",
+                "pwd": NO_LOGIN_PASSWORD_HASH,
+                "first": _cut((first_name or "").strip() or DEFAULT_FIRST_NAME, 50),
+                "last": _cut((last_name or "").strip(), 50),
+                "cid": bale_user_id,
                 "uname": uname,
                 "now": tehran_now(),
             },
         )
-        person = await get_person(conn, bale_user_id)
-        assert person is not None
-        return person
-    if (row.bale_username, row.firstname, row.lastname) != (uname, first, last):
-        await conn.execute(
-            text(
-                "UPDATE Person SET bale_username = :uname, firstname = :first, "
-                "lastname = :last WHERE id = :id"
-            ),
-            {"uname": uname, "first": first, "last": last, "id": row.id},
-        )
-    return PersonRow(int(row.id), bale_user_id, row.is_active is None or bool(row.is_active))
+    except DBAPIError as exc:
+        # Two messages at the same moment: the other one created the row.
+        if mysql_errno(exc) != ER_DUP_ENTRY:
+            raise
+    person = await get_person(conn, bale_user_id)
+    if person is None:
+        msg = f"Users row for BaleChatId {bale_user_id} could not be created"
+        raise RuntimeError(msg)
+    return person
 
 
 async def ensure_membership(conn: AsyncConnection, person_id: int, ehya_group_id: int) -> None:
-    """One PersonGroup row per (person, group); an existing row is left as is.
+    """One BaleGroupMembers row per (user, group); an existing row is left as is.
 
     Two messages at the same moment can race; the duplicate-key error is ignored.
     """
     existing = await conn.execute(
-        text("SELECT 1 FROM PersonGroup WHERE person_id = :pid AND ehya_group_id = :gid"),
-        {"pid": person_id, "gid": ehya_group_id},
+        text("SELECT 1 FROM BaleGroupMembers WHERE UserId = :uid AND BaleGroupId = :gid"),
+        {"uid": person_id, "gid": ehya_group_id},
     )
     if existing.first() is not None:
         return
     try:
         await conn.execute(
             text(
-                "INSERT INTO PersonGroup (person_id, ehya_group_id, created_at, is_active) "
-                "VALUES (:pid, :gid, :now, 1)"
+                "INSERT INTO BaleGroupMembers (UserId, BaleGroupId, IsActive, CreatedAt) "
+                "VALUES (:uid, :gid, 1, :now)"
             ),
-            {"pid": person_id, "gid": ehya_group_id, "now": tehran_now()},
+            {"uid": person_id, "gid": ehya_group_id, "now": tehran_now()},
         )
     except DBAPIError as exc:
-        # Two messages at the same moment: the other one already added the row.
         if mysql_errno(exc) != ER_DUP_ENTRY:
             raise
 
 
-# ─── Hashtag ───
+async def pickable_people(conn: AsyncConnection, limit: int = 40) -> list[tuple[int, str]]:
+    """(BaleChatId, label) of recent active users that have a Bale account."""
+    result = await conn.execute(
+        text(
+            "SELECT Id AS id, FirstName AS firstname, LastName AS lastname, "
+            "BaleUsername AS bale_username, BaleChatId AS bale_user_id FROM Users "
+            "WHERE BaleChatId IS NOT NULL AND IsActive = 1 AND IsDeleted = 0 "
+            "ORDER BY Id DESC LIMIT :lim"
+        ),
+        {"lim": limit},
+    )
+    return [(int(row.bale_user_id), person_label(row)) for row in result]
+
+
+def person_label(row: object) -> str:
+    first = (getattr(row, "firstname", None) or "").strip()
+    last = (getattr(row, "lastname", None) or "").strip()
+    name = f"{first} {last}".strip()
+    username = getattr(row, "bale_username", None)
+    if name and username:
+        return f"{name} (@{username})"
+    if name:
+        return name
+    if username:
+        return f"@{username}"
+    return str(getattr(row, "bale_user_id", "") or getattr(row, "id", ""))
+
+
+# ─── Hashtags ───
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,14 +354,56 @@ class HashtagRow:
 
 
 async def active_hashtags(conn: AsyncConnection) -> list[HashtagRow]:
-    """Every active hashtag, read fresh each time. Nothing is hard-coded."""
+    """Every active hashtag, read fresh each time, ordered by Id. Nothing is hard-coded."""
     result = await conn.execute(
-        text("SELECT id, name FROM Hashtag WHERE is_active = 1 ORDER BY id")
+        text("SELECT Id AS id, Name AS name FROM Hashtags WHERE IsActive = 1 ORDER BY Id")
     )
     return [HashtagRow(int(row.id), str(row.name)) for row in result]
 
 
-# ─── Post / PostHashtag / PostMedia ───
+async def all_hashtags(conn: AsyncConnection) -> list[tuple[int, str, bool]]:
+    result = await conn.execute(
+        text("SELECT Id AS id, Name AS name, IsActive AS is_active FROM Hashtags ORDER BY Id")
+    )
+    return [(int(row.id), str(row.name), bool(row.is_active)) for row in result]
+
+
+async def add_hashtag(conn: AsyncConnection, name: str) -> bool:
+    """False when the name already exists (unique Name)."""
+    try:
+        await conn.execute(
+            text("INSERT INTO Hashtags (Name, IsActive) VALUES (:name, 1)"),
+            {"name": _cut(name, 100)},
+        )
+    except DBAPIError as exc:
+        if mysql_errno(exc) == ER_DUP_ENTRY:
+            return False
+        raise
+    return True
+
+
+async def rename_hashtag(conn: AsyncConnection, hashtag_id: int, name: str) -> bool:
+    try:
+        result = await conn.execute(
+            text("UPDATE Hashtags SET Name = :name WHERE Id = :id"),
+            {"name": _cut(name, 100), "id": hashtag_id},
+        )
+    except DBAPIError as exc:
+        if mysql_errno(exc) == ER_DUP_ENTRY:
+            return False
+        raise
+    return bool(result.rowcount)
+
+
+async def set_hashtag_active(conn: AsyncConnection, hashtag_id: int, active: bool) -> None:
+    """Hashtags are never deleted, only switched off."""
+    await conn.execute(
+        text("UPDATE Hashtags SET IsActive = :active WHERE Id = :id"),
+        {"active": 1 if active else 0, "id": hashtag_id},
+    )
+
+
+# ─── Posts / PostHashtags / PostMedia ───
 
 
 @dataclass(slots=True)
@@ -280,11 +428,13 @@ class NewPost:
     content_text: str
     posted_at: datetime
     hashtag_ids: list[int]
+    org_unit_id: int = 0
+    user_note: str | None = None
     media: list[NewMedia] = field(default_factory=list)
 
 
 async def insert_post(conn: AsyncConnection, post: NewPost) -> tuple[int, list[int]]:
-    """Write Post + PostHashtag + PostMedia on ``conn`` (the caller's transaction).
+    """Write Posts + PostHashtags + PostMedia on ``conn`` (the caller's transaction).
 
     Returns (post_id, media_ids). Raises :class:`DuplicatePost` or
     :class:`ContentTypeRejected`; the caller's transaction then rolls back
@@ -296,32 +446,36 @@ async def insert_post(conn: AsyncConnection, post: NewPost) -> tuple[int, list[i
     try:
         result = await conn.execute(
             text(
-                "INSERT INTO Post (person_id, ehya_group_id, bale_message_id, content_type, "
-                "content_text, posted_at, created_at) "
-                "VALUES (:pid, :gid, :mid, :ctype, :body, :posted, :now)"
+                "INSERT INTO Posts (AuthorUserId, BaleGroupId, BaleMessageId, ContentType, Body, "
+                "PostedAt, CreatedAt, OrgUnitId, Source, Title, UserNote) "
+                "VALUES (:uid, :gid, :mid, :ctype, :body, :posted, :now, :unit, :source, NULL, "
+                ":note)"
             ),
             {
-                "pid": post.person_id,
+                "uid": post.person_id,
                 "gid": post.ehya_group_id,
                 "mid": post.bale_message_id,
                 "ctype": post.content_type,
                 "body": post.content_text or "",
                 "posted": post.posted_at,
                 "now": tehran_now(),
+                "unit": post.org_unit_id,
+                "source": SOURCE_BALE,
+                "note": post.user_note or None,
             },
         )
         post_id = int(result.lastrowid)
         for hashtag_id in sorted(set(post.hashtag_ids)):
             await conn.execute(
-                text("INSERT INTO PostHashtag (post_id, hashtag_id) VALUES (:pid, :hid)"),
+                text("INSERT INTO PostHashtags (PostId, HashtagId) VALUES (:pid, :hid)"),
                 {"pid": post_id, "hid": hashtag_id},
             )
         media_ids: list[int] = []
         for item in post.media:
             media_result = await conn.execute(
                 text(
-                    "INSERT INTO PostMedia (post_id, media_type, bale_file_id, file_name, "
-                    "file_size, mime_type, storage_path, duration, width, height, created_at) "
+                    "INSERT INTO PostMedia (PostId, MediaType, BaleFileId, FileName, FileSize, "
+                    "MimeType, StoragePath, Duration, Width, Height, CreatedAt) "
                     "VALUES (:pid, :mtype, :fid, :fname, :fsize, :mime, :path, :dur, :w, :h, :now)"
                 ),
                 {
@@ -351,7 +505,7 @@ async def insert_post(conn: AsyncConnection, post: NewPost) -> tuple[int, list[i
 
 async def post_exists(conn: AsyncConnection, ehya_group_id: int, bale_message_id: int) -> bool:
     result = await conn.execute(
-        text("SELECT 1 FROM Post WHERE ehya_group_id = :gid AND bale_message_id = :mid"),
+        text("SELECT 1 FROM Posts WHERE BaleGroupId = :gid AND BaleMessageId = :mid"),
         {"gid": ehya_group_id, "mid": bale_message_id},
     )
     return result.first() is not None
@@ -359,81 +513,12 @@ async def post_exists(conn: AsyncConnection, ehya_group_id: int, bale_message_id
 
 async def set_storage_path(conn: AsyncConnection, media_id: int, storage_path: str) -> None:
     await conn.execute(
-        text("UPDATE PostMedia SET storage_path = :path WHERE id = :id"),
+        text("UPDATE PostMedia SET StoragePath = :path WHERE Id = :id"),
         {"path": _cut(storage_path, 1000), "id": media_id},
     )
 
 
-# ─── Admin panel: hashtag and group upkeep (single-row INSERT/UPDATE only) ───
-
-
-async def all_hashtags(conn: AsyncConnection) -> list[tuple[int, str, bool]]:
-    result = await conn.execute(text("SELECT id, name, is_active FROM Hashtag ORDER BY id"))
-    return [(int(row.id), str(row.name), bool(row.is_active)) for row in result]
-
-
-async def add_hashtag(conn: AsyncConnection, name: str) -> bool:
-    """False when the name already exists (UQ_Hashtag_name)."""
-    try:
-        await conn.execute(
-            text("INSERT INTO Hashtag (name, is_active) VALUES (:name, 1)"),
-            {"name": _cut(name, 100)},
-        )
-    except DBAPIError as exc:
-        if mysql_errno(exc) == ER_DUP_ENTRY:
-            return False
-        raise
-    return True
-
-
-async def rename_hashtag(conn: AsyncConnection, hashtag_id: int, name: str) -> bool:
-    try:
-        result = await conn.execute(
-            text("UPDATE Hashtag SET name = :name WHERE id = :id"),
-            {"name": _cut(name, 100), "id": hashtag_id},
-        )
-    except DBAPIError as exc:
-        if mysql_errno(exc) == ER_DUP_ENTRY:
-            return False
-        raise
-    return bool(result.rowcount)
-
-
-async def set_hashtag_active(conn: AsyncConnection, hashtag_id: int, active: bool) -> None:
-    """Hashtags are never deleted, only switched off."""
-    await conn.execute(
-        text("UPDATE Hashtag SET is_active = :active WHERE id = :id"),
-        {"active": 1 if active else 0, "id": hashtag_id},
-    )
-
-
-async def get_group_by_id(conn: AsyncConnection, group_id: int) -> GroupRow | None:
-    result = await conn.execute(
-        text(
-            "SELECT id, bale_group_id, bale_group_name, level, is_active "
-            "FROM EhyaGroup WHERE id = :id"
-        ),
-        {"id": group_id},
-    )
-    row = result.first()
-    return _group(row) if row is not None else None
-
-
-async def set_group_level(conn: AsyncConnection, group_id: int, level: int) -> None:
-    await conn.execute(
-        text("UPDATE EhyaGroup SET level = :level, updated_at = :now WHERE id = :id"),
-        {"level": level, "now": tehran_now(), "id": group_id},
-    )
-
-
-async def set_group_active(conn: AsyncConnection, group_id: int, active: bool) -> None:
-    await conn.execute(
-        text("UPDATE EhyaGroup SET is_active = :active, updated_at = :now WHERE id = :id"),
-        {"active": 1 if active else 0, "now": tehran_now(), "id": group_id},
-    )
-
-
-# ─── A user's own posts (private menu) ───
+# ─── A user's own posts (private menu) — Source='bale' only ───
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,57 +529,66 @@ class OwnPost:
     content_text: str
     group_name: str
     hashtags: str
+    user_note: str | None = None
 
 
 async def own_posts(conn: AsyncConnection, person_id: int, limit: int = 10) -> list[OwnPost]:
     result = await conn.execute(
         text(
-            "SELECT p.id, p.created_at, p.content_type, p.content_text, g.bale_group_name, "
-            "(SELECT GROUP_CONCAT(h.name ORDER BY h.id SEPARATOR ' ') FROM PostHashtag ph "
-            " JOIN Hashtag h ON h.id = ph.hashtag_id WHERE ph.post_id = p.id) AS tags "
-            "FROM Post p JOIN EhyaGroup g ON g.id = p.ehya_group_id "
-            "WHERE p.person_id = :pid ORDER BY p.id DESC LIMIT :lim"
+            "SELECT p.Id AS id, p.CreatedAt AS created_at, p.ContentType AS content_type, "
+            "p.Body AS body, p.UserNote AS user_note, g.Title AS group_name, "
+            "(SELECT GROUP_CONCAT(h.Name ORDER BY h.Id SEPARATOR ' ') FROM PostHashtags ph "
+            " JOIN Hashtags h ON h.Id = ph.HashtagId WHERE ph.PostId = p.Id) AS tags "
+            "FROM Posts p JOIN BaleGroups g ON g.Id = p.BaleGroupId "
+            "WHERE p.AuthorUserId = :uid AND p.Source = :source ORDER BY p.Id DESC LIMIT :lim"
         ),
-        {"pid": person_id, "lim": limit},
+        {"uid": person_id, "source": SOURCE_BALE, "lim": limit},
     )
     return [
         OwnPost(
             int(row.id),
             row.created_at,
             int(row.content_type),
-            str(row.content_text or ""),
-            str(row.bale_group_name),
+            str(row.body or ""),
+            str(row.group_name),
             str(row.tags or ""),
+            row.user_note,
         )
         for row in result
     ]
 
 
 async def delete_own_post(conn: AsyncConnection, post_id: int, person_id: int) -> list[str] | None:
-    """Undo one post of this person on the caller's transaction.
+    """Undo one of this user's Source='bale' posts on the caller's transaction.
 
-    Order: PostHashtag, PostMedia, then Post. Returns the storage paths of the
-    removed files, or None when the post is not this person's.
+    Order: PostHashtags, PostMedia, then Posts. Returns the storage paths of
+    the removed files, or None when the post is not this user's bale post.
     """
     owner = await conn.execute(
-        text("SELECT 1 FROM Post WHERE id = :id AND person_id = :pid"),
-        {"id": post_id, "pid": person_id},
+        text(
+            "SELECT 1 FROM Posts WHERE Id = :id AND AuthorUserId = :uid AND Source = :source"
+        ),
+        {"id": post_id, "uid": person_id, "source": SOURCE_BALE},
     )
     if owner.first() is None:
         return None
     paths = [
         str(row.storage_path)
         for row in await conn.execute(
-            text("SELECT storage_path FROM PostMedia WHERE post_id = :id"), {"id": post_id}
+            text("SELECT StoragePath AS storage_path FROM PostMedia WHERE PostId = :id"),
+            {"id": post_id},
         )
     ]
-    await conn.execute(text("DELETE FROM PostHashtag WHERE post_id = :id"), {"id": post_id})
-    await conn.execute(text("DELETE FROM PostMedia WHERE post_id = :id"), {"id": post_id})
+    await conn.execute(text("DELETE FROM PostHashtags WHERE PostId = :id"), {"id": post_id})
+    await conn.execute(text("DELETE FROM PostMedia WHERE PostId = :id"), {"id": post_id})
     await conn.execute(
-        text("DELETE FROM Post WHERE id = :id AND person_id = :pid"),
-        {"id": post_id, "pid": person_id},
+        text("DELETE FROM Posts WHERE Id = :id AND AuthorUserId = :uid AND Source = :source"),
+        {"id": post_id, "uid": person_id, "source": SOURCE_BALE},
     )
     return paths
+
+
+# ─── PostMedia after download / compression / manual upload ───
 
 
 async def set_media_compressed(
@@ -509,9 +603,9 @@ async def set_media_compressed(
     """After compression/conversion: only existing PostMedia columns (NULL = keep)."""
     await conn.execute(
         text(
-            "UPDATE PostMedia SET storage_path = :path, file_size = :size, "
-            "mime_type = COALESCE(:mime, mime_type), width = COALESCE(:w, width), "
-            "height = COALESCE(:h, height) WHERE id = :id"
+            "UPDATE PostMedia SET StoragePath = :path, FileSize = :size, "
+            "MimeType = COALESCE(:mime, MimeType), Width = COALESCE(:w, Width), "
+            "Height = COALESCE(:h, Height) WHERE Id = :id"
         ),
         {
             "path": _cut(storage_path, 1000),
@@ -537,10 +631,10 @@ async def set_media_uploaded(
     """A file the admin uploaded by hand replaces its bale: reference (only that row)."""
     result = await conn.execute(
         text(
-            "UPDATE PostMedia SET storage_path = :path, file_size = :size, mime_type = :mime, "
-            "width = COALESCE(:w, width), height = COALESCE(:h, height), "
-            "duration = COALESCE(:d, duration) "
-            "WHERE id = :id AND storage_path LIKE 'bale:%'"
+            "UPDATE PostMedia SET StoragePath = :path, FileSize = :size, MimeType = :mime, "
+            "Width = COALESCE(:w, Width), Height = COALESCE(:h, Height), "
+            "Duration = COALESCE(:d, Duration) "
+            "WHERE Id = :id AND StoragePath LIKE 'bale:%'"
         ),
         {
             "path": _cut(storage_path, 1000),
@@ -581,13 +675,15 @@ def _media(row: object) -> MediaRow:
 
 
 _MEDIA_COLUMNS = (
-    "id, post_id, media_type, file_name, file_size, mime_type, storage_path, duration"
+    "m.Id AS id, m.PostId AS post_id, m.MediaType AS media_type, m.FileName AS file_name, "
+    "m.FileSize AS file_size, m.MimeType AS mime_type, m.StoragePath AS storage_path, "
+    "m.Duration AS duration"
 )
 
 
 async def get_media(conn: AsyncConnection, media_id: int) -> MediaRow | None:
     result = await conn.execute(
-        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE id = :id"), {"id": media_id}
+        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia m WHERE m.Id = :id"), {"id": media_id}
     )
     row = result.first()
     return _media(row) if row is not None else None
@@ -596,19 +692,17 @@ async def get_media(conn: AsyncConnection, media_id: int) -> MediaRow | None:
 async def pending_upload_rows(
     conn: AsyncConnection, media_ids: list[int] | None = None, limit: int = 50
 ) -> list[MediaRow]:
-    """Files only held in Bale (storage_path 'bale:…'), newest first."""
-    where = "storage_path LIKE 'bale:%'"
+    """Files only held in Bale (StoragePath 'bale:…'), newest first."""
+    where = "m.StoragePath LIKE 'bale:%'"
     params: dict[str, object] = {"lim": limit}
     if media_ids is not None:
         if not media_ids:
             return []
-        keys = []
-        for index, media_id in enumerate(media_ids):
-            params[f"m{index}"] = media_id
-            keys.append(f":m{index}")
-        where += f" AND id IN ({', '.join(keys)})"
+        where += f" AND m.Id IN ({_in_list('m', media_ids, params)})"
     result = await conn.execute(
-        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE {where} ORDER BY id DESC LIMIT :lim"),
+        text(
+            f"SELECT {_MEDIA_COLUMNS} FROM PostMedia m WHERE {where} ORDER BY m.Id DESC LIMIT :lim"
+        ),
         params,
     )
     return [_media(row) for row in result]
@@ -617,10 +711,10 @@ async def pending_upload_rows(
 async def media_for_posts(conn: AsyncConnection, post_ids: list[int]) -> dict[int, list[MediaRow]]:
     if not post_ids:
         return {}
-    params = {f"p{i}": pid for i, pid in enumerate(post_ids)}
-    keys = ", ".join(f":p{i}" for i in range(len(post_ids)))
+    params: dict[str, object] = {}
+    keys = _in_list("p", post_ids, params)
     result = await conn.execute(
-        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia WHERE post_id IN ({keys}) ORDER BY id"),
+        text(f"SELECT {_MEDIA_COLUMNS} FROM PostMedia m WHERE m.PostId IN ({keys}) ORDER BY m.Id"),
         params,
     )
     grouped: dict[int, list[MediaRow]] = {}
@@ -634,8 +728,21 @@ async def local_media_rows(conn: AsyncConnection) -> list[MediaRow]:
     """Every PostMedia row whose file should be on this server's disk."""
     result = await conn.execute(
         text(
-            f"SELECT {_MEDIA_COLUMNS} FROM PostMedia "
-            "WHERE storage_path NOT LIKE 'bale:%' ORDER BY id"
+            f"SELECT {_MEDIA_COLUMNS} FROM PostMedia m "
+            "WHERE m.StoragePath NOT LIKE 'bale:%' ORDER BY m.Id"
         )
     )
     return [_media(row) for row in result]
+
+
+# ─── Counts for the startup check ───
+
+
+async def count_active_hashtags(conn: AsyncConnection) -> int:
+    result = await conn.execute(text("SELECT COUNT(*) FROM Hashtags WHERE IsActive = 1"))
+    return int(result.scalar_one())
+
+
+async def count_active_org_units(conn: AsyncConnection) -> int:
+    result = await conn.execute(text("SELECT COUNT(*) FROM OrgUnits WHERE IsActive = 1"))
+    return int(result.scalar_one())

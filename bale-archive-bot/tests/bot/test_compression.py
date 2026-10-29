@@ -68,7 +68,7 @@ async def test_good_savings_use_transcoded_file(h: Harness, monkeypatch, tools) 
     monkeypatch.setattr(video_compress, "run_ffmpeg", fake_run(5, calls))  # 15 → 5 bytes
     start = len(EXECUTED_SQL)
     await _save_video(h)
-    (path, size, mime), = h.root.rows("SELECT storage_path, file_size, mime_type FROM PostMedia")
+    (path, size, mime), = h.root.rows("SELECT StoragePath, FileSize, MimeType FROM PostMedia")
     assert size == 5 and path.endswith(".mp4") and mime == "video/mp4"
     assert len(calls) == 1 and "libx264" in calls[0]
     assert len(_media_updates(start)) == 1
@@ -80,7 +80,7 @@ async def test_incompatible_video_replaced_even_with_small_savings(h: Harness, m
     monkeypatch.setattr(video_compress, "probe", fake_probe(HEVC))
     monkeypatch.setattr(video_compress, "run_ffmpeg", fake_run(14, calls))  # only 6.7 % smaller
     await _save_video(h)
-    (size,), = h.root.rows("SELECT file_size FROM PostMedia")
+    (size,), = h.root.rows("SELECT FileSize FROM PostMedia")
     assert size == 14
     assert _log(h)["reason"] == "transcoded_for_compatibility"
 
@@ -101,7 +101,7 @@ async def test_ffmpeg_error_keeps_original(h: Harness, monkeypatch, tools) -> No
     monkeypatch.setattr(video_compress, "probe", fake_probe(HEVC))
     monkeypatch.setattr(video_compress, "run_ffmpeg", fake_run(None, []))
     await _save_video(h)
-    (path, size), = h.root.rows("SELECT storage_path, file_size FROM PostMedia")
+    (path, size), = h.root.rows("SELECT StoragePath, FileSize FROM PostMedia")
     assert Path(path).read_bytes() == b"fake-file-bytes" and size == 100
     assert _media_updates(start_len) == []
     assert list(Path(path).parent.glob("*.c.mp4")) == []
@@ -119,7 +119,7 @@ async def test_big_video_is_not_compressed(h: Harness, monkeypatch, tools) -> No
     calls: list[list[str]] = []
     monkeypatch.setattr(video_compress, "run_ffmpeg", fake_run(1, calls))
     await _save_video(h, size=50 * MB)
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     assert path.startswith("bale:") and calls == []
 
 
@@ -130,7 +130,7 @@ async def test_document_is_left_alone(h: Harness, monkeypatch, tools) -> None:  
     await h.send(GROUP, USER, document={"file_id": "doc", "file_name": "a.pdf", "file_size": 15})
     await h.confirm([1])
     await h.settle()
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     assert Path(path).read_bytes() == b"fake-file-bytes" and calls == []
 
 
@@ -193,7 +193,7 @@ async def test_real_ffmpeg_makes_video_play_everywhere(h: Harness, tmp_path: Pat
     )  # fmt: skip
     h.fake.file_bytes["vid"] = data
     await _save_video(h, size=len(data))
-    (path, width, height), = h.root.rows("SELECT storage_path, width, height FROM PostMedia")
+    (path, width, height), = h.root.rows("SELECT StoragePath, Width, Height FROM PostMedia")
     assert set(_ffprobe(path, "v:0", "codec_name,pix_fmt,profile").split(",")) == {"h264", "yuv420p", "Main"}
     assert (width, height) == (720, 1280)  # portrait: short side 720, aspect kept
 
@@ -209,6 +209,6 @@ async def test_real_ffmpeg_voice_becomes_m4a(h: Harness, tmp_path: Path) -> None
     await h.send(GROUP, USER, voice={"file_id": "voice1", "file_size": len(data), "mime_type": "audio/ogg"})
     await h.confirm([1])
     await h.settle()
-    (path, mime, mtype), = h.root.rows("SELECT storage_path, mime_type, media_type FROM PostMedia")
+    (path, mime, mtype), = h.root.rows("SELECT StoragePath, MimeType, MediaType FROM PostMedia")
     assert mtype == 3 and path.endswith(".m4a") and mime == "audio/mp4"
     assert _ffprobe(path, "a:0", "codec_name") == "aac"

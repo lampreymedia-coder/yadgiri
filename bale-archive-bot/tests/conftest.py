@@ -45,17 +45,21 @@ def _install_sql_recorder() -> None:
 
 
 _install_sql_recorder()
-SCHEMA = FIXTURES / "schema_appendix_a.sql"
-SCHEMA_5_11 = FIXTURES / "schema_5_11.sql"
+SCHEMA = FIXTURES / "schema_merged.sql"
 
 BOT_USER = "balebot_test"
 BOT_PASSWORD = "test-pass"  # noqa: S105 — local throw-away test user
 MAIN_DB = "Bale_Archive"
-OLD_CHECK_DB = "Bale_Archive_oldcheck"  # CHECKs still 1-4 / 1-3, Person.id automatic
-ORIGINAL_DB = "Bale_Archive_original"  # appendix A exactly, nothing changed
+CHECKED_DB = "Bale_Archive_checked"  # + CHECK (ContentType BETWEEN 1 AND 4)
+NO_NOTE_DB = "Bale_Archive_nonote"  # Posts.UserNote missing (incomplete migration)
+OLD_NAMES_DB = "Bale_Archive_oldnames"  # old Person table still under its old name
 
 HASHTAGS = [(1, "یادگیری"), (2, "شبکه و منبع"), (3, "محتوایی"), (4, "سند")]
-BOT_TABLES_DELETE_ORDER = ("PostMedia", "PostHashtag", "Post", "PersonGroup", "Person", "EhyaGroup")
+# 10 active units (+1 inactive) so the /register picker needs two pages.
+ORG_UNITS = [(1, 1, "ستاد مرکزی", None, 1)] + [
+    (i, 2, f"واحد {i:02d}", 1, 1) for i in range(2, 11)
+] + [(11, 2, "واحد بسته", 1, 0)]
+DELETE_ORDER = ("PostMedia", "PostHashtags", "Posts", "BaleGroupMembers", "BaleGroups", "Users")
 
 
 def _statements(path: Path) -> list[str]:
@@ -87,21 +91,14 @@ class RootDB:
             cur.execute(sql, params)
             return list(cur.fetchall())
 
-    def build(self, name: str, *, apply_5_11: bool, auto_person_id: bool) -> None:
+    def build(self, name: str, extra: tuple[str, ...] = ()) -> None:
         self.execute(f"DROP DATABASE IF EXISTS `{name}`")
-        self.execute(
-            f"CREATE DATABASE `{name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-        )
+        self.execute(f"CREATE DATABASE `{name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci")
         self.execute(f"USE `{name}`")
         for statement in _statements(SCHEMA):
             self.execute(statement)
-        if apply_5_11:
-            for statement in _statements(SCHEMA_5_11):
-                self.execute(statement)
-        elif auto_person_id:
-            self.execute("SET FOREIGN_KEY_CHECKS=0")
-            self.execute("ALTER TABLE Person MODIFY id INT NOT NULL AUTO_INCREMENT")
-            self.execute("SET FOREIGN_KEY_CHECKS=1")
+        for statement in extra:
+            self.execute(statement)
         for host in ("localhost", "127.0.0.1"):
             self.execute(f"CREATE USER IF NOT EXISTS '{BOT_USER}'@'{host}' IDENTIFIED BY '{BOT_PASSWORD}'")
             self.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON `{name}`.* TO '{BOT_USER}'@'{host}'")
@@ -109,17 +106,59 @@ class RootDB:
 
     def reset(self, name: str = MAIN_DB) -> None:
         self.execute(f"USE `{name}`")
-        for table in BOT_TABLES_DELETE_ORDER:
+        for table in DELETE_ORDER:
             self.execute(f"DELETE FROM `{table}`")
-        self.execute("DELETE FROM Hashtag")
+        self.execute("DELETE FROM Hashtags")
+        self.execute("UPDATE OrgUnits SET ParentId = NULL")
+        self.execute("DELETE FROM OrgUnits")
+        for unit in ORG_UNITS:
+            self.execute(
+                "INSERT INTO OrgUnits (Id, LevelNo, Name, ParentId, IsActive) VALUES (%s, %s, %s, %s, %s)",
+                unit,
+            )
         for tag_id, tag_name in HASHTAGS:
-            self.execute("INSERT INTO Hashtag (id, name, is_active) VALUES (%s, %s, 1)", (tag_id, tag_name))
+            self.execute(
+                "INSERT INTO Hashtags (Id, Name, IsActive, Description) VALUES (%s, %s, 1, %s)",
+                (tag_id, tag_name, f"توضیح هشتگ {tag_name}"),
+            )
 
     def count(self, table: str, name: str = MAIN_DB) -> int:
         return int(self.execute(f"SELECT COUNT(*) FROM `{name}`.`{table}`")[0][0])
 
     def rows(self, sql: str, params: Any = None) -> list[tuple[Any, ...]]:
         return self.execute(sql, params)
+
+    def add_user(
+        self,
+        bale_chat_id: int | None,
+        *,
+        first: str = "کاربر",
+        last: str = "سامانه",
+        username: str | None = None,
+        bale_username: str | None = None,
+        is_active: int = 1,
+        is_deleted: int = 0,
+        phone: str | None = "09120000000",
+    ) -> int:
+        """A Users row as the STAFF system would create it (not the bot)."""
+        self.execute(
+            "INSERT INTO Users (Username, PasswordHash, FirstName, LastName, Phone, BaleChatId, "
+            "BaleUsername, IsAdmin, IsActor, MustChangePassword, BaleRequireCode, IsDeleted, "
+            "IsActive, NotifyBale, NotifyMeetings, NotifyWeekly, NotifyDelays, FailedLogins, "
+            "CreatedAt) VALUES (%s, %s, %s, %s, %s, %s, %s, 1, 1, 0, 0, %s, %s, 1, 1, 1, 1, 0, NOW())",
+            (
+                username or f"staff_{bale_chat_id}",
+                "$2b$12$realhash",
+                first,
+                last,
+                phone,
+                bale_chat_id,
+                bale_username,
+                is_deleted,
+                is_active,
+            ),
+        )
+        return int(self.execute("SELECT LAST_INSERT_ID()")[0][0])
 
 
 def bot_url(name: str = MAIN_DB) -> str:
@@ -134,19 +173,23 @@ def root_db() -> Iterator[RootDB]:
         root = RootDB()
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"no local MySQL for the throw-away test database: {exc}")
-    root.build(MAIN_DB, apply_5_11=True, auto_person_id=True)
-    root.build(OLD_CHECK_DB, apply_5_11=False, auto_person_id=True)
-    root.build(ORIGINAL_DB, apply_5_11=False, auto_person_id=False)
+    root.build(MAIN_DB)
+    root.build(
+        CHECKED_DB,
+        ("ALTER TABLE Posts ADD CONSTRAINT CK_Posts_ContentType CHECK (ContentType BETWEEN 1 AND 4)",),
+    )
+    root.build(NO_NOTE_DB, ("ALTER TABLE Posts DROP COLUMN UserNote",))
+    root.build(OLD_NAMES_DB, ("CREATE TABLE Person (id INT NOT NULL, PRIMARY KEY (id))",))
     yield root
-    for name in (MAIN_DB, OLD_CHECK_DB, ORIGINAL_DB):
+    for name in (MAIN_DB, CHECKED_DB, NO_NOTE_DB, OLD_NAMES_DB):
         root.execute(f"DROP DATABASE IF EXISTS `{name}`")
     root.conn.close()
 
 
 @pytest.fixture
 def db(root_db: RootDB) -> RootDB:
-    """Clean bot tables (and the 4 staff hashtags) before each test."""
-    for name in (OLD_CHECK_DB, MAIN_DB):
+    """Clean bot tables (and the staff hashtags / org units) before each test."""
+    for name in (CHECKED_DB, MAIN_DB):
         root_db.reset(name)
     root_db.execute(f"USE `{MAIN_DB}`")
     return root_db

@@ -14,7 +14,7 @@ def fa_digits(value: object) -> str:
 
 
 def hashtag_label(name: str) -> str:
-    """Display form of a Hashtag.name: «شبکه و منبع» → «#شبکه_و_منبع»."""
+    """Display form of a Hashtags.Name: «شبکه و منبع» → «#شبکه_و_منبع»."""
     return "#" + "_".join(name.split())
 
 
@@ -73,13 +73,22 @@ NO_ACTIVE_HASHTAGS = "فعلاً هیچ هشتگ فعالی تعریف نشده 
 NEED_ONE_TAG = "حداقل یک هشتگ انتخاب کنید."
 
 
-def preview(group_name: str, content_code: int, body: str, file_count: int, tags: list[str]) -> str:
+def preview(
+    group_name: str,
+    content_code: int,
+    body: str,
+    file_count: int,
+    tags: list[str],
+    note: str | None = None,
+) -> str:
     lines = [
         "پیش‌نمایش ثبت",
         "گروه: " + group_name,
         "نوع: " + content_label(content_code),
         "هشتگ‌ها: " + (hashtags_line(tags) or "—"),
     ]
+    if note:
+        lines.append("📝 توضیحات: " + excerpt(note, 300))
     if file_count:
         lines.append("تعداد فایل: " + fa_digits(file_count))
     short = excerpt(body)
@@ -153,20 +162,22 @@ def admin_check_alert(group_name: str, content_code: int, user_label: str) -> st
 
 # ─── Group registration ───
 
-REGISTER_PICK_LEVEL = "سطح این گروه را انتخاب کنید (۱ تا ۷):"
+REGISTER_PICK_UNIT = "این گروه زیرمجموعه‌ی کدام واحد سازمانی است؟"
+NO_ORG_UNITS = "هیچ واحد سازمانی فعالی در OrgUnits نیست؛ ثبت گروه ممکن نیست. به مدیر سامانه خبر دهید."
+ORG_UNIT_GONE = "این واحد سازمانی دیگر فعال نیست؛ دوباره /register بزنید."
 REGISTER_ONLY_ADMIN = "فقط مدیر ربات می‌تواند این کار را انجام دهد."
 REGISTER_ARCHIVE_REFUSED = "این گروه، گروه آرشیو است و ثبت نمی‌شود."
 REGISTER_IN_GROUP_ONLY = "این دستور را داخل همان گروه بزنید."
 UNREGISTER_NOT_FOUND = "این گروه ثبت نشده یا از قبل غیرفعال است."
 
 
-def register_done(name: str, level: int) -> str:
+def register_done(name: str, unit_name: str) -> str:
     return (
         "✅ گروه «"
         + name
-        + "» با سطح "
-        + fa_digits(level)
-        + " ثبت شد. از این به بعد ربات اینجا فعال است."
+        + "» زیر واحد «"
+        + unit_name
+        + "» ثبت شد. از این به بعد ربات اینجا فعال است."
     )
 
 
@@ -201,7 +212,7 @@ HELP = (
 
 ADMIN_HELP = (
     "دستورهای مدیر\n"
-    "/register — داخل گروه: ثبت گروه (با انتخاب سطح)\n"
+    "/register — داخل گروه: ثبت گروه (با انتخاب واحد سازمانی)\n"
     "/unregister — داخل گروه: غیرفعال کردن گروه\n"
     "/groups — فهرست گروه‌ها\n"
     "/stats — گزارش آرشیو\n"
@@ -226,14 +237,14 @@ def tags_list(names: list[str]) -> str:
     return "هشتگ‌های فعال:\n" + "\n".join(hashtag_label(name) for name in names)
 
 
-def groups_list(rows: list[tuple[str, int, int, bool]]) -> str:
-    """rows: (name, bale_group_id, level, is_active)."""
+def groups_list(rows: list[tuple[str, int, str, bool]]) -> str:
+    """rows: (title, bale chat id, org unit name, is_active)."""
     if not rows:
         return "هیچ گروهی ثبت نشده است. داخل گروه /register را بزنید."
     lines = ["گروه‌های ثبت‌شده:"]
-    for name, gid, level, active in rows:
+    for name, gid, unit, active in rows:
         status = "فعال" if active else "غیرفعال"
-        lines.append(f"• {name} — سطح {fa_digits(level)} — {status} — {gid}")
+        lines.append(f"• {name} — واحد: {unit or '—'} — {status} — {gid}")
     return "\n".join(lines)
 
 
@@ -278,7 +289,7 @@ ASK_ADMIN_ID = "شناسه‌ی عددی مدیر جدید را بفرستید. 
 ASK_ADMIN_FORWARD = "یک پیام از مدیر جدید را همین‌جا فوروارد کنید."
 FORWARD_HAS_NO_USER = "این پیام فوروارد، شناسه‌ی فرستنده را ندارد (احتمالاً به خاطر تنظیمات حریم خصوصی). از «افزودن با شناسه» استفاده کنید."
 PICK_PERSON = "یک نفر را از افراد ثبت‌شده انتخاب کنید:"
-NO_PEOPLE = "فرد دیگری در جدول Person نیست."
+NO_PEOPLE = "فرد دیگری با حساب بله در جدول Users نیست."
 PICK_NEW_OWNER = "مالک جدید را انتخاب کنید (فقط از بین مدیران فعلی):"
 BTN_YES_TRANSFER = "✅ بله، منتقل شود"
 BTN_ADMIN_ADD_ID = "➕ افزودن با شناسه"
@@ -510,8 +521,12 @@ def scoped_report(title: str, report: object) -> str:
     return "\n".join(lines)
 
 
-def group_detail(name: str, level: int, active: bool) -> str:
-    return f"📂 {name}\nسطح: {fa_digits(level)}\nوضعیت: {'فعال' if active else 'غیرفعال'}"
+def group_detail(name: str, unit_name: str, active: bool) -> str:
+    return f"📂 {name}\nواحد سازمانی: {unit_name or '—'}\nوضعیت: {'فعال' if active else 'غیرفعال'}"
+
+
+BTN_GROUP_UNIT = "🏢 تغییر واحد سازمانی"
+PICK_GROUP_UNIT = "واحد سازمانی تازه‌ی این گروه را انتخاب کنید:"
 
 
 def _size(nbytes: int) -> str:
@@ -562,6 +577,9 @@ def my_posts(posts: list[object]) -> str:
         detail = " ".join(part for part in (tags, body) if part)
         if detail:
             lines.append("   " + detail)
+        note = getattr(post, "user_note", None)
+        if note:
+            lines.append("   📝 " + excerpt(note, 100))
     return "\n".join(lines)
 
 
@@ -659,3 +677,15 @@ def pending_list(items: list[tuple[int, int, int | None, int | None, str]]) -> s
         if url:
             lines.append("  " + url)
     return "\n".join(lines)
+
+
+# ─── «📝 توضیحات» (Posts.UserNote) ───
+
+NOTE_MAX = 1000
+BTN_NOTE = "📝 توضیحات"
+BTN_NOTE_SET = "📝 توضیحات ✅"
+BTN_NOTE_EDIT = "📝 ویرایش توضیحات"
+BTN_NOTE_DELETE = "🗑 حذف توضیحات"
+NOTE_PROMPT = "توضیح خود را در پاسخ (Reply) به همین پیام بنویسید."
+NOTE_TOO_LONG = "توضیح حداکثر ۱۰۰۰ کاراکتر می‌تواند باشد. کوتاه‌تر بنویسید و دوباره در پاسخ به همین پیام بفرستید."
+NOTE_EMPTY = "توضیح خالی است. متن توضیح را در پاسخ به همین پیام بفرستید."

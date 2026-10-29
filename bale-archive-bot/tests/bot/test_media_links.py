@@ -31,7 +31,7 @@ async def _save_document(h: Harness, name: str, data: bytes, mime: str) -> int:
     await h.send(GROUP, USER, document={"file_id": "d1", "file_name": name, "mime_type": mime, "file_size": len(data)})
     await h.confirm([1])
     await h.settle()
-    (media_id,), = h.root.rows("SELECT id FROM PostMedia")
+    (media_id,), = h.root.rows("SELECT Id FROM PostMedia")
     return int(media_id)
 
 
@@ -91,7 +91,7 @@ async def test_path_outside_media_folder_is_404(h: Harness, tmp_path: Path) -> N
     secret_file = tmp_path / "outside.txt"
     secret_file.write_text("secret")
     for path in (str(secret_file), str(h.settings.media_root / ".." / "outside.txt"), "/etc/passwd"):
-        h.root.execute("UPDATE PostMedia SET storage_path = %s WHERE id = %s", (path, media_id))
+        h.root.execute("UPDATE PostMedia SET StoragePath = %s WHERE Id = %s", (path, media_id))
         async with client(h) as c:
             response = await c.get(build_media_url(media_id, h.settings))
         assert response.status_code == 404
@@ -110,7 +110,7 @@ async def _save_big_video(h: Harness) -> int:
     await h.send(GROUP, USER, video={"file_id": "big", "file_size": 30 * MB}, caption="ویدیوی بزرگ")
     await h.confirm([1])
     await h.settle()
-    (media_id, path), = h.root.rows("SELECT id, storage_path FROM PostMedia")
+    (media_id, path), = h.root.rows("SELECT Id, StoragePath FROM PostMedia")
     assert path.startswith(f"bale:{ARCHIVE_ID}/")
     return int(media_id)
 
@@ -153,7 +153,7 @@ async def test_upload_replaces_bale_reference(h: Harness, tmp_path: Path) -> Non
         assert "۵٪" in done.text  # size differs a lot from the 30 MB Bale reported: warning
         await h.settle()
         (path, size, mime, width, height, duration), = h.root.rows(
-            "SELECT storage_path, file_size, mime_type, width, height, duration FROM PostMedia"
+            "SELECT StoragePath, FileSize, MimeType, Width, Height, Duration FROM PostMedia"
         )
         assert path.startswith(str(h.settings.media_root)) and path.endswith(".mp4")
         assert mime == "video/mp4" and (width, height) == (320, 240) and duration == 1
@@ -173,7 +173,7 @@ async def test_upload_wrong_signature_is_404(h: Harness) -> None:
         view_sig = build_media_url(media_id, h.settings).rsplit("/", 1)[1]
         swapped = await c.post(f"/u/{media_id}/{view_sig}", content=b"x")  # a view sig is no upload sig
     assert response.status_code == swapped.status_code == 404
-    assert h.root.rows("SELECT storage_path FROM PostMedia")[0][0].startswith("bale:")
+    assert h.root.rows("SELECT StoragePath FROM PostMedia")[0][0].startswith("bale:")
 
 
 async def test_upload_over_60_mb_is_refused(h: Harness) -> None:
@@ -187,7 +187,7 @@ async def test_upload_over_60_mb_is_refused(h: Harness) -> None:
     async with client(h) as c:
         response = await c.post(build_upload_url(media_id, h.settings), content=body())
     assert response.status_code == 413
-    assert h.root.rows("SELECT storage_path FROM PostMedia")[0][0].startswith("bale:")
+    assert h.root.rows("SELECT StoragePath FROM PostMedia")[0][0].startswith("bale:")
     assert list(h.settings.media_root.glob("upload-*")) == []
 
 
@@ -196,7 +196,7 @@ async def test_upload_of_wrong_type_is_refused(h: Harness) -> None:
     async with client(h) as c:
         response = await c.post(build_upload_url(media_id, h.settings), content=b"not a video at all")
     assert response.status_code == 415
-    assert h.root.rows("SELECT storage_path FROM PostMedia")[0][0].startswith("bale:")
+    assert h.root.rows("SELECT StoragePath FROM PostMedia")[0][0].startswith("bale:")
 
 
 async def test_excel_links_are_build_media_url_and_serve_the_file(h: Harness) -> None:
@@ -223,7 +223,7 @@ async def test_excel_links_are_build_media_url_and_serve_the_file(h: Harness) ->
     assert main.sheet_view.rightToLeft and files.sheet_view.rightToLeft
     headers = [cell.value for cell in main[1]]
     assert headers[-2:] == ["فایل ۱", "فایل ۲"]
-    ids = [int(r[0]) for r in h.root.rows("SELECT id FROM PostMedia ORDER BY id")]
+    ids = [int(r[0]) for r in h.root.rows("SELECT Id FROM PostMedia ORDER BY Id")]
     links = [main.cell(row=2, column=len(headers) - 1 + i) for i in range(2)]
     assert [c.value for c in links] == ["مشاهده‌ی فایل ۱", "مشاهده‌ی فایل ۲"]
     assert [c.hyperlink.target for c in links] == [build_media_url(i, h.settings) for i in ids]
@@ -262,15 +262,15 @@ async def test_compress_existing_dry_run_changes_nothing(h: Harness) -> None:
     await h.settle()
     log_file = h.settings.data_path / "compression.json"
     log_file.unlink(missing_ok=True)  # pretend it was stored before compression existed
-    before_rows = h.root.rows("SELECT id, storage_path, file_size, mime_type FROM PostMedia")
+    before_rows = h.root.rows("SELECT Id, StoragePath, FileSize, MimeType FROM PostMedia")
     before_files = {p: p.read_bytes() for p in h.settings.media_root.rglob("*") if p.is_file()}
     code = await module.run(apply=False, settings=h.settings)
     assert code == 0
-    assert h.root.rows("SELECT id, storage_path, file_size, mime_type FROM PostMedia") == before_rows
+    assert h.root.rows("SELECT Id, StoragePath, FileSize, MimeType FROM PostMedia") == before_rows
     assert {p: p.read_bytes() for p in h.settings.media_root.rglob("*") if p.is_file()} == before_files
     assert not log_file.exists()
     if shutil.which("ffmpeg") and shutil.which("ffprobe"):
         assert await module.run(apply=True, settings=h.settings) == 0
         entry = next(iter(__import__("json").loads(log_file.read_text()).values()))
         assert entry["reason"] == "probe_failed"  # fake bytes are not a real video: kept as is
-        assert h.root.rows("SELECT id, storage_path, file_size, mime_type FROM PostMedia") == before_rows
+        assert h.root.rows("SELECT Id, StoragePath, FileSize, MimeType FROM PostMedia") == before_rows

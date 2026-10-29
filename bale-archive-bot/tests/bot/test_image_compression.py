@@ -15,9 +15,9 @@ from tests.bot.harness import GROUP, USER, Harness
 from tests.conftest import EXECUTED_SQL
 
 COMPRESSED_UPDATE = (
-    "UPDATE PostMedia SET storage_path = %s, file_size = %s, "
-    "mime_type = COALESCE(%s, mime_type), width = COALESCE(%s, width), "
-    "height = COALESCE(%s, height) WHERE id = %s"
+    "UPDATE PostMedia SET StoragePath = %s, FileSize = %s, "
+    "MimeType = COALESCE(%s, MimeType), Width = COALESCE(%s, Width), "
+    "Height = COALESCE(%s, Height) WHERE Id = %s"
 )
 
 
@@ -74,7 +74,7 @@ async def test_large_photo_becomes_1920x1440_and_smaller(h: Harness) -> None:
     data = _noisy_jpeg(4000, 3000)
     start = await _save_photo(h, data, 4000, 3000)
     (path, size, width, height, mime), = h.root.rows(
-        "SELECT storage_path, file_size, width, height, mime_type FROM PostMedia"
+        "SELECT StoragePath, FileSize, Width, Height, MimeType FROM PostMedia"
     )
     assert (width, height, mime) == (1920, 1440, "image/jpeg")
     assert size < len(data) and size == Path(path).stat().st_size
@@ -90,7 +90,7 @@ async def test_small_jpeg_is_not_processed_at_all(h: Harness) -> None:
     # Even a quality-100 JPEG ≤ 1920 px is left alone (re-encoding could make it bigger).
     data = _noisy_jpeg(800, 600, quality=100)
     start = await _save_photo(h, data, 800, 600)
-    (path, size, width), = h.root.rows("SELECT storage_path, file_size, width FROM PostMedia")
+    (path, size, width), = h.root.rows("SELECT StoragePath, FileSize, Width FROM PostMedia")
     assert Path(path).read_bytes() == data
     assert (size, width) == (len(data), 800)
     assert _media_writes(start) == []
@@ -101,7 +101,7 @@ async def test_small_jpeg_is_not_processed_at_all(h: Harness) -> None:
 async def test_transparent_png_stays_png(h: Harness) -> None:
     data = _transparent_png(600, 400)
     start = await _save_photo(h, data, 600, 400)
-    (path, mime), = h.root.rows("SELECT storage_path, mime_type FROM PostMedia")
+    (path, mime), = h.root.rows("SELECT StoragePath, MimeType FROM PostMedia")
     assert path.endswith(".png") and mime == "image/png"
     with Image.open(path) as saved:
         assert saved.format == "PNG" and saved.mode == "RGBA"
@@ -116,13 +116,13 @@ async def test_exif_rotation_applied_before_resize(h: Harness) -> None:
     image.save(buffer, "JPEG", quality=100, exif=exif.tobytes())
     data = buffer.getvalue()
     await _save_photo(h, data, 4000, 3000)
-    (width, height), = h.root.rows("SELECT width, height FROM PostMedia")
+    (width, height), = h.root.rows("SELECT Width, Height FROM PostMedia")
     assert (width, height) == (1440, 1920)
 
 
 async def test_broken_picture_keeps_original(h: Harness) -> None:
     start = await _save_photo(h, b"not really a jpeg", 10, 10)
-    (path,), = h.root.rows("SELECT storage_path FROM PostMedia")
+    (path,), = h.root.rows("SELECT StoragePath FROM PostMedia")
     assert Path(path).read_bytes() == b"not really a jpeg"
     assert _media_writes(start) == []
 
@@ -134,21 +134,21 @@ class _RacingConn:
         self.conn = conn
 
     async def execute(self, statement, params=None):  # type: ignore[no-untyped-def]
-        if str(statement).startswith("SELECT 1 FROM PersonGroup"):
-            return await self.conn.execute(text("SELECT 1 FROM Hashtag WHERE id = -1"))
+        if str(statement).startswith("SELECT 1 FROM BaleGroupMembers"):
+            return await self.conn.execute(text("SELECT 1 FROM Hashtags WHERE Id = -1"))
         return await self.conn.execute(statement, params)
 
 
 async def test_ensure_membership_duplicate_insert_is_ignored(h: Harness) -> None:
     group_id = h.register_group()
-    h.root.execute("INSERT INTO Person (firstname, bale_user_id, is_active) VALUES ('x', 9, 1)")
-    (person_id,), = h.root.rows("SELECT id FROM Person")
+    person_id = h.root.add_user(9)
     h.root.execute(
-        "INSERT INTO PersonGroup (person_id, ehya_group_id) VALUES (%s, %s)", (person_id, group_id)
+        "INSERT INTO BaleGroupMembers (UserId, BaleGroupId, IsActive, CreatedAt) VALUES (%s, %s, 1, NOW())",
+        (person_id, group_id),
     )
     async with h.db.tx() as conn:
         await repo.ensure_membership(_RacingConn(conn), person_id, group_id)  # type: ignore[arg-type]
         # the message keeps being processed on the same transaction
         assert await repo.active_hashtags(conn)
         await repo.ensure_membership(conn, person_id, group_id)
-    assert h.count("PersonGroup") == 1
+    assert h.count("BaleGroupMembers") == 1

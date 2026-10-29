@@ -1,8 +1,8 @@
-"""Read-only startup checks (CLAUDE-BOT-FIX.md section 5-11).
+"""Read-only startup checks for the merged schema (CLAUDE-MERGE-SCHEMA.md §3.8).
 
 Runs as the bot's own MySQL user and only reads (information_schema,
-SHOW GRANTS, one COUNT). It never fixes anything: when a check fails it
-prints the exact command the owner has to run as MySQL root.
+SHOW GRANTS, two COUNTs). It never fixes anything: a failed check names the
+exact table/column that is missing so the staff migration can be completed.
 """
 
 from __future__ import annotations
@@ -15,23 +15,19 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from app.config import EXPECTED_DATABASE
+from app.db import repo
+from app.db.schema import (
+    AUTO_INCREMENT,
+    BOT_TABLES,
+    OLD_TABLES,
+    REQUIRED_COLUMNS,
+    REQUIRED_UNIQUE,
+    UNIQUE_NAMES,
+)
 from app.db.session import ensure_utf8mb4
 
-BOT_TABLES = ("Person", "EhyaGroup", "Hashtag", "PersonGroup", "Post", "PostHashtag", "PostMedia")
 ALLOWED_PRIVILEGES = {"SELECT", "INSERT", "UPDATE", "DELETE", "USAGE"}
-
-FIX_CONTENT_TYPE = (
-    "ALTER TABLE Post DROP CHECK CK_Post_content_type;\n"
-    "ALTER TABLE Post ADD CONSTRAINT CK_Post_content_type CHECK (content_type BETWEEN 1 AND 5);"
-)
-FIX_MEDIA_TYPE = (
-    "ALTER TABLE PostMedia DROP CHECK CK_PostMedia_media_type;\n"
-    "ALTER TABLE PostMedia ADD CONSTRAINT CK_PostMedia_media_type CHECK (media_type BETWEEN 1 AND 4);"
-)
-FIX_PERSON_ID = (
-    "SET FOREIGN_KEY_CHECKS=0; ALTER TABLE Person MODIFY id INT NOT NULL AUTO_INCREMENT; "
-    "SET FOREIGN_KEY_CHECKS=1;"
-)
+STAFF_FIX = "باید در اسکریپت ادغام نیرو (با root) اضافه شود؛ ربات خودش ساختار دیتابیس را تغییر نمی‌دهد."
 
 
 @dataclass(slots=True)
@@ -39,11 +35,7 @@ class Check:
     ok: bool
     title: str
     fix: str = ""
-
-
-def _max_allowed(clause: str) -> int | None:
-    numbers = [int(n) for n in re.findall(r"(?<![\w`])\d+(?![\w`])", clause)]
-    return max(numbers) if numbers else None
+    warning: bool = False  # shown, but does not stop the bot
 
 
 def _grant_is_too_wide(line: str, database: str) -> bool:
@@ -60,6 +52,10 @@ def _grant_is_too_wide(line: str, database: str) -> bool:
     return any(name not in ALLOWED_PRIVILEGES for name in names)
 
 
+async def _names(conn: AsyncConnection, sql: str, params: dict[str, object]) -> list[tuple[str, ...]]:
+    return [tuple(str(v) for v in row) for row in await conn.execute(text(sql), params)]
+
+
 async def _run_checks(conn: AsyncConnection, expected_db: str) -> list[Check]:
     checks: list[Check] = []
     current = (await conn.execute(text("SELECT DATABASE()"))).scalar()
@@ -73,65 +69,82 @@ async def _run_checks(conn: AsyncConnection, expected_db: str) -> list[Check]:
         )
         return checks
     checks.append(Check(True, f"دیتابیس {expected_db} در دسترس است."))
+    db = {"db": expected_db}
 
-    rows = await conn.execute(
-        text("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db"),
-        {"db": expected_db},
-    )
-    present = {str(row[0]) for row in rows}
-    missing = [name for name in BOT_TABLES if name not in present]
-    if missing:
+    present = {
+        row[0]
+        for row in await _names(
+            conn, "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db", db
+        )
+    }
+    missing_tables = [name for name in BOT_TABLES if name not in present]
+    if missing_tables:
         checks.append(
             Check(
                 False,
-                "این جدول‌ها پیدا نشدند یا کاربر balebot به آن‌ها دسترسی ندارد: "
-                + "، ".join(missing),
-                "اسکیمای نیروی انسانی را (با root) روی Bale_Archive برگردانید و دسترسی بدهید:\n"
-                "GRANT SELECT, INSERT, UPDATE, DELETE ON Bale_Archive.* TO 'balebot'@'localhost';",
+                "این جدول‌ها پیدا نشدند (یا کاربر ربات به آن‌ها دسترسی ندارد): "
+                + "، ".join(missing_tables),
+                STAFF_FIX
+                + "\nGRANT SELECT, INSERT, UPDATE, DELETE ON Bale_Archive.* TO 'balebot'@'localhost';",
             )
         )
         return checks
-    checks.append(Check(True, "هر ۷ جدول ربات وجود دارند."))
+    checks.append(Check(True, f"هر {len(BOT_TABLES)} جدول ربات وجود دارند: " + "، ".join(BOT_TABLES)))
 
-    constraints = await conn.execute(
-        text(
-            "SELECT CONSTRAINT_NAME, CHECK_CLAUSE FROM information_schema.CHECK_CONSTRAINTS "
-            "WHERE CONSTRAINT_SCHEMA = :db AND CONSTRAINT_NAME IN "
-            "('CK_Post_content_type', 'CK_PostMedia_media_type')"
-        ),
-        {"db": expected_db},
+    columns = await _names(
+        conn,
+        "SELECT TABLE_NAME, COLUMN_NAME, EXTRA FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = :db",
+        db,
     )
-    clauses = {str(row[0]): str(row[1]) for row in constraints}
-    for name, needed, fix, label in (
-        ("CK_Post_content_type", 5, FIX_CONTENT_TYPE, "content_type"),
-        ("CK_PostMedia_media_type", 4, FIX_MEDIA_TYPE, "media_type"),
-    ):
-        clause = clauses.get(name)
-        top = _max_allowed(clause) if clause is not None else None
-        if clause is None or (top is not None and top >= needed):
-            checks.append(Check(True, f"قید {label} تا {needed} باز است."))
-        else:
-            checks.append(
-                Check(
-                    False,
-                    f"قید {label} هنوز فقط تا {top} اجازه می‌دهد (باید تا {needed} باشد).",
-                    fix,
-                )
-            )
-
-    extra = (
-        await conn.execute(
-            text(
-                "SELECT EXTRA FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :db "
-                "AND TABLE_NAME = 'Person' AND COLUMN_NAME = 'id'"
-            ),
-            {"db": expected_db},
+    have = {(table, column) for table, column, _ in columns}
+    extra = {(table, column): flags for table, column, flags in columns}
+    missing_columns = [
+        f"{table}.{column}"
+        for table, wanted in REQUIRED_COLUMNS.items()
+        for column in wanted
+        if (table, column) not in have
+    ]
+    if missing_columns:
+        checks.append(
+            Check(False, "این ستون‌ها پیدا نشدند: " + "، ".join(missing_columns), STAFF_FIX)
         )
-    ).scalar()
-    if extra and "auto_increment" in str(extra).lower():
-        checks.append(Check(True, "Person.id خودکار (AUTO_INCREMENT) است."))
+        return checks
+    checks.append(Check(True, "همه‌ی ستون‌های لازم هستند (از جمله Posts.UserNote و Posts.Source)."))
+
+    not_auto = [
+        f"{table}.{column}"
+        for table, column in AUTO_INCREMENT
+        if "auto_increment" not in extra.get((table, column), "").lower()
+    ]
+    if not_auto:
+        checks.append(
+            Check(False, "این شناسه‌ها خودکار (AUTO_INCREMENT) نیستند: " + "، ".join(not_auto), STAFF_FIX)
+        )
     else:
-        checks.append(Check(False, "Person.id هنوز خودکار (AUTO_INCREMENT) نیست.", FIX_PERSON_ID))
+        checks.append(Check(True, "شناسه‌های Users/BaleGroups/Posts/PostMedia خودکار هستند."))
+
+    index_rows = await _names(
+        conn,
+        "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM information_schema.STATISTICS "
+        "WHERE TABLE_SCHEMA = :db AND NON_UNIQUE = 0 ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX",
+        db,
+    )
+    unique_sets: dict[tuple[str, str], list[str]] = {}
+    for table, index, column in index_rows:
+        unique_sets.setdefault((table, index), []).append(column)
+    missing_unique = []
+    for table, cols in REQUIRED_UNIQUE:
+        found = any(t == table and set(c) == set(cols) for (t, _), c in unique_sets.items())
+        if not found:
+            label = UNIQUE_NAMES.get((table, cols), "UNIQUE")
+            missing_unique.append(f"{label} روی {table}({', '.join(cols)})")
+    if missing_unique:
+        checks.append(Check(False, "این یکتاها نیستند: " + "، ".join(missing_unique), STAFF_FIX))
+    else:
+        checks.append(
+            Check(True, "یکتاها درست‌اند (UQ_Post_BaleMsg، Users.BaleChatId، Users.Username، …).")
+        )
 
     grants = [str(row[0]) for row in await conn.execute(text("SHOW GRANTS FOR CURRENT_USER()"))]
     too_wide = [line for line in grants if _grant_is_too_wide(line, expected_db)]
@@ -153,17 +166,30 @@ async def _run_checks(conn: AsyncConnection, expected_db: str) -> list[Check]:
             Check(True, "کاربر ربات نمی‌تواند جدول بسازد (فقط SELECT, INSERT, UPDATE, DELETE).")
         )
 
-    active = int(
-        (await conn.execute(text("SELECT COUNT(*) FROM Hashtag WHERE is_active = 1"))).scalar_one()
-    )
-    if active:
-        checks.append(Check(True, f"{active} هشتگ فعال هست."))
+    hashtags = await repo.count_active_hashtags(conn)
+    if hashtags:
+        checks.append(Check(True, f"{hashtags} هشتگ فعال در Hashtags هست."))
     else:
         checks.append(
+            Check(False, "هیچ هشتگ فعالی در جدول Hashtags نیست (IsActive = 1).", STAFF_FIX)
+        )
+    units = await repo.count_active_org_units(conn)
+    if units:
+        checks.append(Check(True, f"{units} واحد سازمانی فعال در OrgUnits هست."))
+    else:
+        checks.append(
+            Check(False, "هیچ واحد سازمانی فعالی در جدول OrgUnits نیست (IsActive = 1).", STAFF_FIX)
+        )
+
+    leftovers = [name for name in OLD_TABLES if name in present]
+    if leftovers:
+        checks.append(
             Check(
-                False,
-                "هیچ هشتگ فعالی در جدول Hashtag نیست.",
-                "INSERT INTO Hashtag (name, is_active) VALUES ('یادگیری', 1);",
+                True,
+                "هشدار: جدول‌های قدیمی هنوز با نام قبلی هستند: "
+                + "، ".join(leftovers)
+                + " — ربات از آن‌ها استفاده نمی‌کند (باید zz_old_ شوند).",
+                warning=True,
             )
         )
     return checks
@@ -191,9 +217,10 @@ async def run_preflight(database_url: str, expected_db: str = EXPECTED_DATABASE)
 def format_report(checks: list[Check]) -> str:
     lines = ["بررسی پیش از شروع (preflight):"]
     for check in checks:
-        lines.append(("✅ " if check.ok else "❌ ") + check.title)
+        mark = "⚠️ " if check.warning else ("✅ " if check.ok else "❌ ")
+        lines.append(mark + check.title)
         if not check.ok and check.fix:
-            lines.append("   دستوری که باید (با root در MySQL) اجرا کنید:")
+            lines.append("   کاری که باید انجام شود:")
             lines.extend("   " + part for part in check.fix.splitlines())
     if all(check.ok for check in checks):
         lines.append("همه چیز درست است.")

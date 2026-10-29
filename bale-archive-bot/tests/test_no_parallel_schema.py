@@ -1,6 +1,7 @@
-"""Guard tests (CLAUDE-FEATURES-SAFE.md section 3): no parallel schema, ever.
+"""Guard tests: no parallel schema, ever (CLAUDE-FEATURES-SAFE.md §3, CLAUDE-MERGE-SCHEMA.md §3.9).
 
-The bot may only read/write rows in the 7 staff tables of Bale_Archive.
+The bot may only read/write rows in the 8 tables of the merged Bale_Archive
+schema; it never runs DDL; it never updates Users except BaleUsername.
 """
 
 from __future__ import annotations
@@ -12,7 +13,11 @@ from pathlib import Path
 from tests.conftest import EXECUTED_SQL
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWED_TABLES = {"Person", "EhyaGroup", "Hashtag", "PersonGroup", "Post", "PostHashtag", "PostMedia"}
+ALLOWED_TABLES = {
+    "Users", "BaleGroups", "BaleGroupMembers", "Hashtags", "Posts", "PostHashtags", "PostMedia",
+    "OrgUnits",
+}  # fmt: skip
+OLD_TABLE_NAMES = ("Person", "EhyaGroup", "PersonGroup", "Hashtag", "Post", "PostHashtag")
 
 FORBIDDEN = [
     re.compile(r"CREATE\s+(TABLE|DATABASE|SCHEMA|INDEX|VIEW|TEMPORARY)", re.IGNORECASE),
@@ -21,10 +26,15 @@ FORBIDDEN = [
     re.compile(r"TRUNCATE", re.IGNORECASE),
     re.compile(r"RENAME\s+TABLE", re.IGNORECASE),
     re.compile(r"alembic|create_all|drop_all|metadata\.create|Base\.metadata|sqlite", re.IGNORECASE),
+    # Old parallel tables («users» is now the official Users table, so it is allowed).
     re.compile(
-        r"(FROM|JOIN|INTO|UPDATE|TABLE)\s+[`\"]?(users|groups|tags|submissions|submission_tags|"
+        r"(FROM|JOIN|INTO|UPDATE|TABLE)\s+[`\"]?(groups|tags|submissions|submission_tags|"
         r"media_files|conversation_states|processed_updates|outbox|audit_log|app_settings)\b",
         re.IGNORECASE,
+    ),
+    # Pre-merge staff table names (case-sensitive: «Posts», «Hashtags» … are the new ones).
+    re.compile(
+        r"(FROM|JOIN|INTO|UPDATE|TABLE)\s+[`\"]?(Person|EhyaGroup|PersonGroup|Hashtag|Post|PostHashtag)\b"
     ),
 ]
 
@@ -104,3 +114,34 @@ def test_recorded_sql_has_no_ddl_and_only_the_seven_tables() -> None:
     tables -= {"information_schema"}
     unknown = {t for t in tables if t not in ALLOWED_TABLES}
     assert unknown == set(), unknown
+
+
+def test_bot_never_updates_users_except_bale_username() -> None:
+    """Users is shared with the staff system: only a NULL BaleUsername may be filled."""
+    updates = [s for s in EXECUTED_SQL if re.match(r"\s*UPDATE\s+[`\"]?Users\b", s, re.IGNORECASE)]
+    assert updates, "the suite should have exercised the BaleUsername fill"
+    for statement in updates:
+        assignments = re.search(r"\bSET\b(.*?)\bWHERE\b", statement, re.IGNORECASE | re.DOTALL)
+        assert assignments is not None, statement
+        columns = {part.split("=")[0].strip() for part in assignments.group(1).split(",")}
+        assert columns == {"BaleUsername"}, statement
+
+
+def test_old_table_names_never_reach_the_database() -> None:
+    tables = {name for s in EXECUTED_SQL for name in TABLE_REF.findall(s)}
+    assert not tables & set(OLD_TABLE_NAMES)
+
+
+def test_sql_table_names_only_inside_the_db_layer() -> None:
+    """One repository layer: no table name in SQL text outside app/db/."""
+    pattern = re.compile(
+        r"\b(FROM|JOIN|INTO|UPDATE)\s+[`\"]?(" + "|".join(sorted(ALLOWED_TABLES)) + r")\b"
+    )
+    offenders = []
+    for path in sorted((ROOT / "app").rglob("*.py")):
+        if (ROOT / "app" / "db") in path.parents:
+            continue
+        body = path.read_text(encoding="utf-8")
+        offenders += [f"{path.relative_to(ROOT)}: {m.group(0)}" for m in pattern.finditer(body)]
+    assert offenders == []
+

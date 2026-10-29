@@ -43,6 +43,9 @@ class WizardSession:
     private_extra_ids: list[int] = field(default_factory=list)
     # Group hint shown when the private chat could not be opened.
     hint_message_id: int | None = None
+    # Optional «📝 توضیحات» (Posts.UserNote) and the bot message it must reply to.
+    note: str | None = None
+    note_prompt_id: int | None = None
     created_at: float = field(default_factory=time.monotonic)
     reminded: bool = False
 
@@ -85,6 +88,13 @@ class WizardStore:
     def find_by_origin(self, chat_id: int, message_id: int) -> WizardSession | None:
         for session in self._by_sid.values():
             if session.origin_chat_id == chat_id and message_id in session.origin_message_ids:
+                return session
+        return None
+
+    def find_by_note_prompt(self, chat_id: int, message_id: int) -> WizardSession | None:
+        """The wizard whose «write your note» message has this id (in the sender's chat)."""
+        for session in self._by_sid.values():
+            if session.note_prompt_id == message_id and session.user_id == chat_id:
                 return session
         return None
 

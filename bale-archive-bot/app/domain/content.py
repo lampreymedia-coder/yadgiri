@@ -1,7 +1,7 @@
 """Bot-side content kinds produced by :mod:`app.domain.classify`.
 
 These are only labels inside the program. What is written to the database
-(``Post.content_type`` / ``PostMedia.media_type``) comes from
+(``Posts.ContentType`` / ``PostMedia.MediaType``) comes from
 :mod:`app.mapping`.
 """
 

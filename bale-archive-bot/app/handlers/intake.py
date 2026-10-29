@@ -1,11 +1,11 @@
-"""Group messages → (maybe) a wizard. Never writes Post rows.
+"""Group messages → (maybe) a wizard. Never writes Posts rows.
 
 Rules (CLAUDE-BOT-FIX.md sections 3 and 5):
 * The archive group (ARCHIVE_CHAT_ID) is ignored completely.
-* A group that is not in EhyaGroup with is_active = 1 gets total silence:
+* A group that is not in BaleGroups with IsActive = 1 gets total silence:
   no message, no database write, no deletion.
-* In a registered group the sender gets a Person row (found by bale_user_id)
-  and a PersonGroup row; the content itself is only held in memory until
+* In a registered group the sender gets a Users row (found by BaleChatId)
+  and a BaleGroupMembers row; the content itself is only held in memory until
   the sender confirms in the wizard.
 """
 
@@ -59,7 +59,7 @@ def display_name(message: Message) -> str:
 
 
 def content_text(messages: list[Message]) -> str:
-    """Post.content_text: text or caption; '' for media without a caption."""
+    """Posts.Body: text or caption; '' for media without a caption."""
     for message in messages:
         for value in (message.text, message.caption):
             if value and value.strip():

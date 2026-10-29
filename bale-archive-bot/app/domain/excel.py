@@ -35,8 +35,9 @@ HEADERS = [
     "هشتگ‌ها",
     "تعداد فایل",
     "متن",
+    "توضیحات",
 ]
-WIDTHS = [10, 18, 18, 26, 14, 22, 12, 30, 10, 60]
+WIDTHS = [10, 18, 18, 26, 14, 22, 12, 30, 10, 60, 40]
 FILE_HEADERS = [
     "شماره پست",
     "تاریخ (شمسی)",
@@ -108,6 +109,7 @@ def build_workbook(
                 row.hashtags,
                 row.files,
                 row.content_text,
+                row.user_note,
             ]
         )
         for index, item in enumerate(media.get(row.post_id, []), start=1):

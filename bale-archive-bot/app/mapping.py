@@ -3,14 +3,14 @@
 اگر نیروی انسانی کدها را عوض کرد، فقط همین فایل را عوض کنید.
 (بخش ۵-۱ و ۵-۲ فایل CLAUDE-BOT-FIX.md)
 
-Post.content_type:
+Posts.ContentType:
     1 متن (شامل لینک)
     2 تصویر و آلبوم تصویر
     3 ویدیو (کلیپ و انیمیشن)
     4 صوت (فایل صوتی و پیام صوتی)
     5 سند و فایل
 
-PostMedia.media_type:
+PostMedia.MediaType:
     1 تصویر
     2 ویدیو
     3 صوت
@@ -32,7 +32,7 @@ MEDIA_VIDEO = 2
 MEDIA_AUDIO = 3
 MEDIA_DOCUMENT = 4
 
-# Bot content kind → Post.content_type. Kinds missing here are not archivable.
+# Bot content kind → Posts.ContentType. Kinds missing here are not archivable.
 POST_CONTENT_TYPE: dict[ContentType, int] = {
     ContentType.TEXT: POST_TEXT,
     ContentType.LINK: POST_TEXT,
@@ -46,7 +46,7 @@ POST_CONTENT_TYPE: dict[ContentType, int] = {
     ContentType.DOCUMENT: POST_DOCUMENT,
 }
 
-# Bot content kind of one file → PostMedia.media_type.
+# Bot content kind of one file → PostMedia.MediaType.
 MEDIA_TYPE: dict[ContentType, int] = {
     ContentType.IMAGE: MEDIA_IMAGE,
     ContentType.VIDEO: MEDIA_VIDEO,
@@ -56,7 +56,7 @@ MEDIA_TYPE: dict[ContentType, int] = {
     ContentType.DOCUMENT: MEDIA_DOCUMENT,
 }
 
-# Persian labels for reports (keyed by Post.content_type code).
+# Persian labels for reports (keyed by Posts.ContentType code).
 POST_CONTENT_LABELS: dict[int, str] = {
     POST_TEXT: "متن",
     POST_IMAGE: "تصویر",

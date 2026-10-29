@@ -3,7 +3,9 @@
 # نصب و به‌روزرسانی ربات آرشیو بله روی Ubuntu 24.04 — با یک دستور.
 #
 #   sudo bash /opt/balebot/src/bale-archive-bot/scripts/deploy.sh
+#   sudo bash /opt/balebot/src/bale-archive-bot/scripts/deploy.sh --branch claude/merged-schema
 #
+# بدون --branch همان شاخه‌ای که الان نصب است به‌روز می‌شود.
 # چند بار اجرا کردنش بی‌خطر است (برای به‌روزرسانی هم همین را بزنید).
 # این اسکریپت هیچ دیتابیس یا جدولی نمی‌سازد و چیزی از دیتابیس را تغییر نمی‌دهد؛
 # فقط پشتیبان می‌گیرد (mysqldump) و بررسی فقط‌خواندنی (preflight) انجام می‌دهد.
@@ -19,7 +21,16 @@ if [[ -z "${BALEBOT_DEPLOY_COPY:-}" && -f "$0" ]]; then
 fi
 
 REPO_URL="${REPO_URL:-https://github.com/lampreymedia-coder/yadgiri.git}"
-BRANCH="${BRANCH:-claude/magical-tesla-sb2d7n}"
+DEFAULT_BRANCH="claude/magical-tesla-sb2d7n"
+# Branch: --branch <name> > BRANCH env > the branch already installed > default.
+ARG_BRANCH=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --branch) ARG_BRANCH="${2:-}"; shift 2 ;;
+    --branch=*) ARG_BRANCH="${1#--branch=}"; shift ;;
+    *) echo "گزینه‌ی ناشناخته: $1 (فقط --branch <نام شاخه>)" >&2; exit 2 ;;
+  esac
+done
 BASE=/opt/balebot
 SRC="$BASE/src"
 APP_DIR="$SRC/bale-archive-bot"
@@ -30,6 +41,14 @@ ENV_FILE="$ENV_DIR/balebot.env"
 SERVICE=balebot
 MIRROR="${PIP_MIRROR:-https://mirror-pypi.runflare.com/simple}"
 MIRROR_HOST="$(printf '%s' "$MIRROR" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')"
+
+INSTALLED_BRANCH=""
+if [[ -d "$SRC/.git" ]]; then
+  INSTALLED_BRANCH="$(git -C "$SRC" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+  [[ "$INSTALLED_BRANCH" == "HEAD" ]] && INSTALLED_BRANCH=""
+fi
+BRANCH="${ARG_BRANCH:-${BRANCH:-${INSTALLED_BRANCH:-$DEFAULT_BRANCH}}}"
+[[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "نام شاخه معتبر نیست: $BRANCH" >&2; exit 2; }
 
 step() { echo; echo "==> $*"; }
 fail() { echo; echo "❌ $*" >&2; exit 1; }
@@ -68,6 +87,9 @@ install -d -o balebot -g balebot -m 750 "$DATA_DIR" "$DATA_DIR/media"
 install -d -o balebot -g balebot -m 700 "$ENV_DIR"
 install -d -m 755 "$BASE"
 
+if [[ -n "$INSTALLED_BRANCH" && "$INSTALLED_BRANCH" != "$BRANCH" ]]; then
+  echo "↪ تغییر شاخه: $INSTALLED_BRANCH → $BRANCH"
+fi
 step "۳) آوردن کد از شاخه‌ی $BRANCH"
 if [[ -d "$SRC/.git" ]]; then
   git -C "$SRC" fetch -q --depth 1 origin "$BRANCH"
@@ -88,7 +110,7 @@ if [[ -z "${BALEBOT_DEPLOY_RELOADED:-}" ]] && ! cmp -s "$0" "$APP_DIR/scripts/de
   echo "↻ deploy.sh تازه شد؛ از اول با نسخه‌ی جدید اجرا می‌شود."
   fresh="$(mktemp /tmp/balebot-deploy.XXXXXX.sh)"
   cp "$APP_DIR/scripts/deploy.sh" "$fresh"
-  BALEBOT_DEPLOY_COPY=1 BALEBOT_DEPLOY_RELOADED=1 exec bash "$fresh" "$@"
+  BALEBOT_DEPLOY_COPY=1 BALEBOT_DEPLOY_RELOADED=1 exec bash "$fresh" --branch "$BRANCH"
 fi
 
 step "۴) محیط پایتون و بسته‌ها (از آینه‌ی $MIRROR_HOST)"

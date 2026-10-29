@@ -52,7 +52,7 @@ async def test_add_admin_by_picking_from_person(h: Harness) -> None:
     assert any("علی" in label for label in labels)
     await h.press(OWNER, "pa", "apa", str(USER["id"]))
     assert h.ctx.is_admin(USER["id"])
-    assert h.count("Person") == 1  # nothing written to the database for admins
+    assert h.count("Users") == 1  # nothing written to the database for admins
 
 
 async def test_transfer_ownership(h: Harness) -> None:

@@ -99,6 +99,11 @@ class Dispatcher:
     async def _on_message(self, message: Message) -> None:
         if message.from_user is None or message.from_user.is_bot:
             return
+        # A reply to «write your note»: becomes Posts.UserNote, is never archived itself.
+        if message.reply_to_message is not None and await wizard.handle_note_reply(
+            self.ctx, message
+        ):
+            return
         if message.is_private_message:
             await self._on_private(message)
             return
@@ -173,9 +178,9 @@ class Dispatcher:
             return
         chat_id = cq.message.chat.id if cq.message is not None else None
         logger.info("callback_received", action=data.action, actor=cq.from_user.id, chat_id=chat_id)
-        if data.action == admin.ACT_LEVEL:
+        if data.action in admin.REGISTER_ACTIONS:
             # Registration must work in a group that is not registered yet.
-            await admin.handle_level_callback(self.ctx, cq, data.sid, data.arg)
+            await admin.handle_register_callback(self.ctx, cq, data.action, data.sid, data.arg)
             return
         if data.action == user_menu.ACT_UNDO:
             async with self.ctx.user_locks.get(("undo", cq.from_user.id)):

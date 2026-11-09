@@ -26,7 +26,7 @@ from app.domain.reports import (
     today_range,
     top_people,
 )
-from app.handlers.org_units import unit_label, unit_rows
+from app.handlers import org_units as picker
 from app.i18n import fa
 from app.observability.logging import get_logger
 from app.timeutil import tehran_now
@@ -336,27 +336,18 @@ async def _report_callback(
 async def _group_screen(
     ctx: BotContext, chat_id: int, actor: int, message_id: int | None, screen: str, arg: str
 ) -> None:
-    """grs = show; gro = pick unit (arg id:page); gru = set unit (id:unit); grt = (de)activate."""
+    """grs = show; gro = unit picker (id:<picker arg>); gru = set unit (id:unit); grt = (de)activate."""
     group_part, _, value = arg.partition(":")
     if not group_part.isdigit():
         return
     group_id = int(group_part)
     if screen == "gro":
-        async with ctx.db.tx() as conn:
-            units = await repo.active_org_units(conn)
-            group = await repo.get_group_by_id(conn, group_id)
-        page = int(value) if value.isdigit() else 1
-        rows = unit_rows(
-            units,
-            page,
-            pick=lambda unit: btn(
-                unit_label(unit, group.org_unit_id if group else None), "gru", f"{group_id}:{unit.id}"
-            ),
-            turn=lambda target, label: btn(label, "gro", f"{group_id}:{target}"),
-        )
-        rows.append(back("gr"))
-        await show(ctx, chat_id, message_id, fa.PICK_GROUP_UNIT if units else fa.NO_ORG_UNITS, rows)
-        return
+        parg = "m" if not value or value.isdigit() else value
+        if not parg.startswith("k:"):
+            await _group_unit_picker(ctx, chat_id, actor, message_id, group_id, parg)
+            return
+        screen, value = "gru", parg[2:]  # confirmed on the picker's confirm page
+        ctx.unit_pickers.pop((picker.HOST_PANEL, str(group_id), chat_id), None)
     async with ctx.db.tx() as conn:
         if screen == "gru" and value.isdigit():
             if await repo.get_active_org_unit(conn, int(value)) is not None:
@@ -383,8 +374,41 @@ async def _group_screen(
         if group.is_active
         else btn(fa.BTN_GROUP_ENABLE, "grt", f"{group_id}:1")
     )
-    rows = [[btn(fa.BTN_GROUP_UNIT, "gro", f"{group_id}:1")], [toggle], back("gr")]
+    rows = [[btn(fa.BTN_GROUP_UNIT, "gro", f"{group_id}:m")], [toggle], back("gr")]
     await show(ctx, chat_id, message_id, body, rows)
+
+
+async def _group_unit_picker(
+    ctx: BotContext, chat_id: int, actor: int, message_id: int | None, group_id: int, parg: str
+) -> None:
+    """The same unit picker as /register (search, tree, suggestions, recent)."""
+    st = picker.get_state(ctx, picker.HOST_PANEL, str(group_id), chat_id)
+    if st is None or parg == "m":
+        async with ctx.db.tx() as conn:
+            group = await repo.get_group_by_id(conn, group_id)
+        if group is None:
+            return
+        index = await ctx.org_units.get(ctx.db)
+        if not index.active:
+            await show(ctx, chat_id, message_id, fa.NO_ORG_UNITS, [back("grs")])
+            return
+        st = picker.open_state(
+            ctx,
+            picker.PickerState(
+                host=picker.HOST_PANEL,
+                sid=str(group_id),
+                chat_id=chat_id,
+                user_id=actor,
+                title=group.name,
+                heading=fa.PICK_GROUP_UNIT,
+                current=group.org_unit_id,
+                exit_row=[btn(fa.BTN_PANEL_BACK, "grs", str(group_id))],
+            ),
+        )
+    if parg == "f":
+        await picker.ask_search(ctx, st, message_id)
+    else:
+        await picker.show(ctx, st, parg, message_id)
 
 
 async def _pending_text(ctx: BotContext) -> str:

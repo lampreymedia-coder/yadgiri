@@ -68,9 +68,15 @@ async def test_group_report_unit_and_disable(h: Harness) -> None:
     await h.private(ADMIN, "/panel")
     await h.press(ADMIN, "pa", "grs", str(group_id), message_id=panel_id(h))
     assert "کل ثبت‌ها: ۲" in last_text(h, ADMIN_ID) and "واحد سازمانی: واحد 03" in last_text(h, ADMIN_ID)
-    await h.press(ADMIN, "pa", "gro", f"{group_id}:1", message_id=panel_id(h))
+    await h.press(ADMIN, "pa", "gro", f"{group_id}:m", message_id=panel_id(h))
+    assert "فعلی: ستاد مرکزی › واحد 03" in last_text(h, ADMIN_ID)
+    await h.press(ADMIN, "pa", "gro", f"{group_id}:n:1:1", message_id=panel_id(h))
     labels = h.fake.markup_labels(h.fake.last_markup(ADMIN_ID))
-    assert any(label.startswith("✅ واحد 03") for label in labels)
+    assert "✅ واحد 03" in labels
+    await h.press(ADMIN, "pa", "gro", f"{group_id}:s:6", message_id=panel_id(h))
+    assert h.root.rows("SELECT OrgUnitId FROM BaleGroups") == [(3,)]  # confirm page only
+    await h.press(ADMIN, "pa", "gro", f"{group_id}:k:6", message_id=panel_id(h))
+    assert h.root.rows("SELECT OrgUnitId FROM BaleGroups") == [(6,)]
     await h.press(ADMIN, "pa", "gru", f"{group_id}:6", message_id=panel_id(h))
     await h.press(ADMIN, "pa", "gru", f"{group_id}:11", message_id=panel_id(h))  # inactive unit: ignored
     await h.press(ADMIN, "pa", "grt", f"{group_id}:0", message_id=panel_id(h))

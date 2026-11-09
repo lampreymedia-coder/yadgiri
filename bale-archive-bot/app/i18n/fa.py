@@ -169,6 +169,48 @@ REGISTER_ONLY_ADMIN = "فقط مدیر ربات می‌تواند این کار 
 REGISTER_ARCHIVE_REFUSED = "این گروه، گروه آرشیو است و ثبت نمی‌شود."
 REGISTER_IN_GROUP_ONLY = "این دستور را داخل همان گروه بزنید."
 UNREGISTER_NOT_FOUND = "این گروه ثبت نشده یا از قبل غیرفعال است."
+REGISTER_UNIT_NOT_FOUND = "واحدی با این شماره پیدا نشد یا فعال نیست. /register را بدون عدد بزنید و جست‌وجو کنید."
+
+# ─── Organisational unit picker (search, tree, suggestions, recent) ───
+
+BTN_UNIT_SEARCH = "🔎 جست‌وجو"
+BTN_UNIT_TREE = "🌳 مرور درختی"
+BTN_UNIT_SUGGEST = "💡 پیشنهادها"
+BTN_UNIT_RECENT = "🕘 اخیر"
+BTN_UNIT_SEARCH_AGAIN = "🔎 جست‌وجوی دوباره"
+BTN_UNIT_CONFIRM = "✅ تأیید"
+BTN_UNIT_BACK = "↩️ بازگشت"
+BTN_UNIT_PICK_THIS = "✅ انتخاب همین واحد"
+BTN_UNIT_UP = "⬆️ بالا"
+BTN_UNIT_NEXT = "◀️ بعدی"
+BTN_UNIT_PREV = "قبلی ▶️"
+UNIT_SEARCH_PROMPT = "بخشی از نام واحد را در پاسخ (Reply) به همین پیام بنویسید."
+UNIT_SEARCH_TOO_SHORT = "حداقل ۲ حرف بنویسید و دوباره در پاسخ به همین پیام بفرستید."
+UNIT_NOTHING_FOUND = "چیزی پیدا نشد."
+UNIT_TREE_ROOTS = "🌳 واحدهای اصلی:"
+UNIT_SUGGEST_TITLE = "💡 پیشنهاد بر اساس نام گروه:"
+UNIT_RECENT_TITLE = "🕘 واحدهایی که اخیراً انتخاب شده‌اند:"
+UNIT_PICKER_EXPIRED = "این فهرست قدیمی است؛ دوباره /register بزنید."
+
+
+def unit_search_results(query: str, total: int, page: int, pages: int, crowded: bool) -> str:
+    lines = [f"🔎 «{query}»: {fa_digits(total)} نتیجه"]
+    if pages > 1:
+        lines[0] += f" (صفحه‌ی {fa_digits(page)} از {fa_digits(pages)})"
+    if crowded:
+        lines.append(
+            f"{fa_digits(total)} نتیجه؛ برای دقیق‌تر شدن، نام واحد بالاتر را هم بنویسید "
+            "(مثلاً: نگاشت کنترل بلوغ)"
+        )
+    return "\n".join(lines)
+
+
+def unit_tree_here(path: str) -> str:
+    return f"🌳 مسیر فعلی: {path}"
+
+
+def unit_confirm(path: str, level_no: int) -> str:
+    return f"واحد انتخاب‌شده:\n{path}\n(سطح {fa_digits(level_no)})\n\nتأیید می‌کنید؟"
 
 
 def register_done(name: str, unit_name: str) -> str:

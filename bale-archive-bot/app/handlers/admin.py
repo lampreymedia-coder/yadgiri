@@ -8,21 +8,19 @@ Admin actions are recorded only in the log file.
 from __future__ import annotations
 
 from app.bale.errors import BaleAPIError, NetworkError
-from app.bale.keyboards import button, keyboard
-from app.bale.models import CallbackQuery, InlineKeyboardMarkup, Message
+from app.bale.models import CallbackQuery, Message
 from app.core.context import BotContext
 from app.db import repo
 from app.domain.reports import build_report
-from app.handlers.org_units import unit_label, unit_rows
+from app.handlers import org_units as picker
 from app.i18n import fa
 from app.observability.logging import get_logger
 
 logger = get_logger(__name__)
 
-# callback_data: 1|ou|<group chat id>|<OrgUnits.Id>   and   1|op|<group chat id>|<page>
-ACT_UNIT = "ou"
-ACT_UNIT_PAGE = "op"
-REGISTER_ACTIONS = {ACT_UNIT, ACT_UNIT_PAGE}
+# callback_data: 1|ou|<group chat id>|<picker arg>  (see app/handlers/org_units.py)
+ACT_UNIT = picker.ACT_REGISTER_UNIT
+REGISTER_ACTIONS = {ACT_UNIT}
 
 
 async def _send(ctx: BotContext, chat_id: int, text: str, **kwargs: object) -> None:
@@ -32,23 +30,26 @@ async def _send(ctx: BotContext, chat_id: int, text: str, **kwargs: object) -> N
         logger.warning("admin_send_failed", chat_id=chat_id, error=str(exc))
 
 
-def unit_keyboard(chat_id: int, units: list[repo.OrgUnitRow], page: int = 1) -> InlineKeyboardMarkup:
-    """The group id rides in callback_data, so the tap works even without cq.message."""
-    sid = str(chat_id)
-    return keyboard(
-        unit_rows(
-            units,
-            page,
-            pick=lambda unit: button(unit_label(unit), ACT_UNIT, sid, str(unit.id)),
-            turn=lambda target, label: button(label, ACT_UNIT_PAGE, sid, str(target)),
-        )
+def _register_state(ctx: BotContext, chat_id: int, actor: int, title: str) -> picker.PickerState:
+    return picker.open_state(
+        ctx,
+        picker.PickerState(
+            host=picker.HOST_REGISTER,
+            sid=str(chat_id),
+            chat_id=chat_id,
+            user_id=actor,
+            title=title,
+            heading=fa.REGISTER_PICK_UNIT,
+        ),
     )
 
 
 # ─── Group commands ───
 
 
-async def handle_group_command(ctx: BotContext, message: Message, command: str) -> None:
+async def handle_group_command(
+    ctx: BotContext, message: Message, command: str, args: list[str] | None = None
+) -> None:
     """/register and /unregister inside a group. Non-admins get silence."""
     assert message.from_user is not None
     actor = message.from_user.id
@@ -59,18 +60,20 @@ async def handle_group_command(ctx: BotContext, message: Message, command: str) 
         await _send(ctx, chat_id, fa.REGISTER_ARCHIVE_REFUSED, is_group=True)
         return
     if command == "register":
-        async with ctx.db.tx() as conn:
-            units = await repo.active_org_units(conn)
-        if not units:
+        index = await ctx.org_units.get(ctx.db)
+        if not index.active:
             await _send(ctx, chat_id, fa.NO_ORG_UNITS, is_group=True)
             return
-        await _send(
-            ctx,
-            chat_id,
-            fa.REGISTER_PICK_UNIT,
-            reply_markup=unit_keyboard(chat_id, units),
-            is_group=True,
-        )
+        st = _register_state(ctx, chat_id, actor, message.chat.title or "")
+        parg = "m"
+        if args:
+            # /register <Id>: straight to the confirm page.
+            raw = args[0].strip().translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+            if not raw.isdigit() or index.get(int(raw)) is None:
+                await _send(ctx, chat_id, fa.REGISTER_UNIT_NOT_FOUND, is_group=True)
+                return
+            parg = f"s:{raw}"
+        await picker.show(ctx, st, parg, None)
         logger.info("admin_action", action="register_started", actor=actor, chat_id=chat_id)
         return
     if command == "unregister":
@@ -89,7 +92,7 @@ async def handle_group_command(ctx: BotContext, message: Message, command: str) 
 async def handle_register_callback(
     ctx: BotContext, cq: CallbackQuery, action: str, sid: str, arg: str
 ) -> None:
-    """Unit tap / page turn after /register. Deliberately NOT behind the
+    """Unit picker taps after /register. Deliberately NOT behind the
     unregistered-group silence (the group is not registered yet)."""
     actor = cq.from_user.id
     chat_id: int | None = None
@@ -105,10 +108,6 @@ async def handle_register_callback(
         logger.info("callback_dropped", reason="register_not_admin", actor=actor, chat_id=chat_id)
         await _answer(ctx, cq, fa.REGISTER_ONLY_ADMIN)
         return
-    if not arg.isdigit():
-        logger.info("callback_dropped", reason="register_bad_arg", actor=actor, arg=arg)
-        await _answer(ctx, cq)
-        return
     if chat_id == actor or (cq.message is not None and cq.message.is_private_message):
         logger.info("callback_dropped", reason="register_in_private_chat", actor=actor)
         await _answer(ctx, cq, fa.REGISTER_IN_GROUP_ONLY)
@@ -118,30 +117,32 @@ async def handle_register_callback(
         await _answer(ctx, cq, fa.REGISTER_ARCHIVE_REFUSED)
         return
 
-    if action == ACT_UNIT_PAGE:
-        async with ctx.db.tx() as conn:
-            units = await repo.active_org_units(conn)
+    if arg.isdigit():
+        arg = f"s:{arg}"  # a bare unit id: show its confirm page first
+    message_id = cq.message.message_id if cq.message is not None else None
+    title = cq.message.chat.title if cq.message is not None else None
+    st = picker.get_state(ctx, picker.HOST_REGISTER, str(chat_id), chat_id)
+    if st is None:
+        st = _register_state(ctx, chat_id, actor, title or "")
+    kind, _, unit_part = arg.partition(":")
+    if kind != "k":
         await _answer(ctx, cq)
-        if cq.message is not None:
-            try:
-                await ctx.api.safe_edit(
-                    chat_id,
-                    cq.message.message_id,
-                    fa.REGISTER_PICK_UNIT,
-                    unit_keyboard(chat_id, units, int(arg)),
-                    is_group=True,
-                )
-            except (BaleAPIError, NetworkError) as exc:
-                logger.info("register_page_edit_failed", error=str(exc))
+        if kind == "f":
+            await picker.ask_search(ctx, st, message_id)
+        else:
+            await picker.show(ctx, st, arg, message_id)
+        return
+    if not unit_part.isdigit():
+        logger.info("callback_dropped", reason="register_bad_arg", actor=actor, arg=arg)
+        await _answer(ctx, cq)
         return
 
     async with ctx.db.tx() as conn:
-        unit = await repo.get_active_org_unit(conn, int(arg))
+        unit = await repo.get_active_org_unit(conn, int(unit_part))
     if unit is None:
         logger.info("callback_dropped", reason="register_unknown_unit", actor=actor, unit=arg)
         await _answer(ctx, cq, fa.ORG_UNIT_GONE)
         return
-    title = cq.message.chat.title if cq.message is not None else None
     if not title:
         try:
             title = (await ctx.api.get_chat(chat_id)).title
@@ -150,6 +151,7 @@ async def handle_register_callback(
     title = title or str(chat_id)
     async with ctx.db.tx() as conn:
         group = await repo.register_group(conn, chat_id, title, unit.id)
+    ctx.unit_pickers.pop((picker.HOST_REGISTER, str(chat_id), chat_id), None)
     await _answer(ctx, cq)
     logger.info("admin_action", action="register", actor=actor, chat_id=chat_id, org_unit=unit.id)
     text = fa.register_done(group.name, unit.name)

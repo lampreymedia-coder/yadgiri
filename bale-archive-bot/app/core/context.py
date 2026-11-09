@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from typing import Any
 
 from app.bale.methods import BaleAPI
 from app.config import Settings
@@ -13,6 +14,7 @@ from app.core.notify import AdminNotifier
 from app.core.ratelimit import InboundSpamGuard
 from app.core.wizard_store import WizardStore
 from app.db.session import Database
+from app.domain.org_units import OrgUnitCache
 from app.domain.video_compress import CompressionLog
 
 
@@ -56,6 +58,9 @@ class BotContext:
     background: set[asyncio.Task[None]] = field(default_factory=set)
     # Panel questions waiting for a typed answer: user id → (kind, arg, started).
     pending_input: dict[int, tuple[str, str, float]] = field(default_factory=dict)
+    # OrgUnits in memory (one SELECT, re-read every 10 min) and open unit pickers.
+    org_units: OrgUnitCache = field(default_factory=OrgUnitCache)
+    unit_pickers: dict[tuple[str, str, int], Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.spam_guard = InboundSpamGuard(self.settings.max_submissions_per_user_per_hour)

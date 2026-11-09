@@ -18,24 +18,43 @@ def _unit_button(h: Harness, unit_name: str) -> str:
     return next(data for label, data in _buttons(h) if label.startswith(unit_name))
 
 
-async def test_register_lists_org_units_paged_and_adds_one_row(h: Harness) -> None:
+def _picker(h: Harness) -> tuple[int, str]:
+    """(message_id, text) of the newest bot message with buttons in the group."""
+    for message in reversed(list(h.fake.messages.values())):
+        if message.chat_id == GROUP_ID and not message.deleted and message.reply_markup:
+            return message.message_id, message.text or ""
+    raise AssertionError("no picker message")
+
+
+async def _tap(h: Harness, label_start: str, user: dict = ADMIN) -> None:
+    data = _unit_button(h, label_start)
+    _, action, sid, arg = data.split("|")
+    await h.press(user, action, sid, arg, chat_id=GROUP_ID, message_id=_picker(h)[0])
+
+
+async def test_register_browses_the_tree_confirms_and_adds_one_row(h: Harness) -> None:
     await h.text(GROUP, ADMIN, "/register")
+    labels = [label for label, _ in _buttons(h)]
+    assert labels[:2] == ["🔎 جست‌وجو", "🌳 مرور درختی"]
+    await _tap(h, "🌳")
+    # roots only (ParentId IS NULL), with the number of active children
+    assert [label for label, _ in _buttons(h)][0] == "ستاد مرکزی (۹)"
+    await _tap(h, "ستاد مرکزی")
     first_page = _buttons(h)
-    names = [label for label, _ in first_page if "سطح" in label]
-    # 10 active units (the inactive «واحد بسته» is hidden), 8 per page, LevelNo then Name
-    assert len(names) == 8 and names[0].startswith("ستاد مرکزی") and names[1].startswith("واحد 02")
+    names = [label for label, _ in first_page if label.startswith("واحد")]
+    # 9 active children (the inactive «واحد بسته» is hidden), 8 per page
+    assert len(names) == 8 and names[0] == "واحد 02"
     assert all("واحد بسته" not in label for label, _ in first_page)
     assert all(len(data.encode()) <= 64 and data.isascii() for _, data in first_page)
-    nxt = next(data for label, data in first_page if label == "▶️")
-    _, action, sid, arg = nxt.split("|")
-    await h.press(ADMIN, action, sid, arg, chat_id=GROUP_ID, message_id=1)
-    second = [label for label, _ in _buttons(h) if "سطح" in label]
-    assert [n.split(" (")[0] for n in second] == ["واحد 09", "واحد 10"]
+    assert "مسیر فعلی: ستاد مرکزی" in _picker(h)[1]
+    await _tap(h, "◀️ بعدی")
+    assert [label for label, _ in _buttons(h) if label.startswith("واحد")] == ["واحد 10"]
 
     assert h.count("BaleGroups") == 0
-    _, action, sid, arg = _unit_button(h, "واحد 10").split("|")
-    assert sid == str(GROUP_ID) and arg == "10"
-    await h.press(ADMIN, action, sid, arg, chat_id=GROUP_ID, message_id=1)
+    await _tap(h, "واحد 10")  # a leaf: straight to the confirm page
+    assert "ستاد مرکزی › واحد 10" in _picker(h)[1]
+    assert h.count("BaleGroups") == 0
+    await _tap(h, "✅ تأیید")
     rows = h.root.rows(
         "SELECT BaleChatId, Title, OrgUnitId, IsActive, CreatedAt IS NOT NULL FROM BaleGroups"
     )
@@ -48,20 +67,20 @@ async def test_register_lists_org_units_paged_and_adds_one_row(h: Harness) -> No
 async def test_register_unit_tap_without_message_field(h: Harness) -> None:
     """Some Bale callbacks carry no ``message``; the group id comes from callback_data."""
     await h.text(GROUP, ADMIN, "/register")
-    data = _unit_button(h, "واحد 03")
+    data = f"1|ou|{GROUP_ID}|k:3"
     await h.feed({"callback_query": {"id": "cq-x", "from": ADMIN, "data": data}})
     assert h.root.rows("SELECT BaleChatId, OrgUnitId FROM BaleGroups") == [(GROUP_ID, 3)]
 
 
 async def test_inactive_unit_is_refused(h: Harness) -> None:
     await h.text(GROUP, ADMIN, "/register")
-    await h.press(ADMIN, "ou", str(GROUP_ID), "11", chat_id=GROUP_ID)
+    await h.press(ADMIN, "ou", str(GROUP_ID), "k:11", chat_id=GROUP_ID)
     assert h.count("BaleGroups") == 0
 
 
 async def test_non_admin_register_is_silent(h: Harness) -> None:
     await h.text(GROUP, USER, "/register")
-    await h.press(USER, "ou", str(GROUP_ID), "2", chat_id=GROUP_ID)
+    await h.press(USER, "ou", str(GROUP_ID), "k:2", chat_id=GROUP_ID)
     assert h.count("BaleGroups") == 0
     assert h.fake.calls_for("sendMessage") == []
 
@@ -75,14 +94,14 @@ async def test_unregister_keeps_the_row_and_register_reactivates(h: Harness) -> 
     assert len(h.ctx.wizards) == 0
     # registering again: only IsActive=1 and OrgUnitId change (Title stays as staff set it)
     await h.text(GROUP, ADMIN, "/register")
-    await h.press(ADMIN, "ou", str(GROUP_ID), "5", chat_id=GROUP_ID)
+    await h.press(ADMIN, "ou", str(GROUP_ID), "k:5", chat_id=GROUP_ID)
     assert h.root.rows("SELECT OrgUnitId, IsActive, Title FROM BaleGroups") == [(5, 1, "نام نیرو")]
     assert h.count("BaleGroups") == 1
 
 
 async def test_archive_group_cannot_be_registered(h: Harness) -> None:
     await h.text(ARCHIVE, ADMIN, "/register")
-    await h.press(ADMIN, "ou", str(ARCHIVE["id"]), "1", chat_id=ARCHIVE["id"])
+    await h.press(ADMIN, "ou", str(ARCHIVE["id"]), "k:1", chat_id=ARCHIVE["id"])
     assert h.count("BaleGroups") == 0
 
 

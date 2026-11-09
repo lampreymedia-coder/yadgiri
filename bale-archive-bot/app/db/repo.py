@@ -72,16 +72,6 @@ class OrgUnitRow:
     name: str
 
 
-async def active_org_units(conn: AsyncConnection) -> list[OrgUnitRow]:
-    result = await conn.execute(
-        text(
-            "SELECT Id AS id, LevelNo AS level_no, Name AS name FROM OrgUnits "
-            "WHERE IsActive = 1 ORDER BY LevelNo, Name, Id"
-        )
-    )
-    return [OrgUnitRow(int(r.id), int(r.level_no or 0), str(r.name)) for r in result]
-
-
 async def get_active_org_unit(conn: AsyncConnection, org_unit_id: int) -> OrgUnitRow | None:
     result = await conn.execute(
         text(
@@ -92,6 +82,49 @@ async def get_active_org_unit(conn: AsyncConnection, org_unit_id: int) -> OrgUni
     )
     row = result.first()
     return OrgUnitRow(int(row.id), int(row.level_no or 0), str(row.name)) if row else None
+
+
+@dataclass(frozen=True, slots=True)
+class OrgUnitNode:
+    id: int
+    level_no: int
+    name: str
+    parent_id: int | None
+    is_active: bool
+
+
+async def org_unit_nodes(conn: AsyncConnection) -> list[OrgUnitNode]:
+    """Every unit with its parent, in one SELECT (the picker searches these in memory).
+
+    Inactive units are loaded too, only so that paths through them still read right.
+    """
+    result = await conn.execute(
+        text(
+            "SELECT Id AS id, LevelNo AS level_no, Name AS name, ParentId AS parent_id, "
+            "IsActive AS is_active FROM OrgUnits"
+        )
+    )
+    return [
+        OrgUnitNode(
+            int(r.id),
+            int(r.level_no or 0),
+            str(r.name),
+            int(r.parent_id) if r.parent_id is not None else None,
+            bool(r.is_active),
+        )
+        for r in result
+    ]
+
+
+async def recent_org_unit_ids(conn: AsyncConnection) -> list[int]:
+    """Units of BaleGroups, last chosen first (UpdatedAt, else CreatedAt); may repeat."""
+    result = await conn.execute(
+        text(
+            "SELECT OrgUnitId AS unit FROM BaleGroups "
+            "ORDER BY COALESCE(UpdatedAt, CreatedAt) DESC, Id DESC LIMIT 200"
+        )
+    )
+    return [int(r.unit) for r in result]
 
 
 # ─── BaleGroups ───

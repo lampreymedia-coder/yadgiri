@@ -10,7 +10,7 @@ from app.bale.models import CallbackQuery, Message, Update
 from app.core.albums import AlbumBuffer
 from app.core.context import BotContext
 from app.domain.classify import normalize_fa
-from app.handlers import admin, intake, panel, user_menu, wizard
+from app.handlers import admin, intake, org_units, panel, user_menu, wizard
 from app.i18n import fa
 from app.observability.logging import get_logger
 
@@ -99,6 +99,11 @@ class Dispatcher:
     async def _on_message(self, message: Message) -> None:
         if message.from_user is None or message.from_user.is_bot:
             return
+        # A reply to «write part of the unit name»: a picker search, never archived.
+        if message.reply_to_message is not None and await org_units.handle_search_reply(
+            self.ctx, message
+        ):
+            return
         # A reply to «write your note»: becomes Posts.UserNote, is never archived itself.
         if message.reply_to_message is not None and await wizard.handle_note_reply(
             self.ctx, message
@@ -110,12 +115,12 @@ class Dispatcher:
         if intake.is_archive_chat(self.ctx, message.chat.id):
             command = parse_command(message.text)
             if command is not None and command[0] in {"register", "unregister"}:
-                await admin.handle_group_command(self.ctx, message, command[0])
+                await admin.handle_group_command(self.ctx, message, *command)
             return  # never archived, never written to the database
         command = parse_command(message.text)
         if command is not None and (message.text or "").startswith("/"):
             if command[0] in {"register", "unregister"}:
-                await admin.handle_group_command(self.ctx, message, command[0])
+                await admin.handle_group_command(self.ctx, message, *command)
             return  # other commands in groups: silence
         await self.albums.add(message)
 
